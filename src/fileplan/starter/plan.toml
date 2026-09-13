@@ -1,0 +1,88 @@
+# Your workflow, declared.
+#
+# A state is a directory. A transition moves an item between states. A key
+# is a fact an item carries. This file holds all three, and the tool reads
+# nothing else to build its commands.
+#
+# `fileplan init` copied this file over as it is. Every name below is a
+# placeholder. Rename them to your own words. The tool has no opinion about
+# what your states or transitions are called.
+#
+# The `doc` field points at what a word means. The `policy` field points at
+# what a session does. Both point into `docs/method.md` and
+# `docs/procedures.md`, which `init` wrote as stubs for you to fill in. The
+# tool checks every pointer each time it runs, so a heading you delete
+# refuses by name.
+#
+# `local/` holds session state, such as the lock. Add it to your .gitignore.
+#
+# Run `fileplan` with no arguments to see what you have declared. Run
+# `fileplan COMMAND --help` to see what COMMAND takes and where it points.
+#
+# The tool does more than this file uses. An item can be claimed by one
+# session at a time. It can be cut into named bullets and marked off one by
+# one. It can carry its age in days, or a list of what it waits on. A new
+# item can be bodied from a template. None of that is on until you say so,
+# and each has a section in fileplan's method document, which the project's
+# own repository ships.
+
+# Where an idea lands before anybody has decided about it.
+[states.inbox]
+path = "inbox"
+doc  = "docs/method.md#inbox"
+
+# Where it goes once you have committed to it. `queued` gives this state an
+# order, so the listing answers what is next. `numbered` gives each item a
+# number, and `archive` is the document a closed item's entry is filed in.
+[states.plan]
+path         = "plan"
+doc          = "docs/method.md#plan"
+capabilities = ["queued", "numbered"]
+archive      = "docs/archive.md"
+
+# `values` closes the set, so any other word refuses by name. There is no
+# `done` here on purpose. An item that is done is archived, and its file
+# goes away with it.
+[keys.status]
+doc    = "docs/method.md#status"
+help   = "How the work is going."
+values = ["in progress", "waiting"]
+
+# No `from` creates a new item. This one takes a title and writes the file.
+[transitions.capture]
+doc  = "docs/method.md#capture"
+help = "Log an idea in the inbox."
+to   = "inbox"
+
+# A `from` and a `to` move the file to another directory. This one arrives in
+# an ordered state, so it also takes --above, --below and --at to say where in
+# the order it lands.
+[transitions.queue]
+doc  = "docs/method.md#queue"
+help = "Commit to an idea: move it into the plan."
+from = "inbox"
+to   = "plan"
+
+# A `from` and a `to` that match leave the file where it is. `sets` names the
+# keys it may write, which is what gives this one a --status option. Writing a
+# key is the point of it, so it takes no order options. The `policy` field
+# sends a session to a procedure. Most transitions need none, and say so by
+# carrying none.
+[transitions.work]
+doc    = "docs/method.md#work"
+policy = "docs/procedures.md#working-an-item"
+help   = "Say how the work is going."
+from   = "plan"
+to     = "plan"
+sets   = ["status"]
+
+# `archives` files the item's entry in the document the state named above.
+# `dissolves` takes the file away, which is why this transition names no
+# `to`. The body goes with the file, so the entry is written from --record
+# instead.
+[transitions.archive]
+doc       = "docs/method.md#archive"
+help      = "Close an item out: file its entry and remove the item."
+from      = "plan"
+archives  = true
+dissolves = true

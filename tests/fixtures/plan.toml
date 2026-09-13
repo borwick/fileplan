@@ -1,0 +1,327 @@
+# The suite's declaration. Deliberately NOT this repo's vocabulary.
+#
+# A tool whose premise is repo-local config cannot have a suite that only
+# passes against one repo's config, so the suite reads this file via
+# FILEPLAN_PLAN_TOML (see conftest.py) and test_declaration.py asserts that
+# `greenhouse`, `sprout` and `cultivar` appear nowhere under src/ and nowhere
+# in this repo's own plan.toml. Every word below is the fixture's for that
+# reason, and no comment repeats it.
+#
+# `transplant` is declared before `sprout` on purpose: document order is not
+# alphabetical order, which is what makes the ordering test mean something.
+
+[states.greenhouse]
+path = "greenhouse"
+doc  = "method.md#greenhouse"
+
+# Trees in training. Ordered, numbered, cut into steps, and carrying a cursor
+# over them. `orchard-archive.md` holds the closed half of the register.
+[states.orchard]
+path              = "orchard"
+doc               = "method.md#orchard"
+capabilities      = ["queued", "numbered", "bulleted"]
+archive           = "orchard-archive.md"
+sub-phases        = "Steps"
+sub-phase-pending = "**unpruned — Say what the rest of the training is.**"
+sub-phase-name    = "{number}-{ordinal}"
+sub-phase-cursor  = "graft"
+sub-phase-status  = "graft-status"
+# The key holding the trees this one waits on, which the dependency report
+# reads. `orchard` is the queued state, so the misordered report has places
+# to compare.
+dependencies      = "after"
+
+# The dated state, with a path that shares neither its own name nor its last
+# segment: an item in `beds/hardening-off/` reporting state `cold-frame` is
+# only possible by reading the declaration.
+[states.cold-frame]
+path         = "beds/hardening-off"
+doc          = "method.md#cold-frame"
+capabilities = ["dated"]
+
+# Where a seedling is worked on, one session at a time. Its state lives
+# outside the item file, in a record under `local/claims/`.
+[states.potting-bench]
+path         = "potting-bench"
+doc          = "method.md#potting-bench"
+capabilities = ["claimed"]
+
+# Where a tree goes when it is given up on. No capabilities: nothing about a
+# tree nobody is growing any more is ordered, numbered or claimed.
+[states.firewood]
+path = "firewood"
+doc  = "method.md#firewood"
+
+# The second bulleted state, and deliberately not numbered: its cuttings are
+# called `c1`, `c2`, … — no register, no hyphen, a prefix that is a bare
+# letter. It is also what a dangle is checked against, and `for-tree` names
+# the key holding the tree a batch was struck for.
+[states.propagator]
+path              = "propagator"
+doc               = "method.md#propagator"
+capabilities      = ["bulleted"]
+sub-phases        = "Cuttings"
+sub-phase-pending = "**unstruck — Say what the rest of the batch is.**"
+sub-phase-name    = "c{ordinal}"
+opened-for        = "for-tree"
+
+[keys.cultivar]
+doc    = "method.md#cultivar"
+help   = "Which cultivar the seedling is."
+values = ["heirloom", "hybrid"]
+
+[keys.rootstock]
+doc = "method.md#rootstock"
+
+[keys.tag]
+doc = "method.md#tag"
+
+# Beside `tag` on purpose: `transplant` drops `tag` and leaves this one, so
+# one verb proves both arms of a move's key handling.
+[keys.notebook]
+doc  = "method.md#notebook"
+help = "The document this seedling's breeding notes live in."
+
+# The list-valued key, with a closed `values` beside it: the two fields
+# answer different questions, and this is where they are proved to compose.
+[keys.pest]
+doc         = "method.md#pest"
+help        = "What has been found on this seedling."
+values      = ["aphid", "canker", "scab"]
+list-valued = true
+
+[keys.planted]
+doc  = "method.md#planted"
+help = "The day the seed went in."
+
+[keys.after]
+doc  = "method.md#after"
+help = "Slugs this seedling waits on."
+
+# The provenance pair `line-out` writes.
+[keys.batch]
+doc  = "method.md#batch"
+help = "The batch this seedling was lined out of."
+
+[keys.cutting]
+doc  = "method.md#cutting"
+help = "The cutting, by the name its bullet carries."
+
+# The seal `strike` writes, and what `propagator`'s dangle check reads.
+[keys.for-tree]
+doc  = "method.md#for-tree"
+help = "The tree this batch was struck for."
+
+[keys.for-step]
+doc  = "method.md#for-step"
+help = "The step it was struck for, by the name its bullet carries."
+
+[keys.graft]
+doc  = "method.md#graft"
+help = "Which step is current, by the name its bullet carries."
+
+[keys.graft-status]
+doc    = "method.md#graft"
+help   = "How far the current step has got."
+values = ["open", "planned", "in progress", "done"]
+
+# Two templates, because a template is selected by name at the run and a
+# declaration with one has nothing to select between. Each `doc` is a whole
+# document beside this file, naming no anchor.
+[templates.hardwood]
+doc = "hardwood-cuttings.md"
+
+[templates.softwood]
+doc = "softwood-cuttings.md"
+
+[transitions.transplant]
+doc      = "method.md#transplant"
+help     = "Move a seedling out to the orchard."
+from     = "greenhouse"
+to       = "orchard"
+requires = ["cultivar"]
+refuses  = { cultivar = ["hybrid"] }
+sets     = ["rootstock", "pest"]
+drops    = ["tag"]
+
+[transitions.sprout]
+doc  = "method.md#sprout"
+help = "Start a seedling in the greenhouse."
+to   = "greenhouse"
+sets = ["cultivar"]
+
+# Leaves the queued state, so the drop-on-exit has a declared path. Its
+# `refuses` reads a list-valued head: a tree with canker does not come in,
+# however many other pests it carries.
+[transitions.harvest]
+doc     = "method.md#harvest"
+help    = "Bring a tree in from the orchard."
+from    = "orchard"
+to      = "cold-frame"
+refuses = { pest = ["canker"] }
+
+# One verb per arm of the claim table. `claims = true` is what takes a claim,
+# never arriving: `pot-up` creates into the claimed state and claims; `bench`
+# moves in and claims nothing; `tend` picks one up in place; and `bed-out`
+# leaves for the queued `orchard`, so the claim drops on exit exactly as the
+# place is written on entry.
+[transitions.pot-up]
+doc    = "method.md#pot-up"
+help   = "Start a seedling straight on the potting bench."
+to     = "potting-bench"
+sets   = ["cultivar"]
+claims = true
+
+[transitions.bench]
+doc  = "method.md#bench"
+help = "Take a seedling to the potting bench to work on it."
+from = "greenhouse"
+to   = "potting-bench"
+
+[transitions.tend]
+doc    = "method.md#tend"
+help   = "Work on a seedling where it stands on the bench."
+from   = "potting-bench"
+to     = "potting-bench"
+sets   = ["rootstock"]
+claims = true
+
+[transitions.bed-out]
+doc  = "method.md#bed-out"
+help = "Finish with a seedling and bed it out in the orchard."
+from = "potting-bench"
+to   = "orchard"
+
+# Advances the cursor where the tree stands: an in-place write, so it is the
+# verb the count check is graded through.
+[transitions.graft-on]
+doc  = "method.md#graft"
+help = "Move to a step, and say how far it has got."
+from = "orchard"
+to   = "orchard"
+sets = ["graft", "graft-status"]
+
+# The same-state verb that writes nothing except where the tree stands, so it
+# is the one that carries `--above`, `--below` and `--at`. `graft-on` and
+# `espalier` stay in `orchard` too and carry none of the three.
+[transitions.respace]
+doc  = "method.md#respace"
+help = "Move a tree to another place in the orchard's order."
+from = "orchard"
+to   = "orchard"
+
+# Writes a step into a tree's body where it stands, so a mint is graded
+# through an in-place verb. The fixture's one `policy`, on one verb only, so
+# a contract with no `Running it` block has a fixture path in `graft-on`.
+[transitions.espalier]
+doc    = "method.md#espalier"
+policy = "training.md#training-a-branch"
+help   = "Train one more branch: write the next step into the tree."
+from   = "orchard"
+to     = "orchard"
+mints  = true
+
+# The propagator's two verbs, and why there are two: `mints` is refused on a
+# verb with no `from`, so `strike` creates the batch and `mist` writes a
+# cutting into it. `strike` is also the only seeding verb, `seeds` refusing a
+# `from` and `sprout` creating without one.
+[transitions.strike]
+doc   = "method.md#strike"
+help  = "Strike a batch of cuttings in the propagator."
+to    = "propagator"
+sets  = ["for-tree", "for-step"]
+seeds = true
+
+[transitions.mist]
+doc   = "method.md#mist"
+help  = "Write the next cutting into a batch under mist."
+from  = "propagator"
+to    = "propagator"
+mints = true
+
+# The disposition into the registerless bulleted state: a mark must no more
+# need a number than a mint does.
+[transitions.pot-on]
+doc   = "method.md#pot-on"
+help  = "Say a cutting has rooted and can be potted on."
+from  = "propagator"
+to    = "propagator"
+marks = "rooted"
+
+# The filing disposition, beside `pot-on`, which is what makes `files` a
+# rider on `marks` provable: one state carrying two dispositions, one that
+# files and one that does not. It files into a plain state, which is what a
+# filing destination has to be.
+[transitions.line-out]
+doc   = "method.md#line-out"
+help  = "Line this cutting out as a seedling of its own."
+from  = "propagator"
+to    = "propagator"
+marks = "lined"
+
+[transitions.line-out.files]
+state = "greenhouse"
+item  = "batch"
+name  = "cutting"
+
+# The orchard's dispositions, where a mark and a cursor meet over one body.
+# `ripen` drops the status key and `thin` deliberately does not, which is
+# what proves the drop comes from the field rather than from the half.
+[transitions.ripen]
+doc   = "method.md#ripen"
+help  = "Say a step of the training is finished."
+from  = "orchard"
+to    = "orchard"
+marks = "ripened"
+drops = ["graft-status"]
+
+[transitions.thin]
+doc   = "method.md#thin"
+help  = "Say a step of the training will not be done."
+from  = "orchard"
+to    = "orchard"
+marks = "thinned"
+
+# The recording half alone: it files `## <number>. <title>` into
+# `orchard-archive.md` and moves the tree rather than deleting it.
+[transitions.grub-out]
+doc      = "method.md#grub-out"
+help     = "Give up on a tree: it is not going to fruit."
+from     = "orchard"
+to       = "firewood"
+archives = true
+
+# Both halves: it archives and takes the tree's file away. `--record` is
+# required, the body the entry is written from going away with the run, and
+# `orchard` is the one state that declares `dependencies`.
+[transitions.fell]
+doc       = "method.md#fell"
+help      = "Fell a tree: take it down and record it in the archive."
+from      = "orchard"
+archives  = true
+dissolves = true
+
+# The deletion half alone, out of the unnumbered `greenhouse`, which cannot
+# archive. That is why no refusal ties the two flags together.
+[transitions.compost]
+doc       = "method.md#compost"
+help      = "Give up on a seedling and compost it."
+from      = "greenhouse"
+dissolves = true
+
+# The deletion half plus the repointing one. Its referents live in `orchard`,
+# the one fixture state that declares `dependencies`, and its survivor may be
+# a `greenhouse` seedling or an `orchard` tree, so the cross-state merge and
+# the self-edge case are both reachable.
+[transitions.inarch]
+doc       = "method.md#inarch"
+help      = "Join a seedling to another and let it continue as that one."
+from      = "greenhouse"
+dissolves = true
+absorbs   = true
+
+# Who a session is. The control in test_claim.py asserts no real agent's
+# variable appears under src/, which means nothing unless these differ.
+[identity]
+doc = "method.md#the-identity"
+pid = ["GREENHOUSE_PID", "SPROUT_PID"]
