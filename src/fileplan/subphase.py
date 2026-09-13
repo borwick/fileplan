@@ -202,16 +202,8 @@ def text(body: str, heading: str, *, name: str) -> str | None:
         return None
 
     lines = body.splitlines()
-    ok = _unfenced(lines)
     start = at[0] - 1
-    end = len(lines)
-    for number in range(start + 1, len(lines)):
-        if ok[number] and lines[number] and not lines[number][0].isspace():
-            end = number
-            break
-    while end > start + 1 and not lines[end - 1].strip():
-        end -= 1
-    return "\n".join(lines[start:end])
+    return "\n".join(lines[start : _owned(lines, _unfenced(lines), start)])
 
 
 def unmarked(body: str, heading: str) -> list[str]:
@@ -515,14 +507,15 @@ def mint(
     span = [line for line, _ in paired]
 
     # A new bullet joins the list rather than the end of the span: directly
-    # after the last sub-phase already there, or — where the span carries none
-    # — after the last thing written, ahead of the blank lines that close the
-    # span, since a bullet past them would read as a paragraph.
+    # after the last sub-phase already there and every line `text` says it
+    # owns, or — where the span carries none — after the last thing written,
+    # ahead of the blank lines that close the span, since a bullet past them
+    # would read as a paragraph.
     bullets = [
         number for number, (line, live) in enumerate(paired) if live and _counts(line)
     ]
     if bullets:
-        cut = bullets[-1] + 1
+        cut = _owned(span, [live for _, live in paired], bullets[-1])
     else:
         written = [number for number, line in enumerate(span) if line.strip()]
         cut = written[-1] + 1 if written else 0
@@ -793,6 +786,24 @@ def _unfenced(lines: list[str]) -> list[bool]:
         mask.append(not fenced and not opener)
         fenced = fenced != opener
     return mask
+
+
+def _owned(lines: list[str], ok: list[bool], start: int) -> int:
+    """One past the last line the bullet at index `start` owns.
+
+    The one home of the continuation rule, read by `text` to return a bullet
+    and by `mint` to write past one: the walk stops at the first line that is
+    unfenced, non-blank and at column zero, and trailing blank lines go back
+    to the gap. `ok` is `_unfenced`'s mask, parallel to `lines`.
+    """
+    end = len(lines)
+    for number in range(start + 1, len(lines)):
+        if ok[number] and lines[number] and not lines[number][0].isspace():
+            end = number
+            break
+    while end > start + 1 and not lines[end - 1].strip():
+        end -= 1
+    return end
 
 
 def _unclosed(lines: list[str], start: int, end: int) -> int | None:

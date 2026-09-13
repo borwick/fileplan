@@ -811,6 +811,32 @@ def test_a_bullet_joins_the_list_rather_than_the_end_of_the_span():
     )
 
 
+def test_a_bullet_joins_the_list_after_the_last_ones_continuation():
+    """A consumer's defect, 2026-09-13: 231-5 was written under 231-4's first
+    line, so 231-4's indented description read as 231-5's. The last bullet is
+    the lines `text` says it owns, and the new one goes after all of them —
+    ahead of the blank lines that close the span, as before."""
+    assert minted(
+        "### Steps", "- **7-1 — One**", "  Said at length,", "",
+        "  and continued.", f"- {PENDING}", "", "Trailing prose.",
+        title="Two",
+    ) == body(
+        "### Steps", "- **7-1 — One**", "  Said at length,", "",
+        "  and continued.", "- **7-2 — Two**", f"- {PENDING}", "",
+        "Trailing prose.",
+    )
+
+
+def test_a_fenced_transcript_in_the_last_bullet_stays_with_it():
+    """The continuation rule read by the writer too, fence included: a
+    column-zero line inside the transcript is not where the bullet ends."""
+    last = (
+        "### Steps", "- **7-1 — One**", "  What was run:", "  ```",
+        "- somebody else's bullet, at column zero", "  ```",
+    )
+    assert minted(*last, title="Two", last=True) == body(*last, "- **7-2 — Two**")
+
+
 def test_a_span_with_no_bullets_at_all_takes_one_after_what_is_written():
     """The other arm: nothing to join, so it lands after the last thing the
     span says and ahead of the blank lines that close it."""
@@ -1445,7 +1471,8 @@ def test_a_mint_preserves_a_fenced_block_byte_for_byte():
 
 def test_a_mint_leaves_a_fenced_pending_marker_in_the_body():
     """The pending-bullet filter is fence-aware too, so the quoted marker is
-    evidence rather than this body's own unfinished decomposition."""
+    evidence rather than this body's own unfinished decomposition. The fence
+    is f1's continuation by `text`'s rule, so f2 lands after it."""
     quoted = body("### Steps", "- **f1 — One.**", "```", f"- {PENDING}", "```")
     written = subphase.mint(
         quoted, heading=HEADING, prefix="f", pending=PENDING, title="Two.", last=True
@@ -1453,8 +1480,63 @@ def test_a_mint_leaves_a_fenced_pending_marker_in_the_body():
     assert written.splitlines() == [
         "### Steps",
         "- **f1 — One.**",
-        "- **f2 — Two.**",
         "```",
         f"- {PENDING}",
         "```",
+        "- **f2 — Two.**",
     ]
+
+
+# --- minting: what a reader reads back ---------------------------------------
+
+#: Every body shape the module builds, plus the ones a consumer writes that
+#: this repo's own one-line carrier never did. Indexed by what each is for.
+SHAPES = {
+    "named": NAMED_BODY,
+    "marked": MARKED_BODY,
+    "continued": CONTINUED,
+    "transcript": TRANSCRIPT,
+    "fenced": FENCED,
+    "described-last": body(
+        "### Steps",
+        "- **7-1 — One**",
+        "- **7-2 — Two, described**",
+        "  One helper answering the question,",
+        "  and the done line under it.",
+        f"- {PENDING}",
+    ),
+    "column-zero-fence-last": body(
+        "### Steps", "- **7-1 — One.**", "```", "- quoted", "### quoted", "```"
+    ),
+    "described-then-prose": body(
+        "### Steps", "- **7-1 — One**", "  Said.", "", "", "Trailing prose.", "",
+        "### Done when", "- untouched",
+    ),
+}
+
+
+@pytest.mark.parametrize("last", [False, True], ids=["open", "last"])
+@pytest.mark.parametrize("shape", SHAPES.values(), ids=SHAPES.keys())
+def test_a_mint_changes_no_bullet_a_reader_already_reads(shape, last):
+    """What a consumer's 231-5 broke, stated for every shape rather than one:
+    minting adds a bullet and takes the pending one out, and every other
+    bullet's `text` comes back exactly as it did. The new bullet owns its own
+    line and nothing else, so it cannot have taken a neighbour's description.
+
+    `count` and `names` agreeing was never enough: the defect kept both right
+    and moved four lines of prose from one bullet to the next."""
+    before = {
+        one.name: subphase.text(shape, HEADING, name=one.name)
+        for one in subphase.bullets(shape, HEADING, pending=PENDING)
+    }
+    written = subphase.mint(
+        shape, heading=HEADING, prefix=PREFIX, pending=PENDING, title="New", last=last
+    )
+    after = {
+        one.name: subphase.text(written, HEADING, name=one.name)
+        for one in subphase.bullets(written, HEADING, pending=PENDING)
+    }
+    (new,) = set(after) - set(before)
+    assert after.pop(new) == f"- **{new} — New**"
+    assert after == before
+    assert subphase.errors(written, HEADING) == []

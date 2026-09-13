@@ -1,6 +1,6 @@
 [project]
 name = "fileplan"
-version = "0.5.0"
+version = "0.5.1"
 description = "A plan.toml interpreter: declared states, transitions and keys for filing work across sessions"
 readme = "README.md"
 authors = [
