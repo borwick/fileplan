@@ -332,8 +332,9 @@ the rows carries the rest. `gaps` and `register` together say whether a number
 is still held. The register does not reach below `floor`, and nothing above
 `highest` has been minted. In between, a number is held unless it is a gap.
 `unmarkable` says whether a bullet can be marked, and sits in the envelope
-wherever a command of yours marks at all. Neither is a flag you have to know to
-pass, and neither asks you to read a body.
+wherever a command of yours marks at all. `unread` names a bullet the count
+passed over, wherever a state counts sub-phases. None of them is a flag you
+have to know to pass, and none asks you to read a body.
 
 ## giving an agent the interpreter
 

@@ -111,7 +111,7 @@ def test_contention_is_announced_once_and_then_waited_out(
 
     announced = capfd.readouterr().err
     assert announced.count("waiting for") == 1
-    assert str(lock_file(tmp_path)) in announced
+    assert str(lock_file(tmp_path).relative_to(tmp_path)) in announced
     assert "another-host pid 999, session abc" in announced
 
 

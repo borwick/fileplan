@@ -24,6 +24,8 @@ from typing import Iterator
 
 import click
 
+from fileplan.declaration import named
+
 #: Session-local state, gitignored: the lock, and the claims beside it.
 LOCAL_DIR = "local"
 
@@ -43,7 +45,10 @@ def run_lock(root: Path) -> Iterator[None]:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            click.echo(f"waiting for {path}, held by {_holder(path)}", err=True)
+            click.echo(
+                f"waiting for {named(path, root)}, held by {_holder(path)}",
+                err=True,
+            )
             fcntl.flock(handle, fcntl.LOCK_EX)
         try:
             _write(handle, f"{describe_session()}\n")

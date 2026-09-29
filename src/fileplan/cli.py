@@ -39,6 +39,7 @@ from fileplan.declaration import (
     Refusal,
     Transition,
     load,
+    named,
 )
 from fileplan.transition import (
     execute,
@@ -142,7 +143,7 @@ FILING = (
         "TEXT",
         str,
         "The filed item's description. Required. `-` reads the description "
-        "from stdin.",
+        "from stdin, so `--body - < notes.md` takes it from a file.",
     ),
 )
 
@@ -222,6 +223,7 @@ BULLET_TEXT = "text"
 def main(argv: list[str] | None = None) -> int:
     """Run fileplan. Returns the exit status; 2 for a refusal."""
     args = sys.argv[1:] if argv is None else argv
+    declaration = None
     try:
         if args[:1] == [INIT_COMMAND]:
             # Before the declaration loads: it is the command that writes one.
@@ -252,11 +254,47 @@ def main(argv: list[str] | None = None) -> int:
         return exit_.exit_code
     except click.ClickException as exc:
         exc.show()
+        if declaration is not None and (said := _pointer(exc, declaration)):
+            click.echo(said, err=True)
         return exc.exit_code
     except click.exceptions.Abort:
         click.echo("ERROR: aborted", err=True)
         return 1
     return 0
+
+
+def _pointer(exc: click.ClickException, declaration: Declaration) -> str | None:
+    """The documented way through a usage error click raised, or `None`.
+
+    Three dead ends a consumer's sessions hit often enough to count. Each
+    keeps click's refusal and adds where to go: nothing about what is
+    accepted changes. See docs/method.md#the-listing and
+    docs/method.md#the-next-read
+    """
+    ctx = getattr(exc, "ctx", None)
+    if ctx is None:
+        return None
+    name = ctx.command.name
+    if (
+        isinstance(exc, click.NoSuchOption)
+        and exc.option_name == f"--{CHECK}"
+        and ctx.parent is not None
+        and ctx.parent.command.name == NEXT_COMMAND
+    ):
+        return f"--{CHECK} belongs to the command: fileplan {name} ITEM --{CHECK}"
+    if isinstance(exc, click.MissingParameter) and exc.param is not None:
+        if exc.param.human_readable_name == "ITEM":
+            return (
+                f"fileplan {NEXT_COMMAND} {name} lists what it can take"
+                if name in declaration.transitions
+                else f"fileplan {LIST_COMMAND} lists every item"
+            )
+    extra = str(exc.message).removeprefix("Got unexpected extra argument")
+    if name == LIST_COMMAND and extra != exc.message:
+        word = extra.lstrip("s (").rstrip(")").split()[0]
+        if word in declaration.states:
+            return f"did you mean --state {word}?"
+    return None
 
 
 def _version_option() -> Callable[[Any], Any]:
@@ -363,7 +401,7 @@ def _command(declaration: Declaration, transition: Transition) -> click.Command:
                 metavar="TEXT",
                 help=(
                     "The item's description. `-` reads the description from "
-                    "stdin."
+                    "stdin, so `--body - < notes.md` takes it from a file."
                 ),
             )
         )
@@ -420,7 +458,7 @@ def _command(declaration: Declaration, transition: Transition) -> click.Command:
             check=check,
         )
         # A check hands back its sentence rather than a path.
-        click.echo(wrote if isinstance(wrote, str) else _readable(wrote))
+        click.echo(wrote if isinstance(wrote, str) else named(wrote, declaration.root))
 
     return click.Command(
         name=transition.name,
@@ -682,7 +720,8 @@ def _record_option() -> click.Option:
         help=(
             "The archive entry's prose. Required, because this command "
             "deletes the item and leaves nothing to write the entry from "
-            "afterwards. `-` reads the prose from stdin."
+            "afterwards. `-` reads the prose from stdin, so "
+            "`--record - < entry.md` takes it from a file."
         ),
     )
 
@@ -797,13 +836,6 @@ def _key(variable: str) -> str:
 def _prose(body: str | None) -> str | None:
     """`--body -` reads stdin, so a heredoc works."""
     return sys.stdin.read() if body == "-" else body
-
-
-def _readable(path: Path) -> Path:
-    try:
-        return path.relative_to(Path.cwd())
-    except ValueError:
-        return path
 
 
 # --------------------------------------------------------------------------
@@ -923,6 +955,9 @@ Use `:` for the one comparison taking several values: `--has
 'pest:aphid,scab'` asks whether the key is carried and every value it carries
 is one of those named.
 
+Use `~` to find a word in a value, ignoring case: `--has 'title~review'`.
+A key with declared values refuses it, since those compare by order.
+
 Use `--lacks KEY` to find every item not carrying KEY.
 """
 
@@ -961,9 +996,12 @@ def _read_params(declaration: Declaration) -> list[click.Parameter]:
     """
     carried = declaration.carried
     return [
+        # Repeatable only so a repeat can be refused by name, in `_tests`:
+        # click would otherwise keep the last one and drop the rest.
         click.Option(
             ["--state"],
             metavar="[OP]STATE",
+            multiple=True,
             help=(
                 "Only items in this state. One of: "
                 f"{', '.join(declaration.states)}."
@@ -1071,6 +1109,12 @@ def _read_run(
         # And the unmarkable report, wherever any verb marks at all.
         if declaration.marked_states:
             beside["unmarkable"] = found.unmarkable
+        # And the unread report, wherever any state counts sub-phases.
+        if declaration.counts_sub_phases:
+            beside["unread"] = found.unread
+        # And the undeclared report, wherever any key declares its values.
+        if any(key.values for key in declaration.keys.values()):
+            beside["undeclared"] = found.undeclared
         if as_json:
             # stderr stays silent: the counts live in the envelope instead.
             click.echo(
@@ -1120,6 +1164,15 @@ def _read_run(
             click.echo(_lost(one), err=True)
         for one in found.unmarkable:
             click.echo(_unmarkable(one), err=True)
+        for one in found.unread:
+            click.echo(_unread(one), err=True)
+        for one in found.undeclared:
+            click.echo(
+                f"undeclared value: {one[read.SLUG]} carries "
+                f'"{one[read.VALUE]}" in {one[read.KEY]}, which its values '
+                f"do not declare ({one[read.PATH]})",
+                err=True,
+            )
 
     return run
 
@@ -1220,9 +1273,23 @@ def _unmarkable(one: Mapping[str, Any]) -> str:
     """
     return (
         f"unmarkable bullet: {one[read.BULLET_NAME]} in {one[read.BULLET_ITEM]} "
+        f"({one[read.PATH]}:{one[read.BULLET_LINE]}) "
         f'carries "{one[read.BULLET_REST]}" after its bold run, so nothing '
         "can mark that bullet. Move the prose inside the bold run, or onto a "
         "continuation line under the bullet"
+    )
+
+
+def _unread(one: Mapping[str, Any]) -> str:
+    """One bullet the reader passed over, as the text form's exception line.
+
+    `_unmarkable`'s form. See docs/method.md#sub-phases
+    """
+    name = one[read.BULLET_NAME]
+    return (
+        f"unread bullet: {name or 'a bullet'} in {one[read.BULLET_ITEM]} "
+        f"({one[read.PATH]}:{one[read.BULLET_LINE]}) is not read as a "
+        f"sub-phase: {one[read.BULLET_REASON]}"
     )
 
 
@@ -1232,7 +1299,14 @@ def _tests(declaration: Declaration, given: dict[str, Any]) -> list[read.Test]:
     The parse is where a bad filter refuses, so it happens before the walk.
     """
     tests = []
-    if (state := given.pop("state")) is not None:
+    states = given.pop("state")
+    if len(states) > 1:
+        raise Refusal(
+            f"--state was given {len(states)} times ({', '.join(states)}), and "
+            "it takes one comparison. Keeping the last would drop the others "
+            "without saying so"
+        )
+    if (state := next(iter(states), None)) is not None:
         # A state name is a closed set like any key's `values`. It is the one
         # filter that is not a key: it says where an item is.
         tests.append(read.comparison("state", state, tuple(declaration.states)))
@@ -1368,7 +1442,7 @@ def _still_open(
         nonlocal walked
         if walked is None:
             walked = read.items(declaration)
-        return bool(dangle_errors(one, transition, walked))
+        return bool(dangle_errors(one, transition, walked, declaration.root))
 
     return still_open
 
@@ -1396,7 +1470,9 @@ def _held_elsewhere(
     if not path.exists():
         # A missing record means unclaimed, here as everywhere.
         return False
-    return not claim.owns(claim.read(path), claim.identity(declaration))
+    return not claim.owns(
+        claim.read(path, declaration.root), claim.identity(declaration)
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1423,7 +1499,10 @@ def _one_bullet(
             f"{subphase.NAME} — so it carries no bullet a name could point at"
         )
     carried = subphase.bullets(
-        one.body, one.state.sub_phases, pending=one.state.pending
+        one.body,
+        one.state.sub_phases,
+        pending=one.state.pending,
+        marks=one.state.marks,
     )
     found = next((each for each in carried if each.name == wanted), None)
     if found is None:
@@ -1559,8 +1638,17 @@ def _contents(declaration: Declaration, as_json: bool = False) -> None:
 
 
 def _refuse(refusal: Refusal) -> int:
-    """One `ERROR:` line on stderr, nothing on stdout, no traceback."""
-    click.echo(f"ERROR: {' '.join(str(refusal).split())}", err=True)
+    """`ERROR:` on stderr, nothing on stdout, no traceback.
+
+    The first message goes on the `ERROR:` line and each further one on an
+    indented line of its own, so a plan.toml with four defects reads as four
+    lines. Whitespace is collapsed per message. `Refusal`'s own `str` keeps
+    its one-line join for in-process callers.
+    """
+    first, *rest = [" ".join(one.split()) for one in refusal.messages] or [""]
+    click.echo(f"ERROR: {first}", err=True)
+    for one in rest:
+        click.echo(f"  {one}", err=True)
     return 2
 
 

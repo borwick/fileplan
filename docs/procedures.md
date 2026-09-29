@@ -49,9 +49,9 @@ out is a body of bullets, each one session's worth.
    declares, `<number>-<ordinal>` here. Until `--last` lands the section goes
    on reading as pending, and a decomposition stopped half way says so.
 5. **Then fill each bullet in by hand.** `--title` mints only the bold line,
-   and a title carrying `**` or a newline refuses — so the sentences and the
-   *done when* under each bullet are written after the mint. This is
-   **mint, then fill**, not one command.
+   and a title carrying `**`, a lone `*` or a newline refuses — so the
+   sentences and the *done when* under each bullet are written after the
+   mint. This is **mint, then fill**, not one command.
 6. Commit, staging that one path.
 
 ## planning and working a sub-phase

@@ -6,6 +6,10 @@ directory, from the install onward. This walk assumes fileplan is installed,
 and starts at the first command you would run inside your own repo.
 
 Every command below was run on 2026-09-12 and its output pasted from that run.
+The three refusals that name a file were run again on 2026-09-13, when
+fileplan began naming a file from the folder holding `plan.toml`. The four
+`fileplan list` refusals were run again on 2026-09-28, when each clause of a
+refusal got a line of its own.
 The tree it ran against is a **fixture**: a small repo built to provoke each
 thing a retrofit meets, rather than a copy of anybody's real notes. The tree is
 made up. The behaviour is not.
@@ -127,7 +131,11 @@ not load until the document exists and has the headings:
 
 ```
 $ fileplan list
-ERROR: /private/tmp/fileplan-retrofit/plan.toml is not a usable plan.toml; states.someday-maybe.doc names /private/tmp/fileplan-retrofit/docs/method.md, which does not exist; states.adr.doc names /private/tmp/fileplan-retrofit/docs/method.md, which does not exist; keys.decided.doc names /private/tmp/fileplan-retrofit/docs/method.md, which does not exist; transitions.decide.doc names /private/tmp/fileplan-retrofit/docs/method.md, which does not exist
+ERROR: /private/tmp/fileplan-retrofit/plan.toml is not a usable plan.toml
+  states.someday-maybe.doc names docs/method.md, which does not exist
+  states.adr.doc names docs/method.md, which does not exist
+  keys.decided.doc names docs/method.md, which does not exist
+  transitions.decide.doc names docs/method.md, which does not exist
 ```
 
 Create the document and the refusal gets narrower rather than going away. A
@@ -135,7 +143,11 @@ missing heading is the same broken pointer as a missing document:
 
 ```
 $ fileplan list
-ERROR: /private/tmp/fileplan-retrofit/plan.toml is not a usable plan.toml; states.someday-maybe.doc names anchor "#someday-maybe", which is not a heading in docs/method.md; states.adr.doc names anchor "#adr", which is not a heading in docs/method.md; keys.decided.doc names anchor "#decided", which is not a heading in docs/method.md; transitions.decide.doc names anchor "#decide", which is not a heading in docs/method.md
+ERROR: /private/tmp/fileplan-retrofit/plan.toml is not a usable plan.toml
+  states.someday-maybe.doc names anchor "#someday-maybe", which is not a heading in docs/method.md
+  states.adr.doc names anchor "#adr", which is not a heading in docs/method.md
+  keys.decided.doc names anchor "#decided", which is not a heading in docs/method.md
+  transitions.decide.doc names anchor "#decide", which is not a heading in docs/method.md
 ```
 
 **This is the retrofit's chicken-and-egg, and it reads like a bug until you
@@ -196,18 +208,19 @@ file at once rather than stopping at the first. A file in a state directory
 that is not a usable item refuses rather than being skipped. Nothing is
 quietly left out of your listing.
 
-The refusal arrives as one `ERROR:` line with the clauses joined by semicolons,
-which for a directory of notes is a paragraph. Split the line to read it:
+The refusal arrives as an `ERROR:` line and one indented line for each further
+clause. Each file gets a line of its own and a line saying why, so pick out the
+files:
 
 ```
-$ fileplan list 2>&1 | tr ';' '\n' | grep 'not a usable item file'
-ERROR: /private/tmp/fileplan-retrofit/someday-maybe/Q3 2024 retro.md is not a usable item file
- /private/tmp/fileplan-retrofit/someday-maybe/learn-a-typed-language.md is not a usable item file
- /private/tmp/fileplan-retrofit/someday-maybe/move-off-the-shared-drive.md is not a usable item file
- /private/tmp/fileplan-retrofit/someday-maybe/rewrite-the-importer.md is not a usable item file
- /private/tmp/fileplan-retrofit/adr/0001-store-notes-as-files.md is not a usable item file
- /private/tmp/fileplan-retrofit/adr/0002-one-binary-not-two.md is not a usable item file
- /private/tmp/fileplan-retrofit/adr/README.md is not a usable item file
+$ fileplan list 2>&1 | grep 'not a usable item file'
+ERROR: someday-maybe/Q3 2024 retro.md is not a usable item file
+  someday-maybe/learn-a-typed-language.md is not a usable item file
+  someday-maybe/move-off-the-shared-drive.md is not a usable item file
+  someday-maybe/rewrite-the-importer.md is not a usable item file
+  adr/0001-store-notes-as-files.md is not a usable item file
+  adr/0002-one-binary-not-two.md is not a usable item file
+  adr/README.md is not a usable item file
 ```
 
 That list is the whole job, and re-running `fileplan list` is how you know you
@@ -251,12 +264,11 @@ editing prose to satisfy a listing.
 Run the worklist again and two files are left:
 
 ```
-$ fileplan list 2>&1 | tr ';' '\n'
-ERROR: /private/tmp/fileplan-retrofit/someday-maybe/learn-a-typed-language.md is not a usable item file
- there is no `+++` head on line 1. An item opens with a `+++`-fenced TOML head over its prose, and the head is what every listing reads
- /private/tmp/fileplan-retrofit/someday-maybe/move-off-the-shared-drive.md is not a usable item file
- "layout" is not a declared key (declared: decided
- intrinsic: title)
+$ fileplan list
+ERROR: someday-maybe/learn-a-typed-language.md is not a usable item file
+  there is no `+++` head on line 1. An item opens with a `+++`-fenced TOML head over its prose, and the head is what every listing reads
+  someday-maybe/move-off-the-shared-drive.md is not a usable item file
+  "layout" is not a declared key (declared: decided; intrinsic: title)
 ```
 
 Two shapes the loop could not do for you, and each refusal says which shape it

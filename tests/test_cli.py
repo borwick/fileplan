@@ -346,6 +346,66 @@ def filed(tree: Path) -> None:
     assert main(["transplant", "a-seedling", "--rootstock", "M26"]) == 0
 
 
+def test_a_word_in_a_title_finds_the_item_ignoring_case(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--has title=review` is an exact match, so a session piped `list`
+    through grep. `~` is a substring, any case, over any text key."""
+    filed(tree)
+    capsys.readouterr()
+    assert main(["list", "--has", "title~ANOTHER", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [row["slug"] for row in payload["rows"]] == ["another-seedling"]
+    assert main(["list", "--has", "title~seed", "--json"]) == 0
+    assert len(json.loads(capsys.readouterr().out)["rows"]) == 2
+
+
+def test_a_word_search_over_a_key_with_declared_values_refuses(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Declared values compare by order, so a substring over them is the
+    wrong question, and the refusal names the right ones."""
+    filed(tree)
+    capsys.readouterr()
+    assert main(["list", "--has", "cultivar~heir"]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith('ERROR: --has asks "cultivar~heir"')
+    assert "compare by order" in err
+
+
+def test_a_hand_edited_value_its_key_does_not_declare_is_named(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A value is graded when a verb writes it and never again. The default
+    read names one written by hand, in both renderings, and still lists
+    everything: it gates nothing."""
+    filed(tree)
+    path = tree / "orchard" / "a-seedling.md"
+    path.write_text(
+        path.read_text().replace('cultivar = "heirloom"', 'cultivar = "XXL"'),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+
+    assert main(["list"]) == 0
+    printed = capsys.readouterr()
+    assert "a-seedling" in printed.out and "another-seedling" in printed.out
+    assert (
+        'undeclared value: a-seedling carries "XXL" in cultivar, which its '
+        "values do not declare (orchard/a-seedling.md)"
+    ) in printed.err
+
+    assert main(["list", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["undeclared"] == [
+        {
+            "slug": "a-seedling",
+            "key": "cultivar",
+            "value": "XXL",
+            "path": "orchard/a-seedling.md",
+        }
+    ]
+
+
 def test_the_listing_prints_a_record_per_item(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -530,6 +590,31 @@ def test_has_naming_something_that_is_not_a_key_refuses_by_name(
     detector `head_errors` gives a head."""
     assert main(["list", "--has", "cultivarr"]) == 2
     assert 'not a key an item carries' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("given", [["--has", "state=plan"], ["--lacks", "state"]])
+def test_has_naming_a_field_the_row_reads_off_the_tree_says_so(
+    tree: Path, capsys: pytest.CaptureFixture[str], given: list[str]
+) -> None:
+    """Every row has a `state` field, so naming it here is an easy slip. The
+    refusal names `--state`, the one filter that reaches where an item is."""
+    assert main(["list", *given]) == 2
+    out, err = capsys.readouterr()
+    assert "a row reads off the tree" in err
+    assert "--state" in err
+    assert out == ""
+
+
+def test_has_naming_a_row_field_no_filter_reaches_points_nowhere(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`path` is a row field too, but nothing filters on it, so the refusal
+    stops at saying what it is: no `--state`, and no carried list."""
+    assert main(["list", "--has", "path"]) == 2
+    err = capsys.readouterr().err
+    assert "a row reads off the tree" in err
+    assert "--state" not in err
+    assert "carried:" not in err
 
 
 #: The corpus 14-2 measured the finding against: three seedlings carrying
@@ -979,6 +1064,25 @@ def test_a_body_of_a_dash_is_read_from_stdin(
     assert "Prose from a heredoc." in filed
 
 
+def test_a_body_is_taken_from_a_file_by_redirect(tree: Path) -> None:
+    """Through the real console script, because a redirect is the shell's:
+    `--body - < notes.md` needs no heredoc, and no `--body-file` spelling."""
+    notes = tree / "notes.md"
+    notes.write_text("Prose from a file.\n\nTwo paragraphs of it.\n")
+    with notes.open() as stdin:
+        run = subprocess.run(
+            ["fileplan", "sprout", "A seedling", "--body", "-"],
+            stdin=stdin,
+            capture_output=True,
+            text=True,
+            cwd=tree,
+            env={**os.environ, "FILEPLAN_PLAN_TOML": str(tree / "plan.toml")},
+        )
+    assert run.returncode == 0, run.stderr
+    filed = (tree / "greenhouse" / "a-seedling.md").read_text()
+    assert "Prose from a file.\n\nTwo paragraphs of it." in filed
+
+
 def test_an_unquoted_multi_word_title_refuses_rather_than_joining(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1022,10 +1126,14 @@ def test_a_malformed_plan_toml_refuses_at_a_subcommand_and_writes_nothing(
     assert list((tree / "greenhouse").iterdir()) == []
 
 
-def test_a_refusal_is_one_error_line_with_no_traceback(tree: Path) -> None:
+def test_a_refusal_is_one_error_line_then_one_line_per_defect(tree: Path) -> None:
     """The operator's contract, through the real console script: rc 2, one
-    `ERROR:` line on stderr, nothing on stdout, no traceback."""
-    (tree / "plan.toml").write_text("[states.greenhouse]\npath = 3\n")
+    `ERROR:` line on stderr, nothing on stdout, no traceback. Section 23: each
+    further defect goes on an indented line of its own, where four used to
+    share one line joined by semicolons."""
+    (tree / "plan.toml").write_text(
+        "".join(f"[states.s{n}]\npath = {n}\n" for n in range(4))
+    )
     run = subprocess.run(
         ["fileplan", "sprout", "A seedling"],
         capture_output=True,
@@ -1035,9 +1143,86 @@ def test_a_refusal_is_one_error_line_with_no_traceback(tree: Path) -> None:
     )
     assert run.returncode == 2
     assert run.stdout == ""
-    assert run.stderr.startswith("ERROR: ")
-    assert len(run.stderr.strip().splitlines()) == 1
+    headline, *defects = run.stderr.strip().splitlines()
+    assert headline.startswith("ERROR: ") and "not a usable plan.toml" in headline
+    assert defects == [f"  states.s{n}.path must be a string" for n in range(4)]
     assert "Traceback" not in run.stderr
+
+
+# --------------------------------------------------------------------------
+# Naming a file: from the root, the way a row does
+# --------------------------------------------------------------------------
+#
+# A consumer's commit hook runs fileplan on a temporary copy, from a cwd outside it.
+# Each run below does the same, so a path relative to the cwd would carry the
+# copy's whole prefix. See docs/method.md#the-listing
+
+
+def from_outside(tree: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """The console script, run from a sibling directory outside `tree`."""
+    elsewhere = tree.parent / f"{tree.name}-elsewhere"
+    elsewhere.mkdir(exist_ok=True)
+    return subprocess.run(
+        ["fileplan", *args],
+        capture_output=True,
+        text=True,
+        cwd=elsewhere,
+        env={**os.environ, "FILEPLAN_PLAN_TOML": str(tree / "plan.toml")},
+    )
+
+
+def prefixed(tree: Path, said: str) -> bool:
+    """Whether `said` carries the tree's own absolute prefix, either spelling."""
+    return f"{tree}/" in said or f"{tree.resolve()}/" in said
+
+
+def test_a_refusal_names_a_broken_item_file_from_the_root(tree: Path) -> None:
+    (tree / "greenhouse" / "b-seedling.md").write_text("no head here at all\n")
+    run = from_outside(tree, "list")
+    assert run.returncode == 2
+    assert "greenhouse/b-seedling.md is not a usable item file" in run.stderr
+    assert not prefixed(tree, run.stderr)
+
+
+def test_a_refusal_names_a_claim_record_from_the_root(tree: Path) -> None:
+    record = claim.path(tree, "a-seedling")
+    record.parent.mkdir(parents=True)
+    record.write_text("pid = 4213\n")
+    run = from_outside(tree, "list")
+    assert run.returncode == 2
+    assert "local/claims/a-seedling.toml is not a usable claim record" in run.stderr
+    assert not prefixed(tree, run.stderr)
+
+
+def test_a_run_notice_names_the_file_from_the_root(tree: Path) -> None:
+    """Both streams: a check says its sentence on stdout, and a run that takes
+    a file away says so on stderr."""
+    for title in ("A seedling", "B seedling"):
+        assert main(["sprout", title, "--body", "Prose.", "--cultivar", "heirloom"]) == 0
+
+    checked = from_outside(tree, "transplant", "a-seedling", "--check")
+    assert checked.returncode == 0
+    assert "would move greenhouse/a-seedling.md to orchard/a-seedling.md" in checked.stdout
+    assert not prefixed(tree, checked.stdout)
+
+    gone = from_outside(tree, "compost", "b-seedling")
+    assert gone.returncode == 0
+    assert "greenhouse/b-seedling.md is gone: compost took it away" in gone.stderr
+    assert gone.stdout == "greenhouse/b-seedling.md\n"
+    assert not prefixed(tree, gone.stderr + gone.stdout)
+
+
+def test_a_plan_toml_refusal_names_the_declaration_as_given(tree: Path) -> None:
+    """`plan.toml` is what says which declaration was read, so a hook pointed at
+    the wrong copy hears which. What it points at is named from the root."""
+    declared = tree / "plan.toml"
+    text = declared.read_text()
+    assert text.count('"method.md#compost"') == 1
+    declared.write_text(text.replace('"method.md#compost"', '"nowhere.md#compost"'))
+    run = from_outside(tree, "list")
+    assert run.returncode == 2
+    assert run.stderr.startswith(f"ERROR: {declared} is not a usable plan.toml")
+    assert "transitions.compost.doc names nowhere.md, which does not exist" in run.stderr
 
 
 # --------------------------------------------------------------------------
@@ -1591,6 +1776,22 @@ def test_an_item_waiting_on_a_filed_item_carries_it_in_blocked_by(
     assert found == {"first-tree": None, "second-tree": ["first-tree"]}
     assert main(["list", "--state", "orchard"]) == 0
     assert "blocked-by       first-tree" in capsys.readouterr().out
+
+
+def test_show_prints_what_waits_on_an_item(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Before declining or reworking an item a session wants to know who
+    depends on it. `blocks` is `blocked-by` read the other way round."""
+    orchard(tree, "First tree")
+    orchard(tree, "Second tree", "--at", "200")
+    waits(tree, "second-tree", "first-tree")
+    capsys.readouterr()
+    assert main(["show", "first-tree"]) == 0
+    assert "blocks           second-tree" in capsys.readouterr().out
+    assert main(["list", "--has", "blocks=second-tree", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [row["slug"] for row in payload["rows"]] == ["first-tree"]
 
 
 def test_an_item_waiting_on_nothing_carries_null(
@@ -2230,6 +2431,63 @@ def test_a_number_is_not_a_handle(
     assert "no item starts with" in capsys.readouterr().err
 
 
+def test_a_number_as_a_handle_is_told_where_numbers_are_found(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Still not a handle, and now the refusal says where a number is found,
+    each part on its own line under the `ERROR:` one."""
+    orchard(tree, "First tree")
+    capsys.readouterr()
+    assert main(["show", "1-1"]) == 2
+    headline, pointer = capsys.readouterr().err.strip().splitlines()
+    assert headline == 'ERROR: no item starts with "1-1"'
+    assert "`fileplan list --has number=N`" in pointer
+
+
+@pytest.mark.parametrize(
+    "argv, said",
+    [
+        pytest.param(["list", "orchard"], "did you mean --state orchard?", id="state"),
+        pytest.param(
+            ["next", "ripen", "--check"],
+            "--check belongs to the command: fileplan ripen ITEM --check",
+            id="check",
+        ),
+        pytest.param(["ripen"], "fileplan next ripen lists what it can take", id="item"),
+        pytest.param(["show"], "fileplan list lists every item", id="show"),
+    ],
+)
+def test_a_usage_error_points_at_the_documented_way_through(
+    tree: Path, capsys: pytest.CaptureFixture[str], argv: list[str], said: str
+) -> None:
+    """Click's own refusal stays, and the line after it says where to go. A
+    consumer's sessions hit `list plan` forty-odd times."""
+    capsys.readouterr()
+    assert main(argv) == 2
+    err = capsys.readouterr().err
+    assert "Error: " in err
+    assert err.strip().splitlines()[-1] == said
+
+
+def test_an_extra_argument_naming_no_state_gets_only_clicks_refusal(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The pointer is a fact about the declaration, so it is never a guess."""
+    capsys.readouterr()
+    assert main(["list", "226"]) == 2
+    assert capsys.readouterr().err.strip().endswith("(226)")
+
+
+def test_a_repeated_state_filter_refuses_by_name(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Click kept the last `--state` and dropped the first, silently."""
+    capsys.readouterr()
+    assert main(["list", "--state", "orchard", "--state", "greenhouse"]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("ERROR: --state was given 2 times (orchard, greenhouse)")
+
+
 def test_an_in_place_verb_leaves_the_order_alone(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -2815,7 +3073,7 @@ def test_a_malformed_claim_record_refuses_the_listing_with_no_json(
     printed = capsys.readouterr()
     assert printed.out == ""
     assert printed.err.startswith("ERROR: ")
-    assert str(path) in printed.err
+    assert str(path.relative_to(tree)) in printed.err
 
 
 def test_this_repo_claims_its_own_work_so_its_listing_carries_the_holder(
@@ -3710,19 +3968,32 @@ def test_a_bullet_no_mark_could_be_read_on_is_named_by_the_default_read(
     refuse such a bullet, and nothing said so until a session reached for the
     verb. The default read is where a defect nobody is looking for gets
     found."""
-    scribbled(tree)
+    path = scribbled(tree)
     capsys.readouterr()
+    lines = path.read_text().split("\n")
+    line = 1 + next(
+        at for at, text in enumerate(lines) if text.startswith("- **c1 — The first**")
+    )
 
     assert main(["list"]) == 0
     printed = capsys.readouterr()
     assert "unmarkable" not in printed.out
-    assert "unmarkable bullet: c1 in a-batch" in printed.err
+    assert (
+        f"unmarkable bullet: c1 in a-batch (propagator/a-batch.md:{line})"
+        in printed.err
+    )
     assert 'carries "and a note somebody typed" after its bold run' in printed.err
 
     assert main(["list", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["unmarkable"] == [
-        {"item": "a-batch", "name": "c1", "rest": "and a note somebody typed"}
+        {
+            "item": "a-batch",
+            "name": "c1",
+            "rest": "and a note somebody typed",
+            "line": line,
+            "path": "propagator/a-batch.md",
+        }
     ]
 
 
@@ -3800,6 +4071,111 @@ def test_no_filter_narrows_the_unmarkable_report(
     payload = json.loads(capsys.readouterr().out)
     assert payload["rows"] == []
     assert [one["name"] for one in payload["unmarkable"]] == ["c1"]
+
+
+def test_a_second_bold_run_holding_an_undeclared_word_is_open_and_reported(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Section 23: `**Note:** prose` read as a mark, so the count fell and
+    nothing was said. The mark is a declared word, so this bullet is open,
+    unmarkable, and named by the default read."""
+    cuttings("The first")
+    path = tree / "propagator" / "a-batch.md"
+    path.write_text(
+        path.read_text().replace(
+            "- **c1 — The first**", "- **c1 — The first** **Note:** it struck early"
+        ),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+
+    assert main(["list", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["rows"][0]["sub-phases-left"] == 1
+    assert [(one["name"], one["rest"]) for one in payload["unmarkable"]] == [
+        ("c1", "**Note:** it struck early")
+    ]
+    assert main(["pot-on", "a-batch", "c1"]) == 2
+
+
+def test_a_title_carrying_a_lone_asterisk_refuses(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The tool wrote `- **f1 — *moves* thing**` itself, and then no reader
+    could name it. A lone `*` is the same second author as `**`."""
+    cuttings("The first", close=False)
+    path = tree / "propagator" / "a-batch.md"
+    before = path.read_bytes()
+    capsys.readouterr()
+    assert main(["mist", "a-batch", "--title", "*moves* thing"]) == 2
+    assert 'a lone "*"' in capsys.readouterr().err
+    assert path.read_bytes() == before
+
+
+def hidden(tree: Path, old: str, new: str) -> Path:
+    """The batch with one hand edit, which `mist` would never have written."""
+    path = tree / "propagator" / "a-batch.md"
+    path.write_text(path.read_text().replace(old, new), encoding="utf-8")
+    return path
+
+
+def test_a_bullet_the_reader_cannot_name_is_reported_and_stops_a_mint(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Hand-written bullets still arrive. The read side makes one loud rather
+    than making it work: the default read names it, and a mint refuses,
+    because highest-plus-one over the names it can read would mint c1 again."""
+    cuttings("The first", close=False)
+    path = hidden(tree, "- **c1 — The first**", "- **c1 — *moves* thing**")
+    capsys.readouterr()
+    line = 1 + path.read_text().split("\n").index("- **c1 — *moves* thing**")
+
+    assert main(["list", "--json"]) == 0
+    (one,) = json.loads(capsys.readouterr().out)["unread"]
+    assert {key: one[key] for key in ("item", "name", "line", "path")} == {
+        "item": "a-batch",
+        "name": "c1",
+        "line": line,
+        "path": "propagator/a-batch.md",
+    }
+    assert main(["list"]) == 0
+    assert (
+        f"unread bullet: c1 in a-batch (propagator/a-batch.md:{line})"
+        in capsys.readouterr().err
+    )
+
+    before = path.read_bytes()
+    assert main(["mist", "a-batch", "--title", "The second"]) == 2
+    err = capsys.readouterr().err
+    assert "passes over" in err and f"propagator/a-batch.md:{line}:" in err
+    assert path.read_bytes() == before
+
+
+def test_a_bullet_a_heading_cut_off_from_its_span_is_reported_and_stops_a_mark(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A consumer saw 40 findings read as 18. Where a span ends does not
+    change, and the bullets past it are named rather than dropped."""
+    cuttings("The first", "The second")
+    path = tree / "propagator" / "a-batch.md"
+    path.write_text(
+        path.read_text() + "\n## Aside\n\n- **c3 — The third**\n", encoding="utf-8"
+    )
+    capsys.readouterr()
+
+    assert main(["list", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["rows"][0]["sub-phases"] == 2
+    assert [one["name"] for one in payload["unread"]] == ["c3"]
+    assert '"## Aside"' in payload["unread"][0]["reason"]
+
+    before = path.read_bytes()
+    assert main(["pot-on", "a-batch", "c1"]) == 2
+    assert "passes over" in capsys.readouterr().err
+    # A mint would hand out c3 a second time.
+    assert main(["mist", "a-batch", "--title", "The fourth"]) == 2
+    assert "passes over" in capsys.readouterr().err
+    assert path.read_bytes() == before
 
 
 def test_a_dispositions_help_takes_the_item_and_then_the_bullet(

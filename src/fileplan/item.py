@@ -37,6 +37,7 @@ from fileplan.declaration import (
     Refusal,
     State,
     capability_of,
+    named,
 )
 
 #: Three characters, not YAML's `---`, so nothing reads a head's opening line
@@ -59,6 +60,11 @@ class Item:
     head: Mapping[str, Any]
     #: Verbatim. Every byte after the closing fence's newline.
     body: str
+    #: How many lines of the file come before the body, both fences included,
+    #: counted on the text as written: comments and blank lines in the head
+    #: count. A body line plus this is a file line. `0` is right only for an
+    #: Item that was built to write and never read.
+    opening: int = 0
 
     @property
     def slug(self) -> str:
@@ -328,14 +334,20 @@ def read(path: str | os.PathLike[str], declaration: Declaration) -> Item:
         with path.open(encoding="utf-8", newline="") as handle:
             text = handle.read()
     except UnicodeDecodeError:
-        raise Refusal(f"{path} is not UTF-8, so it is not an item file") from None
+        raise Refusal(
+            f"{named(path, declaration.root)} is not UTF-8, so it is not an item file"
+        ) from None
     except OSError as exc:
-        raise Refusal(f"{path} could not be read: {exc.strerror}") from None
+        raise Refusal(
+            f"{named(path, declaration.root)} could not be read: {exc.strerror}"
+        ) from None
 
     try:
         head, body = parse(text)
     except Refusal as refusal:
-        raise Refusal([_not_usable(path), *refusal.messages]) from None
+        raise Refusal(
+            [_not_usable(path, declaration.root), *refusal.messages]
+        ) from None
 
     # The state comes first, because it says which capability keys this item
     # may carry: the head is graded against where the file actually sits.
@@ -343,17 +355,20 @@ def read(path: str | os.PathLike[str], declaration: Declaration) -> Item:
     errors = head_errors(head, declaration, state)
     if state is None:
         errors.append(
-            f"{path.parent} is not a declared state directory "
+            f"{named(path.parent, declaration.root)} is not a declared state directory "
             f"(declared: {', '.join(declaration.states)})"
         )
     if errors:
-        raise Refusal([_not_usable(path), *errors])
+        raise Refusal([_not_usable(path, declaration.root), *errors])
 
-    return Item(path=path, state=state, head=head, body=body)
+    # The body is the text's exact suffix, so what precedes it is the head as
+    # written. The parsed head has dropped its comments and blank lines.
+    opening = text[: len(text) - len(body)].count("\n")
+    return Item(path=path, state=state, head=head, body=body, opening=opening)
 
 
-def _not_usable(path: Path) -> str:
-    return f"{path} is not a usable item file"
+def _not_usable(path: Path, root: Path) -> str:
+    return f"{named(path, root)} is not a usable item file"
 
 
 def write(item: Item) -> None:

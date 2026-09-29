@@ -652,6 +652,14 @@ against does not depend on which items happen to be filed. A row reports a
 state by its declared **name**, never by its directory — one spelling per
 state.
 
+A row names its file by `path`, relative to the folder holding `plan.toml`.
+Every other message names a path the same way. That covers a refusal, a
+notice, and the path a run prints. So there is one spelling per file too. A
+consumer reading a refusal beside a row matches the two without stripping a
+prefix. Two paths are named as given. One is `plan.toml` itself, because it
+says which declaration was read. The other is any path outside that folder,
+which has no relative form.
+
 A row also carries what sits **beside** the item. Where a state opts into the
 [`claimed` capability](#the-claimed-state), every row carries `claimed-by` and
 `claim-status`. `claimed-by` is the holder, spelled `hostname pid 4213`.
@@ -708,7 +716,7 @@ away. The tool never removes one for you.
 Every **exception report** the listing carries works the way a stranded claim
 does. Each report is a line per record on stderr in the text form, and its own
 array in the envelope under `--json`. Each report is computed over the whole
-tree, and narrowed by no filter. There are seven:
+tree, and narrowed by no filter. These are the reports:
 
 * `stranded` is a claim with no item.
 * `undecomposed` is a started section carrying no [sub-phases](#sub-phases).
@@ -718,14 +726,51 @@ tree, and narrowed by no filter. There are seven:
   register](#the-register), which is their one home.
 * `unmarkable` is a bullet no transition could mark: unmarked, and carrying
   text after its bold run. The listing says so before a session reaches for
-  the command. [Marking](#marking) is where the rule lives.
+  the command. [Marking](#marking) is where the rule lives. Each record
+  carries the item's `path` and the bullet's `line`. The `line` counts from 1
+  over the whole item file, head included. So `path:line` is where an editor
+  opens.
+* `undeclared` is a head value its key's `values` do not declare. A verb
+  grades a value when it writes one, and nothing grades it again, so a hand
+  edit lands here. Each record carries the item's `slug`, the `key`, the
+  `value` and the `path`, one per entry of a list. It gates nothing, for the
+  reason [dependencies](#dependencies) gives.
+* `unread` is a bullet the reader passes over that was plainly meant as a
+  sub-phase. [Sub-phases](#sub-phases) says which two cases it names. Each
+  record carries `item`, `name`, `line`, `path` and a `reason`. The `name` is
+  what the name would be, or `null`.
 
 The reports stay separate arrays rather than one merged list of notices. Each
 report carries a different shape, and the envelope key is how a consumer
 selects the report it cares about.
 
-The envelope also carries [the register](#the-register) itself, under
-`register`, and the register's own section is its home.
+**The envelope is one object, and these are its fields.** Every read carries
+`version`, `kind`, `matched`, `read` and `rows`. The rest are arrays, each
+present whenever the declaration could fill it and absent otherwise:
+
+* `version` is the envelope's version, an integer.
+* `kind` names the read: `items` for `list`, `item` for `show`, `sub-phase`
+  for `show ITEM NAME`, `next` for an offer of items and `sub-phases` for an
+  offer of bullets. It is a word, never the array. The rows are always under
+  `rows`.
+* `transition` names the command an offer is for, on a `next` read only.
+* `matched` is how many rows the read returns, and `read` is how many the
+  traversal walked.
+* `stranded` is present wherever a state claims.
+* `undecomposed` is present wherever a state carries a cursor.
+* `unknown` and `misordered` are present wherever a state reads dependencies.
+* `gaps`, `lost` and `register` are present wherever a state is numbered.
+  `register` is not a report, and [the register](#the-register) is its home.
+* `unmarkable` is present wherever a command marks.
+* `unread` is present wherever a state counts sub-phases.
+* `undeclared` is present wherever a key declares its values.
+* `rows` is the rows, always last.
+
+**What `version` promises.** It goes up only when a field is removed, or
+changes type. A field added is not a change a consumer parsing the old shape
+could trip on, so it is not a bump. That is why the envelope is an object
+rather than a bare array. What each command takes is a different contract,
+read with [`fileplan --json`](#the-contract).
 
 Both renderings come off the row and nothing else. The text form is a
 multi-line record per item. The text form drops a key the item does not carry,
@@ -736,7 +781,8 @@ dash. Neither rendering walks the tree itself, so the two cannot disagree.
 `--json` puts the counts in its envelope and leaves **stderr silent**, so a
 consumer parses one thing. In the text form the counts go to stderr, so
 `fileplan list | ...` carries the records and nothing else. A refusal emits
-**no JSON** either way: rc 2, one `ERROR:` line, empty stdout.
+**no JSON** either way: rc 2, an `ERROR:` line and one indented line for each
+further defect, empty stdout.
 
 There are **three** filters, and several narrow together. `--has
 KEY[OP]VALUE` is the filter over a key. `--has` names a key, then says
@@ -744,7 +790,9 @@ something about that key. A value may carry a **comparison**: `--has
 'size>=L'`, `--has 'stale-days>=14'`. A key with declared `values` orders by
 that list. So `>=` means something only because `plan.toml` puts the values in
 order. A key the filter does not know refuses by name, listing what an item
-can carry. A value outside a key's `values` refuses by name too.
+can carry. A field the row reads off the tree (`slug`, `state`, `path`) is not
+a key. It refuses as a row field, and `state` points at `--state`. A value
+outside a key's `values` refuses by name too.
 
 `:` reads as **drawn from**, and `:` is the one operator naming several
 values. `--has 'pest:aphid,scab'` asks whether every value the key carries is
@@ -754,6 +802,13 @@ subset question. Over a single-valued key, `:` degenerates to "is one of". So
 value is refused against the key's `values` on its own, so a typo among them
 names itself. A declared value carrying a comma cannot be named this way. A
 `:` naming no value refuses rather than matching nothing.
+
+`~` reads as **contains**. `--has 'title~review'` finds every item whose
+title holds the word, ignoring case. Over a list-valued key it asks each
+entry. It is a substring and not a pattern, because a pattern would be a
+second language to document. The body is not searched, since the body is not
+in the row. A key with declared `values` refuses `~` by name. Those values
+compare by order, so a substring of one is the wrong question.
 
 `--has` reaches **every key an item can carry** — intrinsic, declared, given
 by a capability, and derived from outside the item file — off one roster. So
@@ -774,6 +829,12 @@ the workflow's vocabulary. The declared states are a closed list like a key's
 `values`. So `--state '!=plan'` is spelled the same way, and `--state zzz`
 refuses by name rather than matching nothing. `--state ':plan,carrier'` is
 that operator over the same closed list, and nothing reaches for it.
+
+**`--state` is given once.** `--has` and `--lacks` repeat and narrow
+together, so a repeated `--state` looks as if it should too. Click would keep
+the last one and drop the rest without a word. So a second `--state` refuses,
+naming both. `fileplan list plan` names a state as an argument, and click
+refuses it. The line after click's says `did you mean --state plan?`.
 
 A bad filter refuses **before the tree is walked**. The parse is where a
 refusal happens, so `--state zzz` costs no traversal to reject.
@@ -893,6 +954,12 @@ neither read. A session that wants to see the marks reads the file the row's
 `path` names. The alternative is running the offer for the disposition the
 session cares about.
 
+**A usage error points here.** `--check` is the command's, so `fileplan next
+work --check` is click's refusal. The line after it says `fileplan work ITEM
+--check`. A command run with no `ITEM` gets `fileplan next VERB` as the way to
+see what it can take. `show` and `release` are not transitions, so theirs is
+`fileplan list`.
+
 ### show
 
 `fileplan show ITEM` is [the listing](#the-listing)'s row for **one item**.
@@ -909,8 +976,8 @@ narrowing.
 
 `show` prints the **row**, never the body. `cat` the `path` the row names to
 read the prose. What the row adds is everything the file does not hold —
-`claimed-by` and `claim-status`, `blocked-by`, `stale-days`, and the fields
-counted off the body. Putting the body in the row would put the body in
+`claimed-by` and `claim-status`, `blocked-by` and `blocks`, `stale-days`, and
+the fields counted off the body. Putting the body in the row would put the body in
 *every* `list --json` as well. The token budget rules that out. Putting the
 body in only one rendering would break the very thing that makes both
 renderings agree.
@@ -1037,7 +1104,7 @@ it.
   stdout and exits 0. The sentence reads `work would rewrite
   plan/a-section.md, which stays in plan, and would take the claim`;
 * if the transition would **refuse** the item, the check gives the refusal a
-  real run gives: rc 2, one `ERROR:` line on stderr, nothing on stdout.
+  real run gives: rc 2, the `ERROR:` lines on stderr, nothing on stdout.
 
 The refusal is the real one because there is **one path**. `--check` is the
 run, stopped at the seam, rather than a second implementation of the
@@ -1212,6 +1279,11 @@ whether or not any item is filed in one. The field filters like any other:
 the work nothing filed is in the way of. A state that names no key reads none.
 So an item carrying the key *there* carries a fact nothing was declared to
 read.
+
+Beside it is **`blocks`**, the same edges read the other way round. It holds
+the filed items whose edges name this one, or `null` where nothing waits on
+it. It comes off the walk that gives `blocked-by`, so it costs no second one.
+Before declining or reworking an item, `show` says who depends on it.
 
 **An edge naming nothing is named, never read as satisfied.** The old tool's
 rule was the other way round. A dependency was satisfied by *absence*, and
@@ -1435,7 +1507,7 @@ precondition reading history would stop being pure over a head, and every test
 of it would need a repo on disk. The [offer](#the-next-read) is narrowed by it
 through the same function the transition refuses with. So the read and the run
 cannot disagree about which items are affected. What the check does not add is
-a seventh [exception report](#the-listing). The refusal is where a forgotten
+another [exception report](#the-listing). The refusal is where a forgotten
 close-out is made loud, and a second reporter naming open carriers would be
 machinery ahead of need.
 
@@ -1763,7 +1835,8 @@ What the section decided, and the done lines it closed on.
 END
 ```
 
-`-` reads stdin, so a long entry comes in from a heredoc. It is required
+`-` reads stdin, so a long entry comes in from a heredoc. A redirect works
+too, with no heredoc: `--record - < entry.md`. It is required
 because [mint-then-fill](#decompose) cannot work here. The body the record is
 written from is deleted by the same run. A minted heading with nothing under
 it, plus a deleted item, is the lost close-out
@@ -1905,6 +1978,15 @@ guessing where a list stops, and the guesses are unbounded: `**Done when:**`,
 close them with a real heading.
 This repo's items do the first.
 
+**What the span passes over, the tool names.** A bullet after the heading
+that ends the span is not counted. Where its name has the state's form, it
+was plainly meant as a sub-phase. So the [`unread` report](#the-listing)
+names it, with its line. The same report names a bullet whose bold run the
+reader cannot name, because a lone `*` sits in it or it never closes. A
+mint or a mark into such a body refuses, naming the line. A mint hands out
+the highest ordinal it can read plus one, so the hidden name would be minted
+twice.
+
 The count is a field on every row wherever the declaration counts at all.
 `null` means the item's *state* counts no sub-phases. `0` means a section
 nobody has decomposed yet. Those are different facts, and the zero is a real
@@ -2019,8 +2101,8 @@ all, which is the ordinary case and is not a defect.
 **What says a sub-phase is over is a [mark](#marking) on its bullet**, and
 the head says nothing about it at all. There is no third field naming which
 status word is terminal. There was one, and it went, because completion
-written in both places is completion that can disagree with itself. Any mark
-ends a sub-phase. Which one it is says *how* it ended, and nothing in `src/`
+written in both places is completion that can disagree with itself. Any
+declared mark ends a sub-phase. Which one it is says *how* it ended, and nothing in `src/`
 knows either word.
 
 **A mark on the bullet is what buys `next-sub-phase`**, a field on every row
@@ -2197,8 +2279,8 @@ somebody had to clear. With the marker in the document there is nothing left
 to refuse. The re-open **is announced on stderr**, because a state change
 nobody asked for should be loud.
 
-A title carrying `**` or a newline refuses and writes nothing. Either would
-break the strict form the mint is there to write.
+A title carrying `**`, a lone `*` or a newline refuses and writes nothing.
+Each would break the strict form the mint is there to write.
 
 `bulleted` gives an item **no head key**. What it writes is the body, which is
 the workflow's prose rather than a line the tool keeps. So there is nothing to
@@ -2240,17 +2322,25 @@ Move it inside the bold run, which is what [a sub-phase](#sub-phases) is
 already written as. Or move it onto an indented continuation line under the
 bullet, which [`show ITEM NAME`](#show) prints.
 
-The reader is anchored, so a mark written past prose lands where nothing finds
-it. Reading the *last* bold run instead would make
-every such bullet markable with nobody told. A mark is written once, so the
-quiet arm here is a mark nobody can read and a count that never falls. [The
-listing](#the-listing) names such a bullet before any run reaches it.
+The reader reads the run straight after the name's, so a mark written past
+prose lands where nothing finds it. Reading the *last* bold run instead would
+make every such bullet markable with nobody told. A mark is written once, so
+the quiet arm here is a mark nobody can read and a count that never falls.
+[The listing](#the-listing) names such a bullet before any run reaches it.
+
+**A second bold run is a mark only if its word is declared.** Take
+`- **9-1 — Parse** **Note:** fences are hard`. It has a mark's shape, and
+nobody marked it. So the run counts as a mark only where a transition marks
+that word into the bullet's state. Any other word leaves the bullet open and
+unmarkable, and the listing names it. The line is not anchored at its end
+instead, because `--note` writes prose after the mark, as below. A state nothing
+marks into has no words declared, so any word reads there.
 
 Nothing new is declared for it. The tool already owns every character of this
 bullet's punctuation: the marker, the bold, the dash. So the second run is
 read by the same mechanical rule as the first. A state saying what its marks
 look like would be machinery with one caller. A [title](#sub-phases) carrying
-`**` already refuses, so the two runs can never be confused.
+`**` or a lone `*` already refuses, so the two runs can never be confused.
 
 **The word is the workflow's, and it lives on the transition.** `marks` is a
 string, not a flag. `fixed` and `dismissed` are this repo's vocabulary, and
@@ -2519,6 +2609,22 @@ its life. An ambiguous prefix refuses, naming its candidates. One matching
 nothing refuses, naming its near misses. The tool never guesses which item was
 meant.
 
+**An ambiguous prefix names ten candidates**, one per line, then how many
+more there are. So nothing is hidden, and the refusal stays readable.
+
+**A near miss is scored against the start of each slug.** The handle is
+compared with each slug's prefix of the same length. A short typo is then
+measured against what it was the start of, and a long slug is not beaten by
+short strangers. Ties go to the slug sharing more hyphen-words, and three at
+most are offered. Nothing below a cutoff is offered at all.
+
+**A number is never a handle.** A number names a section in
+[the register](#the-register), and a number that resolved would be a second
+answer to which item is meant. A handle that is all digits, or that starts
+with digits and a hyphen, gets one more line. It says that
+`fileplan list --has number=N` finds the item carrying a number. It also says
+that a sub-phase is reached as [`show ITEM NAME`](#show).
+
 Resolution is tree-wide. So a transition aimed at an item in another state
 says **where the item actually is**, rather than that no such item exists.
 
@@ -2532,7 +2638,11 @@ so a heredoc works:
 
 ```
 fileplan idea "A worked example" --body "Why this is worth keeping."
+fileplan idea "A worked example" --body - < notes.md
 ```
+
+The second line takes the body from a file. A redirect needs no heredoc, so
+a hook that inspects command text has nothing to trip over.
 
 **Both are required.** An item is a [title](#title) and a description, and a
 creating transition refuses without prose. The one way out is a template, and

@@ -38,12 +38,18 @@ COUNTED = "-"
 #: The strict named form: a counted bullet whose very first thing is a bold run.
 NAMED = re.compile(r"^-\s+\*\*(?P<bold>[^*]+?)\*\*")
 
+#: A counted bullet opening a bold run, whether or not `NAMED` can read it:
+#: the token is what a name would be, up to whatever ends one or a `*`.
+BOLDED = re.compile(r"^-\s+\*\*(?P<token>[^\s*\u2014\u2013]*)")
+
 #: What ends a name inside that bold run. A bare hyphen is deliberately not
 #: one, so `4-1` survives whole and a name is always one token.
 NAME_END = re.compile(r"[\s\u2014\u2013]")
 
 #: The strict marked form: a named bullet whose bold run is followed by a
-#: second one, holding the disposition. See docs/method.md#marking
+#: second one, holding the disposition. Where the state declares its marks,
+#: that run is a mark only if its word is one of them. See
+#: docs/method.md#marking
 MARKED = re.compile(r"^-\s+\*\*[^*]+?\*\*\s+\*\*(?P<mark>[^*]+?)\*\*")
 
 #: The two state fields naming which declared keys hold the cursor and the
@@ -131,6 +137,9 @@ class Bullet:
     #: remainder that decides whether a *new* mark could be read at all. A
     #: fact about the bullet rather than a row field — nothing renders it.
     rest: str | None
+    #: The 1-based line the bullet is on, counted within the body. A file's
+    #: line adds the head the reader measured: `item.Item.opening`.
+    line: int
 
     @property
     def unmarkable(self) -> bool:
@@ -143,6 +152,20 @@ class Bullet:
         over, and by the listing's report. See docs/method.md#marking
         """
         return self.mark is None and self.rest is not None
+
+
+@dataclass(frozen=True)
+class Unread:
+    """A bullet that looks named and that no reader here reads as a sub-phase.
+
+    `name` is what the name would be, or `None` where even that is empty.
+    `line` counts within the body, as `Bullet.line` does.
+    See docs/method.md#sub-phases
+    """
+
+    line: int
+    name: str | None
+    reason: str
 
 
 def count(body: str, heading: str) -> int:
@@ -166,7 +189,13 @@ def names(body: str, heading: str) -> list[str]:
     return [name for _, _, name in _counted(body, heading) if name]
 
 
-def bullets(body: str, heading: str, *, pending: str | None) -> list[Bullet]:
+def bullets(
+    body: str,
+    heading: str,
+    *,
+    pending: str | None,
+    marks: frozenset[str] | None = None,
+) -> list[Bullet]:
     """The named bullets under `heading`, in document order. Pure.
 
     `names` with what each name is attached to, off the same walk, so a
@@ -174,11 +203,21 @@ def bullets(body: str, heading: str, *, pending: str | None) -> list[Bullet]:
     Two bullets are absent: an unnamed one, which `count` still counts, and
     the state's pending bullet, which marks a decomposition as unfinished
     rather than being work. `pending` is `None` for a state that declares none.
+
+    `marks` is the words a declared verb marks into this state
+    (`State.marks`). A second bold run holding any other word is not a mark,
+    so the bullet reads as open and unmarkable. `None` reads any word.
     """
     marker = _pending_name(pending)
     return [
-        Bullet(name=name, title=_title(line), mark=_mark(line), rest=_rest(line))
-        for _, line, name in _counted(body, heading)
+        Bullet(
+            name=name,
+            title=_title(line),
+            mark=_mark(line, marks),
+            rest=_rest(line),
+            line=number,
+        )
+        for number, line, name in _counted(body, heading)
         if name is not None and name != marker
     ]
 
@@ -206,7 +245,9 @@ def text(body: str, heading: str, *, name: str) -> str | None:
     return "\n".join(lines[start : _owned(lines, _unfenced(lines), start)])
 
 
-def unmarked(body: str, heading: str) -> list[str]:
+def unmarked(
+    body: str, heading: str, marks: frozenset[str] | None = None
+) -> list[str]:
     """The names of the bullets under `heading` carrying no mark. Pure.
 
     The one home of which sub-phases are still open, asked by four callers
@@ -216,14 +257,22 @@ def unmarked(body: str, heading: str) -> list[str]:
     written onto a marked bullet exactly when the section could close, so the
     two cannot drift into disagreeing. `pending=None` is here rather than in
     each of them, so the state's marker is in this list whenever the body
-    carries one at all.
+    carries one at all. `marks` is `bullets`'.
     """
     return [
-        one.name for one in bullets(body, heading, pending=None) if one.mark is None
+        one.name
+        for one in bullets(body, heading, pending=None, marks=marks)
+        if one.mark is None
     ]
 
 
-def upcoming(body: str, heading: str, *, cursor: str | None) -> str | None:
+def upcoming(
+    body: str,
+    heading: str,
+    *,
+    cursor: str | None,
+    marks: frozenset[str] | None = None,
+) -> str | None:
     """Which sub-phase under `heading` comes next, or `None` for none.
 
     Two arms over `unmarked`: a cursor naming a bullet that carries no mark is
@@ -236,7 +285,7 @@ def upcoming(body: str, heading: str, *, cursor: str | None) -> str | None:
     not carry falls through to the first unmarked bullet: `cursor_errors`
     refuses one when it is written.
     """
-    found = unmarked(body, heading)
+    found = unmarked(body, heading, marks)
     if cursor is not None and cursor in found:
         return cursor
     return found[0] if found else None
@@ -290,8 +339,57 @@ def errors(body: str, heading: str) -> list[str]:
     return complaints
 
 
+def unread(body: str, heading: str, *, prefix: str | None) -> list[Unread]:
+    """The bullets the reader passes over that were plainly meant as sub-phases.
+
+    Two cases, reported rather than read, since reading either would be a
+    guess. A counted bullet opening a bold run `NAMED` cannot read, because a
+    lone `*` sits in it or it never closes. And a bullet after the heading
+    that closed the span, whose name has the state's form: `prefix` then an
+    ordinal. `prefix` is `None` where the state or the item cannot compose
+    one, and then the second case is not asked. Pure.
+    """
+    lines = body.splitlines()
+    bounds = _bounds(lines, heading)
+    if bounds is None:
+        return []
+    said = [
+        Unread(
+            number,
+            found["token"] or None,
+            "its bold run holds a lone \"*\" or never closes, so no name can "
+            "be read from it",
+        )
+        for number, line, name in _counted(body, heading)
+        if name is None and (found := BOLDED.match(line))
+    ]
+    if prefix is None:
+        return said
+    ok = _unfenced(lines)
+    end = bounds[1]
+    return said + [
+        Unread(
+            number + 1,
+            token,
+            f'it sits after "{lines[end].strip()}" on body line {end + 1}, '
+            f'which ends the "{heading}" span, so it is not counted',
+        )
+        for number in range(end + 1, len(lines))
+        if ok[number]
+        and (found := BOLDED.match(lines[number]))
+        and (token := found["token"]).startswith(prefix)
+        and ORDINAL.match(token[len(prefix) :])
+    ]
+
+
 def cursor_errors(
-    head: Mapping[str, Any], body: str, *, key: str, heading: str, written: bool
+    head: Mapping[str, Any],
+    body: str,
+    *,
+    key: str,
+    heading: str,
+    written: bool,
+    marks: frozenset[str] | None = None,
 ) -> list[str]:
     """Every way `head`'s cursor fails the sub-phases `body` carries.
 
@@ -324,10 +422,10 @@ def cursor_errors(
     if cursor in named:
         if not written:
             return []
-        if not unmarked(body, heading):
+        if not unmarked(body, heading, marks):
             return []
         line = next(line for _, line, name in counted if name == cursor)
-        if (mark := _mark(line)) is None:
+        if (mark := _mark(line, marks)) is None:
             return []
         return [
             f'{key} names sub-phase "{cursor}", and that bullet already '
@@ -429,6 +527,15 @@ def form_errors(form: str, where: str) -> list[str]:
             "the suffix with"
         ]
     return []
+
+
+def absent(form: str, head: Mapping[str, Any]) -> list[str]:
+    """The fields `form` names that `head` does not carry, the ordinal aside.
+
+    Asked before `prefix`, which assumes there are none: a silently empty
+    prefix would name one bullet differently from the last.
+    """
+    return [field for field in fields(form) if field != SLOT and field not in head]
 
 
 def prefix(form: str, head: Mapping[str, Any]) -> str:
@@ -544,9 +651,10 @@ def mark(
     """`body` with one bullet's mark written, and every other byte identical.
 
     The mark is a second bold run, appended at the end of the line. `MARKED`
-    is anchored, so it reads that run only where the line ends at the name's
-    bold run — the caller gates on `Bullet.rest`, and this stays total and
-    raises nothing, like everything else here. Nothing else moves: not the
+    reads the run immediately after the name's, so a word written past any
+    other text would land where nothing reads it — the caller gates on
+    `Bullet.rest`, and this stays total and raises nothing, like everything
+    else here. Nothing else moves: not the
     heading, not the bullets either side, not the prose around the span. The
     first matching bullet only.
 
@@ -594,11 +702,20 @@ def opens(body: str, *, heading: str, pending: str) -> bool:
 def title_errors(title: str) -> list[str]:
     """Every way `title` cannot go into the strict form. Pure.
 
-    Narrow on purpose: empty, a newline, or a `**` that would close the bold
-    run its name is read from. Each is a bullet the reader beside this could
-    not count or name, so it refuses before anything is written.
+    Narrow on purpose: empty, a newline, a `**` that would close the bold
+    run its name is read from, or a lone `*`, which `NAMED` cannot read
+    through either. Each is a bullet the reader beside this could not count or
+    name, so it refuses before anything is written. A note sits outside the
+    bold run, so `note_errors` has no fourth case.
     """
-    return _one_line_errors(
+    lone = (
+        ['a sub-phase title carries a lone "*", and the bold run its name is '
+         "read from cannot hold one — the bullet would count and could not be "
+         "pointed at"]
+        if "*" in title.replace("**", "")
+        else []
+    )
+    return lone + _one_line_errors(
         title,
         "a sub-phase needs a title. Its bullet is what a later session "
         "reads to know what the work is, and a name with nothing beside "
@@ -858,14 +975,17 @@ def _title(line: str) -> str | None:
     return bold["bold"][end.end() :].strip(" \u2014\u2013") or None
 
 
-def _mark(line: str) -> str | None:
+def _mark(line: str, marks: frozenset[str] | None = None) -> str | None:
     """The mark a counted bullet carries, or `None` where it carries none.
 
-    `_name`'s rule over the second bold run. `None` is the answer an offer
-    narrows on: an unmarked finding is one every disposition could still take.
+    `_name`'s rule over the second bold run, which is a mark only where its
+    word is one of `marks`: `**Note:** prose` has a mark's shape and nobody
+    marked it. `None` is the answer an offer narrows on: an unmarked finding
+    is one every disposition could still take.
     """
     marked = MARKED.match(line)
-    return (marked["mark"].strip() if marked else None) or None
+    word = (marked["mark"].strip() if marked else None) or None
+    return word if marks is None or word in marks else None
 
 
 def _rest(line: str) -> str | None:

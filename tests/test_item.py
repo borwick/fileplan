@@ -279,6 +279,16 @@ def test_an_item_in_greenhouse_reports_state_greenhouse(tree: Declaration) -> No
     assert read(path, tree).state.name == "greenhouse"
 
 
+def test_read_counts_the_head_as_written_before_the_body(tree: Declaration) -> None:
+    """The parsed head drops comments and blank lines, and a file line does
+    not. Both fences count, so the body's first line is `opening + 1`."""
+    text = '+++\n# typed by hand\ncultivar = "heirloom"\n\n+++\nprose\n'
+    path = item_at(tree, "greenhouse", "a.md", text)
+    one = read(path, tree)
+    assert one.opening == 5
+    assert text.split("\n")[one.opening] == "prose"
+
+
 def test_an_item_in_orchard_reports_state_orchard(tree: Declaration) -> None:
     path = item_at(tree, "orchard", "a.md", '+++\ncultivar = "heirloom"\n+++\n')
     assert read(path, tree).state.name == "orchard"
@@ -323,7 +333,7 @@ def test_a_file_with_no_head_refuses_by_name_naming_the_path(
     path = item_at(tree, "greenhouse", "a.md", "# Just prose\n")
     with pytest.raises(Refusal) as raised:
         read(path, tree)
-    assert str(path) in str(raised.value)
+    assert str(path.relative_to(tree.root)) in str(raised.value)
     assert "no `+++` head on line 1" in str(raised.value)
 
 
@@ -410,7 +420,7 @@ def test_an_undeclared_key_refuses_at_read_naming_the_file(
     path = item_at(tree, "greenhouse", "a.md", '+++\ncultivarr = "heirloom"\n+++\n')
     with pytest.raises(Refusal) as raised:
         read(path, tree)
-    assert str(path) in str(raised.value)
+    assert str(path.relative_to(tree.root)) in str(raised.value)
     assert '"cultivarr" is not a declared key' in str(raised.value)
 
 
@@ -507,7 +517,7 @@ def test_an_item_elsewhere_carrying_a_place_refuses_at_read(
     path = item_at(tree, "greenhouse", "a.md", "+++\nposition = 100\n+++\n")
     with pytest.raises(Refusal) as refusal:
         read(path, tree)
-    assert str(path) in str(refusal.value)
+    assert str(path.relative_to(tree.root)) in str(refusal.value)
     assert "greenhouse is not a queued state" in str(refusal.value)
 
 

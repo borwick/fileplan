@@ -281,7 +281,7 @@ def test_the_phrase_spells_the_moment_the_way_the_record_does(
     not."""
     path = claim.path(tmp_path, "a-seedling")
     claim.write(path, claim.record(HERE, taken=TAKEN))
-    stamp = claim.describe(claim.read(path), DEAD).partition("taken ")[2]
+    stamp = claim.describe(claim.read(path, tmp_path), DEAD).partition("taken ")[2]
     assert f"taken = {stamp}" in path.read_text()
 
 
@@ -437,7 +437,7 @@ def test_a_malformed_record_refuses_by_name(tree: Declaration) -> None:
     path = broken(tree, "a-seedling", "pid = 4213\n")
     with pytest.raises(Refusal) as refusal:
         claim.holders(tree)
-    assert str(path) in str(refusal.value)
+    assert str(path.relative_to(tree.root)) in str(refusal.value)
     assert "no host" in str(refusal.value)
 
 
@@ -530,8 +530,8 @@ def test_a_record_round_trips_and_a_second_write_is_byte_identical(
     claim.write(path, written)
     once = path.read_bytes()
 
-    assert claim.read(path) == written
-    claim.write(path, claim.read(path))
+    assert claim.read(path, tmp_path) == written
+    claim.write(path, claim.read(path, tmp_path))
     assert path.read_bytes() == once
 
 
@@ -572,7 +572,7 @@ def test_a_chmod_on_a_claim_record_survives_the_next_write(tmp_path: Path) -> No
 
 def test_a_missing_record_refuses_by_name(tmp_path: Path) -> None:
     with pytest.raises(Refusal, match="could not be read"):
-        claim.read(claim.path(tmp_path, "never-claimed"))
+        claim.read(claim.path(tmp_path, "never-claimed"), tmp_path)
 
 
 def test_a_record_that_is_not_utf8_refuses(tmp_path: Path) -> None:
@@ -580,7 +580,7 @@ def test_a_record_that_is_not_utf8_refuses(tmp_path: Path) -> None:
     path.parent.mkdir(parents=True)
     path.write_bytes(b'host = "\xff\xfe"\n')
     with pytest.raises(Refusal, match="not UTF-8"):
-        claim.read(path)
+        claim.read(path, tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -594,7 +594,7 @@ def test_a_nested_record_refuses_by_name(tmp_path: Path, text: str) -> None:
     path.parent.mkdir(parents=True)
     path.write_text(text)
     with pytest.raises(Refusal, match="a claim record is flat"):
-        claim.read(path)
+        claim.read(path, tmp_path)
 
 
 def test_unparseable_toml_carries_tomllibs_own_message(tmp_path: Path) -> None:
@@ -602,13 +602,13 @@ def test_unparseable_toml_carries_tomllibs_own_message(tmp_path: Path) -> None:
     path.parent.mkdir(parents=True)
     path.write_text('host = "unterminated\n')
     with pytest.raises(Refusal, match="not valid TOML"):
-        claim.read(path)
+        claim.read(path, tmp_path)
 
 
 def test_remove_takes_the_record_away(tmp_path: Path) -> None:
     path = claim.path(tmp_path, "a-seedling")
     claim.write(path, claim.record(HERE, taken=TAKEN))
-    claim.remove(path)
+    claim.remove(path, tmp_path)
     assert not path.exists()
 
 
@@ -619,7 +619,7 @@ def test_removing_a_record_that_is_not_there_is_not_an_error(
     would turn a crash between an item's write and its record's removal into
     something a person has to resolve. A missing record means unclaimed
     everywhere else too."""
-    claim.remove(claim.path(tmp_path, "never-claimed"))
+    claim.remove(claim.path(tmp_path, "never-claimed"), tmp_path)
 
 
 def test_remove_leaves_the_claims_directory_and_its_neighbours(
@@ -631,7 +631,7 @@ def test_remove_leaves_the_claims_directory_and_its_neighbours(
     theirs = claim.path(tmp_path, "b-seedling")
     claim.write(mine, claim.record(HERE, taken=TAKEN))
     claim.write(theirs, claim.record(HERE, taken=TAKEN))
-    claim.remove(mine)
+    claim.remove(mine, tmp_path)
     assert theirs.exists()
 
 

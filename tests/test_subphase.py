@@ -897,6 +897,7 @@ def test_opens_says_whether_a_mint_would_re_open():
         pytest.param("   ", "needs a title", id="whitespace"),
         pytest.param("One\ntwo", "carries a newline", id="newline"),
         pytest.param("A **bold** one", 'carries "**"', id="bold"),
+        pytest.param("*moves* thing", 'a lone "*"', id="lone-asterisk"),
     ],
 )
 def test_a_title_that_would_break_the_strict_form_is_named(title, said):
@@ -960,9 +961,24 @@ def test_bullets_reads_the_named_ones_in_document_order():
     title is the rest of the bold run and the mark is the second one."""
     assert subphase.bullets(MARKED_BODY, HEADING, pending=PENDING) == [
         subphase.Bullet(
-            name="c1", title="The first cutting", mark="rooted", rest="**rooted**"
+            name="c1",
+            title="The first cutting",
+            mark="rooted",
+            rest="**rooted**",
+            line=4,
         ),
-        subphase.Bullet(name="c2", title="The second", mark=None, rest=None),
+        subphase.Bullet(name="c2", title="The second", mark=None, rest=None, line=5),
+    ]
+
+
+def test_a_bullets_line_is_counted_within_the_body():
+    """The module is pure over the body, so the head is the reader's to add.
+    Counted from 1, with the prose and the blank line above the heading."""
+    found = subphase.bullets(MARKED_BODY, HEADING, pending=PENDING)
+    lines = MARKED_BODY.split("\n")
+    assert [lines[one.line - 1].startswith(f"- **{one.name}") for one in found] == [
+        True,
+        True,
     ]
 
 
@@ -997,13 +1013,14 @@ def test_bullets_under_another_heading_are_not_read():
 def test_a_bare_name_carries_no_title():
     """`_name`'s rule one field over: a value nobody could read is not one."""
     (one,) = subphase.bullets(body("### Steps", "- **c1**"), HEADING, pending=None)
-    assert one == subphase.Bullet(name="c1", title=None, mark=None, rest=None)
+    assert one == subphase.Bullet(name="c1", title=None, mark=None, rest=None, line=2)
 
 
 def test_rest_reads_what_the_line_carries_past_the_name_and_nothing_for_a_bare_one():
     """The fact a disposition gates on: `mark` appends at the end of the line
-    and `MARKED` is anchored, so the two agree only where there is nothing
-    out here. Whitespace is nothing, since a mark still lands readably."""
+    and `MARKED` reads the run straight after the name's, so the two agree
+    only where there is nothing out here. Whitespace is nothing, since a mark
+    still lands readably."""
     bare, prose, spaced = subphase.bullets(
         body(
             "### Steps",
@@ -1028,6 +1045,62 @@ def test_a_marked_bullets_rest_is_its_own_mark_run():
         pending=None,
     )
     assert (one.mark, one.rest) == ("rooted", "**rooted**")
+
+
+def test_a_second_bold_run_is_a_mark_only_where_the_state_declares_its_word():
+    """Section 23 (John, 2026-09-28): `**Note:** prose` has a mark's shape
+    and nobody marked it. So a run is a mark only where a declared verb marks
+    that word into the state, and otherwise the bullet is open and
+    unmarkable. `None` is a state nothing marks into, read as before."""
+    lines = body("### Steps", "- **c1 — Parse** **Note:** fences are hard")
+    (one,) = subphase.bullets(lines, HEADING, pending=None, marks=frozenset({"rooted"}))
+    assert (one.mark, one.unmarkable) == (None, True)
+    assert subphase.unmarked(lines, HEADING, frozenset({"rooted"})) == ["c1"]
+    (anyword,) = subphase.bullets(lines, HEADING, pending=None)
+    assert anyword.mark == "Note:"
+
+
+def test_a_declared_mark_with_a_note_after_it_still_reads():
+    """Why the reader is not anchored at the end of the line: `--note` writes
+    prose after the mark, and that is the shape of the bug."""
+    written = subphase.mark(
+        MARKED_BODY, heading=HEADING, name="c2", word="potted", note="To the wall."
+    )
+    found = subphase.bullets(
+        written, HEADING, pending=PENDING, marks=frozenset({"rooted", "potted"})
+    )
+    assert {one.name: one.mark for one in found} == {"c1": "rooted", "c2": "potted"}
+
+
+def test_a_bullet_whose_bold_run_cannot_be_read_is_unread():
+    """A lone `*` leaves `NAMED` nothing to match, so the bullet counts and
+    has no name. It is reported with the name it plainly meant, never read
+    with it: reading it would be a guess."""
+    lines = body("### Steps", "- **c1 — *moves* thing**", "- **c2 — Fine**")
+    (one,) = subphase.unread(lines, HEADING, prefix="c")
+    assert (one.line, one.name) == (2, "c1")
+    assert 'lone "*"' in one.reason
+    assert subphase.names(lines, HEADING) == ["c2"]
+
+
+def test_a_bullet_in_the_form_after_the_heading_that_ended_the_span_is_unread():
+    """The span rule stays, and what it passes over is named. Only a bullet
+    whose name has the state's form is: prose bullets under a later heading
+    are the writer's own, and a fenced one is quoted."""
+    lines = body(
+        "### Steps",
+        "- **c1 — One**",
+        "## Aside",
+        "- **c2 — Two**",
+        "- **Note — prose**",
+        "```",
+        "- **c3 — quoted**",
+        "```",
+    )
+    (one,) = subphase.unread(lines, HEADING, prefix="c")
+    assert (one.line, one.name) == (4, "c2")
+    assert '"## Aside" on body line 3' in one.reason
+    assert subphase.unread(lines, HEADING, prefix=None) == []
 
 
 def test_a_body_with_no_such_heading_carries_no_bullets():

@@ -132,7 +132,7 @@ def test_a_broken_item_file_refuses_the_listing_naming_it(tree: Declaration) -> 
     broken = file(tree, "greenhouse", "b-seedling.md", "no head here at all\n")
     with pytest.raises(Refusal) as refusal:
         read.items(tree)
-    assert str(broken) in str(refusal.value)
+    assert str(broken.relative_to(tree.root)) in str(refusal.value)
     assert "is not a usable item file" in str(refusal.value)
 
 
@@ -153,8 +153,8 @@ def test_two_broken_files_are_reported_in_one_refusal(tree: Declaration) -> None
     second = file(tree, "orchard", "b-seedling.md", "no head either\n")
     with pytest.raises(Refusal) as refusal:
         read.items(tree)
-    assert str(first) in str(refusal.value)
-    assert str(second) in str(refusal.value)
+    assert str(first.relative_to(tree.root)) in str(refusal.value)
+    assert str(second.relative_to(tree.root)) in str(refusal.value)
 
 
 def test_an_undeclared_head_key_refuses_the_listing(tree: Declaration) -> None:
@@ -194,7 +194,8 @@ def test_a_rows_fields_are_in_a_fixed_order(tree: Declaration) -> None:
     same bullets. All five are present because the fixture declares such states
     at all, not because this item is in one.
 
-    `blocked-by` comes after those two and before the declared keys, for the
+    `blocked-by` and `blocks` come after those two and before the declared
+    keys, for the
     third version of the same argument: it is derived from the **tree** rather
     than read out of a head, so it belongs with the things that sit beside the
     declared keys rather than among them. Present because the fixture has a
@@ -221,6 +222,7 @@ def test_a_rows_fields_are_in_a_fixed_order(tree: Declaration) -> None:
         subphase.LEFT,
         subphase.NEXT,
         depends.BLOCKED,
+        depends.BLOCKS,
         stale.DAYS,
         "title",
         *tree.keys,
@@ -418,6 +420,25 @@ def test_the_offer_passes_over_a_bullet_no_disposition_could_mark(
     # What the traversal read, not what it offered: the bullet still counts.
     assert found.walked == 1
     assert [one[read.BULLET_NAME] for one in found.unmarkable] == ["graft-1"]
+    assert [one[read.PATH] for one in found.unmarkable] == ["orchard/a-tree.md"]
+
+
+def test_an_unmarkable_bullets_line_counts_the_head_as_written_on_disk(
+    tree: Declaration,
+) -> None:
+    """`sed -n <line>p <path>` prints the bullet. The head here is longer
+    than `SCRIBBLED`'s, and carries a comment and a blank line that the
+    parsed head drops, so a line counted off the parse would land short."""
+    text = SCRIBBLED.replace(
+        '+++\ntitle = "A tree"\n+++\n',
+        '+++\n# typed by hand\ntitle = "A tree"\n\ncultivar = "heirloom"\n+++\n',
+    )
+    path = file(tree, "orchard", "a-tree.md", text)
+    (one,) = read.listing(tree).unmarkable
+    # Six lines of head, then the bullet on the body's fourth line.
+    assert one[read.BULLET_LINE] == 6 + 4
+    assert text.split("\n")[one[read.BULLET_LINE] - 1].startswith("- **graft-1")
+    assert tree.root / one[read.PATH] == path
 
 
 def test_a_bullet_in_a_state_nothing_marks_into_is_reported_nowhere(
@@ -437,9 +458,44 @@ def test_a_bullet_in_a_state_nothing_marks_into_is_reported_nowhere(
             for name, one in tree.transitions.items()
             if one.marks is None
         },
+        # What the verbs mark into is read onto each state at load.
+        states={
+            name: dataclasses.replace(one, marks=None)
+            for name, one in tree.states.items()
+        },
     )
     assert unmarking.marked_states == frozenset()
     assert read.listing(unmarking).unmarkable == []
+
+
+CUT_OFF = """\
++++
+title = "A tree"
+{number}+++
+
+### Steps
+
+- **7-1 — the first.**
+
+## Aside
+
+- **7-2 — the second.**
+"""
+
+
+def test_a_bullet_past_the_span_is_found_by_the_form_the_item_fills_in(
+    tree: Declaration,
+) -> None:
+    """The orchard names its bullets `{number}-{ordinal}`, so the prefix is
+    the item's own number. An item carrying no number has no prefix, and a
+    stray bullet then cannot be told from the writer's own prose."""
+    path = file(tree, "orchard", "a-tree.md", CUT_OFF.format(number="number = 7\n"))
+    (one,) = read.listing(tree).unread
+    assert (one[read.BULLET_NAME], one[read.PATH]) == ("7-2", "orchard/a-tree.md")
+    assert path.read_text().split("\n")[one[read.BULLET_LINE] - 1].startswith("- **7-2")
+
+    file(tree, "orchard", "a-tree.md", CUT_OFF.format(number=""))
+    assert read.listing(tree).unread == []
 
 
 def test_a_state_that_counts_no_sub_phases_carries_none_of_the_three_fields(
@@ -472,6 +528,32 @@ def waiting(tree: Declaration, name: str, *edges: str, place: int | None = None)
     if place is not None:
         text = text.replace('title = "A tree"', f'title = "A tree"\nposition = {place}')
     file(tree, "orchard", f"{name}.md", text)
+
+
+def test_a_word_is_found_in_any_entry_of_a_list_ignoring_case() -> None:
+    """`~` over a list asks each entry, `carries`' rule, and folds case on
+    both sides."""
+    found = [{"pest": ["Woolly aphid", "scab"]}, {"pest": "canker"}, {}]
+    test = read.comparison("pest", "~APHID")
+    assert read.matching(found, [test]) == [found[0]]
+
+
+def test_a_row_carries_what_waits_on_it(tree: Declaration) -> None:
+    """`blocks` is `blocked-by` the other way round, off the same walk: what
+    a session wants to know before declining or reworking an item."""
+    file(tree, "orchard", "a-tree.md")
+    waiting(tree, "b-tree", "a-tree")
+    waiting(tree, "c-tree", "a-tree", "b-tree")
+    found = read.listing(tree)
+    assert {row["slug"]: row[depends.BLOCKS] for row in found.rows} == {
+        "a-tree": ["b-tree", "c-tree"],
+        "b-tree": ["c-tree"],
+        "c-tree": None,
+    }
+    assert [
+        row["slug"]
+        for row in read.matching(found.rows, [read.filtering(tree, "blocks=c-tree")])
+    ] == ["a-tree", "b-tree"]
 
 
 def test_a_row_carries_the_edges_it_waits_on_that_are_still_filed(
@@ -1779,8 +1861,8 @@ def test_a_slug_held_in_two_states_refuses_naming_both(tree: Declaration) -> Non
     second = file(tree, "orchard", "a-seedling.md")
     with pytest.raises(Refusal) as refusal:
         read.resolve(tree, "a-seedling")
-    assert str(first) in str(refusal.value)
-    assert str(second) in str(refusal.value)
+    assert str(first.relative_to(tree.root)) in str(refusal.value)
+    assert str(second.relative_to(tree.root)) in str(refusal.value)
 
 
 def test_the_resolver_still_lists_a_duplicated_slug(tree: Declaration) -> None:
@@ -1821,6 +1903,42 @@ def test_an_ambiguous_prefix_names_its_candidates_purely() -> None:
         read.chosen(NAMED, "a-see")
     assert '"a-see" names 2 items' in str(refusal.value)
     assert "a-seed" in str(refusal.value) and "a-seedling" in str(refusal.value)
+
+
+def test_an_ambiguous_prefix_names_ten_candidates_and_counts_the_rest() -> None:
+    """`show a-` printed 28 slugs on one line. Ten, one per message so each
+    gets its own line at the CLI, then how many were left out, so nothing is
+    hidden and the refusal is readable."""
+    many = [(f"a-seed-{n:02}", f"greenhouse/a-seed-{n:02}.md") for n in range(30)]
+    with pytest.raises(Refusal) as refusal:
+        read.chosen(many, "a-")
+    headline, *named, rest = refusal.value.messages
+    assert headline == '"a-" names 30 items. Say more'
+    assert named == [f"a-seed-{n:02}" for n in range(10)]
+    assert rest == "and 20 more"
+
+
+def test_a_near_miss_is_ranked_by_the_start_of_each_slug() -> None:
+    """Over whole slugs, a short typo against a long slug scored low and three
+    short strangers won. Against each slug's start it comes first."""
+    meant = "a-checker-s-route-to-the-far-end-of-the-garden-and-back"
+    named = [
+        (slug, "x")
+        for slug in (meant, "a-check", "a-cheese-route", "a-chore", "a-sheet-s-rot")
+    ]
+    with pytest.raises(Refusal) as refusal:
+        read.chosen(named, "a-cheker-s-route")
+    assert f"nearest: {meant}, " in str(refusal.value)
+
+
+@pytest.mark.parametrize("handle", ["235", "23-1"])
+def test_a_number_as_a_handle_is_told_where_numbers_are_found(handle) -> None:
+    """A number never resolves, by the register's rule, and that stays. The
+    refusal says so, and where a number and a sub-phase name are found."""
+    with pytest.raises(Refusal) as refusal:
+        read.chosen(NAMED, handle)
+    assert "`fileplan list --has number=N`" in str(refusal.value)
+    assert "`show ITEM NAME`" in str(refusal.value)
 
 
 def test_a_handle_matching_nothing_names_its_near_misses_purely() -> None:

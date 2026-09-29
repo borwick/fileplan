@@ -38,8 +38,12 @@ FIELD = "dependencies"
 #: because it is read off the tree rather than written into a head.
 BLOCKED = "blocked-by"
 
+#: The same edges the other way round: the filed items whose edges name this
+#: one. Off the walk that gives `BLOCKED`, so it costs no second one.
+BLOCKS = "blocks"
+
 #: The row fields derived here, read as a tuple by `fileplan.declaration`.
-DERIVED = (BLOCKED,)
+DERIVED = (BLOCKED, BLOCKS)
 
 #: The fields an exception report's record carries: which item the edge is
 #: written on, which key it is written in, and what it names. Both reports

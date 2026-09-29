@@ -21,6 +21,7 @@ from __future__ import annotations
 import datetime as dt
 import difflib
 import operator as operators
+import re
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Sequence
@@ -32,9 +33,12 @@ from fileplan.declaration import (
     CLAIMED,
     DATED,
     INTRINSIC_KEYS,
+    RESERVED_KEYS,
     Declaration,
     Refusal,
+    State,
     collecting,
+    named,
 )
 from fileplan.item import Item
 
@@ -56,14 +60,40 @@ BULLET_NAME, BULLET_ITEM, BULLET_TITLE, BULLET_MARK = "name", "item", "title", "
 #: rather than in a row. See docs/method.md#marking
 BULLET_REST = "rest"
 
+#: The 1-based line a bullet is on in its item file, head included, so a
+#: record's `path` and this are where an editor opens. Report-only, like
+#: `BULLET_REST`. See docs/method.md#the-listing
+BULLET_LINE = "line"
+
+#: The two fields an `undeclared` record adds to the item's slug and path:
+#: which key, and the entry it carries that the key does not declare.
+#: See docs/method.md#the-listing
+KEY, VALUE = "key", "value"
+
+#: Why the reader passed a bullet over, in the `unread` report's records.
+#: Report-only, like `BULLET_REST`. See docs/method.md#sub-phases
+BULLET_REASON = "reason"
+
+#: How many candidates an ambiguous prefix names, one per line, before it
+#: says how many more there are. See docs/method.md#the-handle
+CANDIDATES = 10
+
+#: How like a slug's start a handle has to be to be offered as a near miss.
+NEAR = 0.6
+
 #: The comparison operators a filter value may carry, longest first so `>=`
 #: is never read as `>`. A bare value means `=`.
-OPERATORS = ("!=", ">=", "<=", "=", ">", "<", ":")
+OPERATORS = ("!=", ">=", "<=", "=", ">", "<", ":", "~")
 
 #: `drawn from`: the one operator taking several values, and the one that asks
 #: about the whole of what a key carries rather than about an entry of it.
 #: `:` prefix-collides with no other operator, so its place above is free.
 DRAWN = ":"
+
+#: `contains`: a case-insensitive substring of a value's text, or of any entry
+#: of a list. Over a key with declared values it refuses, since those compare
+#: by order. See docs/method.md#the-listing
+CONTAINS = "~"
 
 #: The two tests that ask about presence rather than value. They come from
 #: `--has` / `--lacks`, not from a value's prefix, and carry no value.
@@ -123,7 +153,7 @@ def items(declaration: Declaration) -> list[Item]:
             here.append(one)
             if state.sub_phases:
                 errors += [
-                    f"{path.name}: {message}"
+                    f"{named(path, declaration.root)}: {message}"
                     for message in subphase.errors(one.body, state.sub_phases)
                 ]
         found += queued.order(here) if state.has(queued.NAME) else here
@@ -191,6 +221,11 @@ def rows(
     counts = declaration.counts_sub_phases
     waits = declaration.has_dependencies
     dated = declaration.has(DATED)
+    # `blocking` inverted: who waits on each slug, in the traversal's order.
+    waited: dict[str, list[str]] = {}
+    for slug, named in blocking.items():
+        for one in named:
+            waited.setdefault(one, []).append(slug)
     return [
         {
             SLUG: one.slug,
@@ -205,7 +240,11 @@ def rows(
                         else None
                     ),
                     subphase.LEFT: (
-                        len(subphase.unmarked(one.body, one.state.sub_phases))
+                        len(
+                            subphase.unmarked(
+                                one.body, one.state.sub_phases, one.state.marks
+                            )
+                        )
                         if one.state.sub_phases
                         else None
                     ),
@@ -216,6 +255,7 @@ def rows(
                             cursor=one.get(one.state.cursor)
                             if one.state.cursor
                             else None,
+                            marks=one.state.marks,
                         )
                         if one.state.sub_phases
                         else None
@@ -225,7 +265,10 @@ def rows(
                 else {}
             ),
             **(
-                {depends.BLOCKED: list(blocking.get(one.slug, ())) or None}
+                {
+                    depends.BLOCKED: list(blocking.get(one.slug, ())) or None,
+                    depends.BLOCKS: waited.get(one.slug),
+                }
                 if waits
                 else {}
             ),
@@ -260,7 +303,7 @@ class Listing:
     #: order — one record each, naming the item, the key and what it named.
     #: Exception reports like the one above. See docs/method.md#dependencies
     #:
-    #: Seven reports and no merged `notices` array: each carries a different
+    #: Separate reports and no merged `notices` array: each carries a different
     #: shape, and the envelope key is how a consumer selects one. A merged
     #: array would be a union mostly empty at every read.
     unknown: list[dict[str, Any]] = field(default_factory=list)
@@ -274,10 +317,20 @@ class Listing:
     lost: list[dict[str, Any]] = field(default_factory=list)
     #: The bullets no verb could mark: unmarked, in a state some verb marks
     #: into, and carrying text after the name's bold run. One record each,
-    #: naming the item, the bullet and what is in the way. The seventh
-    #: exception report. See docs/method.md#marking
+    #: naming the item, the bullet, where it is and what is in the way. See
+    #: docs/method.md#marking
     unmarkable: list[dict[str, Any]] = field(default_factory=list)
-    #: **Not** one of the seven. One record per numbered state, saying what
+    #: The bullets that look named and that the reader passes over: a bold run
+    #: it cannot read, or a name in the state's form after the heading that
+    #: ended the span. One record each, naming the item, what the name would
+    #: be, where it is and why. See docs/method.md#sub-phases
+    unread: list[dict[str, Any]] = field(default_factory=list)
+    #: The head values outside their key's declared `values`, one record per
+    #: entry. A value is graded when a verb writes it and never again, so a
+    #: hand edit is found here. It gates nothing: grading at read would break
+    #: the whole listing over one item. See docs/method.md#the-listing
+    undeclared: list[dict[str, Any]] = field(default_factory=list)
+    #: **Not** an exception report. One record per numbered state, saying what
     #: the register holds rather than what is wrong with it: its name, its
     #: archive, its floor and the highest number it holds. A report is silent
     #: when nothing is wrong; this prints on every read. See
@@ -330,6 +383,8 @@ def listing(
     blocking, unknown, misordered = _dependencies(found)
     gaps, lost, register = _register(declaration, found)
     unmarkable = _unmarkable(declaration, found)
+    passed = _unread(declaration, found)
+    undeclared = _undeclared(declaration, found)
     ages = stale.ages(
         declaration.root,
         [(one.slug, one.path) for one in found if one.state.has(DATED)],
@@ -383,6 +438,8 @@ def listing(
         gaps=gaps,
         lost=lost,
         unmarkable=unmarkable,
+        unread=passed,
+        undeclared=undeclared,
         register=register,
     )
 
@@ -411,7 +468,10 @@ def _bullets(
         if not one.state.sub_phases:
             continue
         for bullet in subphase.bullets(
-            one.body, one.state.sub_phases, pending=one.state.pending
+            one.body,
+            one.state.sub_phases,
+            pending=one.state.pending,
+            marks=one.state.marks,
         ):
             walked += 1
             if one.slug in offering and marking(bullet):
@@ -445,13 +505,79 @@ def _unmarkable(
         if heading is None or one.state.name not in marked:
             continue
         said += [
-            {BULLET_ITEM: one.slug, BULLET_NAME: bullet.name, BULLET_REST: bullet.rest}
+            {
+                BULLET_ITEM: one.slug,
+                BULLET_NAME: bullet.name,
+                BULLET_REST: bullet.rest,
+                BULLET_LINE: one.opening + bullet.line,
+                PATH: str(one.path.relative_to(declaration.root)),
+            }
             for bullet in subphase.bullets(
-                one.body, heading, pending=one.state.pending
+                one.body, heading, pending=one.state.pending, marks=one.state.marks
             )
             if bullet.unmarkable
         ]
     return said
+
+
+def unread(state: State, body: str, head: Mapping[str, Any]) -> list[subphase.Unread]:
+    """`subphase.unread` for an item in `state` carrying `head`.
+
+    The prefix is composed here, once for the listing and the refusal a
+    writing run gives: a state that names no form, or an item missing a field
+    the form names, has no prefix to find a stray bullet by.
+    """
+    if state.sub_phases is None:
+        return []
+    form = state.sub_phase_name
+    prefix = (
+        subphase.prefix(form, head)
+        if form is not None and not subphase.absent(form, head)
+        else None
+    )
+    return subphase.unread(body, state.sub_phases, prefix=prefix)
+
+
+def _unread(declaration: Declaration, found: Sequence[Item]) -> list[dict[str, Any]]:
+    """The `unread` report: every bullet `unread` finds, over the whole tree.
+
+    `_unmarkable`'s record shape with a reason in place of the rest.
+    """
+    return [
+        {
+            BULLET_ITEM: one.slug,
+            BULLET_NAME: bullet.name,
+            BULLET_REASON: bullet.reason,
+            BULLET_LINE: one.opening + bullet.line,
+            PATH: str(one.path.relative_to(declaration.root)),
+        }
+        for one in found
+        for bullet in unread(one.state, one.body, one.head)
+    ]
+
+
+def _undeclared(
+    declaration: Declaration, found: Sequence[Item]
+) -> list[dict[str, Any]]:
+    """The `undeclared` report: every carried entry its key does not declare.
+
+    Only a key with `values` is asked about, and a list is asked entry by
+    entry, `carries`' rule. In traversal order, then declared key order.
+    """
+    closed = {name: key.values for name, key in declaration.keys.items() if key.values}
+    return [
+        {
+            SLUG: one.slug,
+            KEY: name,
+            VALUE: entry,
+            PATH: str(one.path.relative_to(declaration.root)),
+        }
+        for one in found
+        for name, values in closed.items()
+        if name in one.head
+        for entry in _entries(one.head[name])
+        if str(entry) not in values
+    ]
 
 
 def _register(
@@ -595,6 +721,12 @@ def comparison(
             f"names the whole set {key} may be drawn from, and an empty one "
             "matches nothing"
         )
+    if found == CONTAINS and values is not None:
+        raise Refusal(
+            f'{option} asks "{key}{found}{wanted}", and {key} declares its '
+            "values, which compare by order: use =, !=, <, <=, >, >= or "
+            f"`{DRAWN}` over {key}"
+        )
     if values is not None:
         for one in named:
             if one not in values:
@@ -638,6 +770,12 @@ def known(declaration: Declaration, option: str, key: str) -> str:
     detector is here rather than in the parse."""
     if key in declaration.carried:
         return key
+    if key in RESERVED_KEYS:
+        pointer = ". Use --state to name where an item is" if key == "state" else ""
+        raise Refusal(
+            f'{option} names "{key}", which a row reads off the tree rather '
+            f"than a key an item carries{pointer}"
+        )
     raise Refusal(
         f'{option} names "{key}", which is not a key an item carries '
         f"(carried: {', '.join(declaration.carried)})"
@@ -674,6 +812,9 @@ def _satisfies(row: Mapping[str, Any], test: Test) -> bool:
         return not carries(value, test.value)
     if test.operator == DRAWN:
         return _drawn_from(value, test.value)
+    if test.operator == CONTAINS:
+        wanted = test.value.casefold()
+        return any(wanted in str(entry).casefold() for entry in _entries(value))
     return _compares(value, test)
 
 
@@ -799,7 +940,9 @@ def resolve(declaration: Declaration, handle: str) -> Item:
     to the rows it already has. See docs/method.md#the-handle
     """
     found = items(declaration)
-    slug = chosen([(one.slug, str(one.path)) for one in found], handle)
+    slug = chosen(
+        [(one.slug, named(one.path, declaration.root)) for one in found], handle
+    )
     return next(one for one in found if one.slug == slug)
 
 
@@ -826,13 +969,41 @@ def chosen(named: Sequence[tuple[str, str]], handle: str) -> str:
     if len(matches) == 1:
         return matches[0]
     if matches:
+        more = len(matches) - CANDIDATES
         raise Refusal(
-            f'"{handle}" names {len(matches)} items — '
-            f'{", ".join(matches)}. Say more'
+            [
+                f'"{handle}" names {len(matches)} items. Say more',
+                *matches[:CANDIDATES],
+                *([f"and {more} more"] if more > 0 else []),
+            ]
         )
 
-    near = difflib.get_close_matches(
-        handle, [slug for slug, _ in named], n=3, cutoff=0.4
+    said = [f'no item starts with "{handle}"{_nearest(named, handle)}']
+    if re.match(r"\d+(-|$)", handle):
+        said.append(
+            "a number names an archived section and is never a handle: "
+            "`fileplan list --has number=N` finds the item carrying it, and a "
+            "sub-phase is reached as `show ITEM NAME`"
+        )
+    raise Refusal(said)
+
+
+def _nearest(named: Sequence[tuple[str, str]], handle: str) -> str:
+    """The near misses a refusal offers, best first, or nothing.
+
+    Each slug is scored on its prefix of the handle's length, so a short
+    typo is compared with what it was the start of, rather than losing to a
+    short unrelated slug. Ties go to the slug sharing more hyphen-words.
+    The cutoff keeps anything unrelated out: the tool never guesses.
+    """
+    words = set(handle.split("-"))
+    scored = sorted(
+        (
+            -difflib.SequenceMatcher(None, handle, slug[: len(handle)]).ratio(),
+            -len(words & set(slug.split("-"))),
+            slug,
+        )
+        for slug, _ in named
     )
-    nearest = f" (nearest: {', '.join(near)})" if near else ""
-    raise Refusal(f'no item starts with "{handle}"{nearest}')
+    near = [slug for ratio, _, slug in scored if -ratio >= NEAR][:3]
+    return f" (nearest: {', '.join(near)})" if near else ""

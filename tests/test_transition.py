@@ -286,7 +286,7 @@ def test_a_slug_taken_in_another_state_refuses_naming_the_file(
     taken.write_text(READY)
     with pytest.raises(Refusal) as refusal:
         execute(tree, tree.transitions["sprout"], name="A seedling", body="Prose.")
-    assert str(taken) in str(refusal.value)
+    assert str(taken.relative_to(tree.root)) in str(refusal.value)
     assert list((tree.root / "greenhouse").iterdir()) == []
 
 
@@ -617,8 +617,8 @@ def test_a_slug_held_in_two_states_refuses_naming_both_files(
     with pytest.raises(Refusal) as refusal:
         execute(tree, tree.transitions["transplant"], name="a-seedling")
     assert "is held by 2 files" in str(refusal.value)
-    assert str(source) in str(refusal.value)
-    assert str(blocker) in str(refusal.value)
+    assert str(source.relative_to(tree.root)) in str(refusal.value)
+    assert str(blocker.relative_to(tree.root)) in str(refusal.value)
     assert source.exists()
 
 
@@ -644,7 +644,11 @@ def test_an_ambiguous_prefix_refuses_naming_its_candidates(tree: Declaration) ->
     seedling(tree, "a-second-seedling", READY)
     with pytest.raises(Refusal) as refusal:
         execute(tree, tree.transitions["transplant"], name="a-se")
-    assert 'names 2 items — a-second-seedling, a-seedling' in str(refusal.value)
+    assert refusal.value.messages == [
+        '"a-se" names 2 items. Say more',
+        "a-second-seedling",
+        "a-seedling",
+    ]
     assert list((tree.root / "orchard").iterdir()) == []
 
 
@@ -688,7 +692,7 @@ def test_an_item_in_another_state_refuses_by_naming_the_state_it_is_in(
     stranded.write_text(READY)
     with pytest.raises(Refusal) as refusal:
         execute(tree, tree.transitions["transplant"], name="a-seedling")
-    assert f"{stranded} is in orchard" in str(refusal.value)
+    assert f"{stranded.relative_to(tree.root)} is in orchard" in str(refusal.value)
     assert "transplant moves an item out of greenhouse" in str(refusal.value)
     assert stranded.read_text() == READY
 
@@ -808,7 +812,7 @@ def test_an_anchor_in_another_state_refuses_naming_where_it_is(
             name="b-seedling",
             asked={"above": "c-seedling"},
         )
-    assert f"{stranger} is in greenhouse" in str(refusal.value)
+    assert f"{stranger.relative_to(tree.root)} is in greenhouse" in str(refusal.value)
     assert "a place beside it would be a place in orchard" in str(refusal.value)
     assert source.read_bytes() == before
     assert list(places(tree)) == ["a-seedling"]
@@ -1307,7 +1311,7 @@ def tended(tree: Declaration, name: str = "a-seedling") -> Path:
 
 
 def record(tree: Declaration, slug: str = "a-seedling") -> dict:
-    return claim.read(claim.path(tree.root, slug))
+    return claim.read(claim.path(tree.root, slug), tree.root)
 
 
 def someone_else(
@@ -1873,7 +1877,7 @@ def test_the_refusal_is_the_one_home_of_that_sentence(tree: Declaration) -> None
     with pytest.raises(Refusal) as refusal:
         execute(tree, tree.transitions["pot-on"], name="a-batch", asked={"name": "c9"})
     assert str(refusal.value) == subphase.unknown(
-        str(path), "c9", carried, "Cuttings"
+        str(path.relative_to(tree.root)), "c9", carried, "Cuttings"
     )
 
 
@@ -2444,7 +2448,7 @@ def test_a_check_names_the_file_it_would_write_and_reserves_nothing(
     )
     assert said.endswith(
         f'which stays in propagator, and would mark c1 "lined" and file '
-        f"{tree.root / 'greenhouse' / 'the-first.md'}"
+        "greenhouse/the-first.md"
     )
     assert not (tree.root / "greenhouse").exists()
     assert carrier.read_bytes() == before
@@ -2487,8 +2491,8 @@ def test_the_notice_names_both_files(tree: Declaration) -> None:
         announce=said.append,
     )
     assert said == [
-        f"{tree.root / 'greenhouse' / 'the-first.md'}: filed from c1 in "
-        f"{carrier}, which this run marked \"lined\""
+        "greenhouse/the-first.md: filed from c1 in "
+        f"{carrier.relative_to(tree.root)}, which this run marked \"lined\""
     ]
 
 
@@ -2909,9 +2913,9 @@ def test_a_carrier_still_holding_findings_refuses_naming_the_key_and_the_count(
     tool's own noun. Never the state's heading and never this repo's word for
     what the state is — both are the declaration's to choose."""
     held = carrying(tree, None, "rooted", None)
-    errors = dangle_errors(standing(tree), tree.transitions["fell"], [held])
+    errors = dangle_errors(standing(tree), tree.transitions["fell"], [held], tree.root)
     assert len(errors) == 1
-    assert str(held.path) in errors[0]
+    assert str(held.path.relative_to(tree.root)) in errors[0]
     assert "for-tree" in errors[0]
     # Off the sentence rather than off the whole line: `tmp_path` is named
     # after the test, and this test's name has both words in it.
@@ -2926,7 +2930,7 @@ def test_a_carrier_whose_every_finding_is_disposed_of_stops_nothing(
     """The other polarity, and the one a close-out reaches: the work is in the
     tree, so the record filed now has it."""
     held = carrying(tree, "rooted", "lined", "rooted")
-    assert dangle_errors(standing(tree), tree.transitions["fell"], [held]) == []
+    assert dangle_errors(standing(tree), tree.transitions["fell"], [held], tree.root) == []
 
 
 def test_an_archiving_verb_that_moves_the_item_refuses_nothing(
@@ -2937,7 +2941,7 @@ def test_an_archiving_verb_that_moves_the_item_refuses_nothing(
     it still resolves and nothing is orphaned. Abandoning a half-done section
     stays one run rather than one run per open finding."""
     held = carrying(tree, None, None)
-    assert dangle_errors(standing(tree), tree.transitions["grub-out"], [held]) == []
+    assert dangle_errors(standing(tree), tree.transitions["grub-out"], [held], tree.root) == []
 
 
 def test_a_dissolving_verb_that_archives_nothing_refuses_nothing(
@@ -2947,7 +2951,7 @@ def test_a_dissolving_verb_that_archives_nothing_refuses_nothing(
     so there is no record to be missing the work — the rule is over the pair,
     and one half of it is not the rule."""
     held = carrying(tree, None, None)
-    assert dangle_errors(standing(tree), tree.transitions["compost"], [held]) == []
+    assert dangle_errors(standing(tree), tree.transitions["compost"], [held], tree.root) == []
 
 
 def test_a_carrier_struck_for_something_else_is_not_read(
@@ -2956,7 +2960,7 @@ def test_a_carrier_struck_for_something_else_is_not_read(
     """Scope is the seal's own value, not the state: another tree's open batch
     says nothing about this one."""
     held = carrying(tree, None, None, owner="b-seedling")
-    assert dangle_errors(standing(tree), tree.transitions["fell"], [held]) == []
+    assert dangle_errors(standing(tree), tree.transitions["fell"], [held], tree.root) == []
 
 
 def test_the_pending_bullet_is_not_an_open_finding(tree: Declaration) -> None:
@@ -2964,7 +2968,7 @@ def test_the_pending_bullet_is_not_an_open_finding(tree: Declaration) -> None:
     calls a forgotten one loud and harmless, and a gate over it would reverse
     a reading already written down."""
     held = carrying(tree, "rooted", "rooted", pending=True)
-    assert dangle_errors(standing(tree), tree.transitions["fell"], [held]) == []
+    assert dangle_errors(standing(tree), tree.transitions["fell"], [held], tree.root) == []
 
 
 def test_an_item_whose_state_seals_nothing_is_never_read(
@@ -2974,12 +2978,12 @@ def test_an_item_whose_state_seals_nothing_is_never_read(
     `for-tree` in its head is carrying a fact nothing was declared to read
     here, and a state that seals but counts no bullets has none to be open."""
     orchards = carrying(tree, None, None, state="orchard")
-    assert dangle_errors(standing(tree), tree.transitions["fell"], [orchards]) == []
+    assert dangle_errors(standing(tree), tree.transitions["fell"], [orchards], tree.root) == []
 
     seals = dataclasses.replace(tree.states["propagator"], sub_phases=None)
     tree.states["sealing-nothing"] = seals
     held = carrying(tree, None, None, state="sealing-nothing")
-    assert dangle_errors(standing(tree), tree.transitions["fell"], [held]) == []
+    assert dangle_errors(standing(tree), tree.transitions["fell"], [held], tree.root) == []
 
 
 def test_an_open_carrier_refuses_the_run_and_writes_nothing(

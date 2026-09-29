@@ -199,6 +199,20 @@ class Refusal(Exception):
         return "; ".join(self.messages)
 
 
+def named(path: Path, root: Path) -> str:
+    """`path` as a message names it: relative to `root`, the way a row's
+    `path` is, and as given where it is not under `root`. Resolved on the
+    second try, because a `/tmp` can be a symlink.
+    See docs/method.md#the-listing
+    """
+    for under, above in ((path, root), (path.resolve(), root.resolve())):
+        try:
+            return str(under.relative_to(above))
+        except ValueError:
+            continue
+    return str(path)
+
+
 def collecting[T](
     read: Callable[[Path], T], sources: Iterable[Path], defects: list[str]
 ) -> Iterator[tuple[Path, T]]:
@@ -257,6 +271,10 @@ class State:
     #: nothing. The literal here rather than in `fileplan.numbered`, which
     #: imports this module; the two are pinned together.
     first_number: int = 1
+    #: The words the declared verbs mark into this state, or `None` where
+    #: none does. A second bold run holding any other word is not a mark.
+    #: Derived from the transitions at load. See docs/method.md#marking
+    marks: frozenset[str] | None = None
 
     def has(self, capability: str) -> bool:
         """Whether this state opted into `capability`."""
@@ -498,9 +516,7 @@ class Declaration:
         See docs/method.md#marking
         """
         return frozenset(
-            one.to
-            for one in self.transitions.values()
-            if one.marks is not None and one.to is not None
+            name for name, state in self.states.items() if state.marks
         )
 
     def state_at(self, path: str | os.PathLike[str]) -> State | None:
@@ -1433,8 +1449,9 @@ def _key_errors(
         if name in depends.DERIVED:
             errors.append(
                 f'{where} redeclares "{name}", which every listing derives '
-                "from the tree around the item. What an item waits on is read "
-                "off the key its state names, against what is still filed. "
+                "from the tree around the item. What an item waits on, and what "
+                "waits on it, is read off the key its state names, against what "
+                "is still filed. "
                 f"Drop {where}"
             )
             continue
@@ -1772,7 +1789,7 @@ def pointer_errors(document: Mapping[str, Any], root: Path) -> list[str]:
             headings[target] = heading_slugs(target)
         slugs = headings[target]
         if slugs is None:
-            errors.append(f"{where} names {target}, which does not exist")
+            errors.append(f"{where} names {relative}, which does not exist")
         elif anchor not in slugs:
             errors.append(
                 f'{where} names anchor "#{anchor}", which is not a heading in {relative}'
@@ -1786,7 +1803,7 @@ def _archive_pointer_errors(document: Mapping[str, Any], root: Path) -> list[str
     if not isinstance(states, dict):
         return []
     return [
-        f"states.{name}.{ARCHIVE} names {root / entry[ARCHIVE]}, "
+        f"states.{name}.{ARCHIVE} names {entry[ARCHIVE]}, "
         "which does not exist. A register that cannot read the archive would "
         "mint a number some closed item already holds. Create the file, empty "
         "if this repo has closed nothing"
@@ -1814,14 +1831,14 @@ def _template_pointer_errors(document: Mapping[str, Any], root: Path) -> list[st
         target = root / entry["doc"]
         if not target.is_file():
             errors.append(
-                f"{TEMPLATES}.{name}.doc names {target}, which does not "
+                f"{TEMPLATES}.{name}.doc names {entry['doc']}, which does not "
                 "exist. A seeded item's body is copied from the template, so "
                 "a seeded item would have nothing in it. Name a file the tree "
                 "holds"
             )
         elif not target.read_bytes().strip():
             errors.append(
-                f"{TEMPLATES}.{name}.doc names {target}, which is empty. A "
+                f"{TEMPLATES}.{name}.doc names {entry['doc']}, which is empty. A "
                 "template is copied into a new item's body verbatim, and an "
                 "item with no body is intent somebody pays to re-derive. "
                 "Write the prose a seeded item starts from"
@@ -1936,7 +1953,9 @@ def load(path: str | os.PathLike[str] | None = None) -> Declaration:
     return Declaration(
         source=source,
         root=root,
-        states=_states(document.get("states", {})),
+        states=_states(
+            document.get("states", {}), document.get("transitions", {})
+        ),
         keys=_keys(document.get("keys", {})),
         transitions=_transitions(document.get("transitions", {})),
         templates=_templates(document.get(TEMPLATES, {})),
@@ -1968,7 +1987,13 @@ def _discover(path: str | os.PathLike[str] | None) -> Path:
     )
 
 
-def _states(entries: Mapping[str, Any]) -> dict[str, State]:
+def _states(
+    entries: Mapping[str, Any], transitions: Mapping[str, Any]
+) -> dict[str, State]:
+    marks: dict[str, set[str]] = {}
+    for entry in transitions.values():
+        if "marks" in entry and "to" in entry:
+            marks.setdefault(entry["to"], set()).add(entry["marks"])
     return {
         name: State(
             name=name,
@@ -1984,6 +2009,7 @@ def _states(entries: Mapping[str, Any]) -> dict[str, State]:
             opened_for=entry.get(OPENED_FOR),
             archive=entry.get(ARCHIVE),
             first_number=entry.get(FIRST_NUMBER, 1),
+            marks=frozenset(marks[name]) if name in marks else None,
         )
         for name, entry in entries.items()
     }

@@ -31,6 +31,7 @@ from fileplan.declaration import (
     Refusal,
     State,
     Transition,
+    named,
 )
 from fileplan.lock import run_lock
 
@@ -96,7 +97,10 @@ def value_errors(
 
 
 def dangle_errors(
-    owner: item.Item, transition: Transition, others: Sequence[item.Item]
+    owner: item.Item,
+    transition: Transition,
+    others: Sequence[item.Item],
+    root: Path,
 ) -> list[str]:
     """Every way `owner` is not something `transition` may take away yet.
 
@@ -115,14 +119,17 @@ def dangle_errors(
         if str(one.get(key, "")) != owner.slug:
             continue
         carried = subphase.bullets(
-            one.body, one.state.sub_phases, pending=one.state.pending
+            one.body,
+            one.state.sub_phases,
+            pending=one.state.pending,
+            marks=one.state.marks,
         )
         # The pending bullet is dropped. See docs/method.md#carrier
         undisposed = [bullet for bullet in carried if bullet.mark is None]
         if not undisposed:
             continue
         errors.append(
-            f"{one.path} names it in {key}, and {len(undisposed)} of its "
+            f"{named(one.path, root)} names it in {key}, and {len(undisposed)} of its "
             f"{len(carried)} {subphase.NAME} carry no mark. A record filed "
             "now would not have that work in it, and taking the item away "
             f"leaves nothing for {key} to name"
@@ -140,8 +147,9 @@ def unmarked_errors(owner: item.Item, transition: Transition) -> list[str]:
     heading = owner.state.sub_phases
     if not (transition.archives and transition.dissolves) or not heading:
         return []
-    carried = subphase.bullets(owner.body, heading, pending=None)
-    if not (open_ := subphase.unmarked(owner.body, heading)):
+    marks = owner.state.marks
+    carried = subphase.bullets(owner.body, heading, pending=None, marks=marks)
+    if not (open_ := subphase.unmarked(owner.body, heading, marks)):
         return []
     return [
         f"it carries {len(open_)} of {len(carried)} {subphase.NAME} with "
@@ -236,6 +244,7 @@ def _unheard(said: str) -> None:
 
 def _would(
     opening: str,
+    root: Path,
     *,
     entering: Mapping[str, Any] | None = None,
     dropping: Sequence[str] | None = None,
@@ -268,13 +277,13 @@ def _would(
     if writing is not None:
         said.append(writing)
     if filing is not None:
-        said.append(f"file {_readable(filing.path)}")
+        said.append(f"file {named(filing.path, root)}")
     if archiving is not None:
         said.append(
-            f"file `{archiving.heading}` in {_readable(archiving.path)}"
+            f"file `{archiving.heading}` in {named(archiving.path, root)}"
         )
     if clearing is not None and clearing.edits:
-        where = ", ".join(str(_readable(one.path)) for one in clearing.edits)
+        where = ", ".join(named(one.path, root) for one in clearing.edits)
         said.append(f"clear the edge to it in {where}")
     return f"{opening}, and would {_listed(said)}" if said else opening
 
@@ -318,7 +327,7 @@ def _create(running: _Running) -> Path | str:
     stem = item.slug(running.name)
     held = _held_by(running.declaration, stem)
     if held is not None:
-        raise Refusal(_taken(stem, held))
+        raise Refusal(_taken(stem, held, running.declaration.root))
 
     # Both before the reservation below, which is itself a write.
     claiming = _claiming(running, slug=stem)
@@ -330,7 +339,8 @@ def _create(running: _Running) -> Path | str:
     if running.check:
         # The seam: the reservation below is a write, partway through this arm.
         return _would(
-            f"{running.transition.name} would file {_readable(destination)}",
+            f"{running.transition.name} would file {named(destination, running.declaration.root)}",
+            running.declaration.root,
             entering=entering,
             claiming=claiming,
             # From what this arm resolved, like every other clause.
@@ -345,13 +355,13 @@ def _create(running: _Running) -> Path | str:
         with destination.open("x"):
             pass
     except FileExistsError:
-        raise Refusal(_taken(stem, destination)) from None
+        raise Refusal(_taken(stem, destination, running.declaration.root)) from None
 
     head = {"title": running.name}
     head.update({key: running.given[key] for key in running.transition.sets if key in running.given})
     head.update(entering)
     _place(running, destination, head, _prose(body))
-    _apply(claiming)
+    _apply(claiming, running.declaration.root)
     return destination
 
 
@@ -373,7 +383,12 @@ def _cursor_errors(running: _Running, original: item.Item, body: str) -> list[st
     if writes:
         head[state.cursor] = running.given[state.cursor]
     return subphase.cursor_errors(
-        head, body, key=state.cursor, heading=state.sub_phases, written=writes
+        head,
+        body,
+        key=state.cursor,
+        heading=state.sub_phases,
+        written=writes,
+        marks=state.marks,
     )
 
 
@@ -388,7 +403,7 @@ def _reading(running: _Running) -> tuple[item.Item, _Claiming]:
     if original.state.name != running.transition.source:
         # Tree-wide, so this can say where the item actually is.
         raise Refusal(
-            f"{original.path} is in {original.state.name}, and "
+            f"{named(original.path, running.declaration.root)} is in {original.state.name}, and "
             f"{running.transition.name} moves an item out of {running.transition.source}"
         )
     return original, _claiming(running, slug=original.slug)
@@ -401,6 +416,7 @@ def _move(running: _Running) -> Path | str:
     # Head keys, then body, then the cursor check: each is what the next is
     # graded against. None of the three writes anything.
     entering = _entering(running, moving=original.slug)
+    _unread_errors(running, original, entering)
     # Once, before the two arms that need it: the body arm and the filing arm.
     disposing = _disposing(running, original)
     body, notice, writing = _bulleting(
@@ -415,7 +431,9 @@ def _move(running: _Running) -> Path | str:
     errors += _cursor_errors(running, original, body)
     if errors:
         # Nothing written yet, and nothing will be.
-        raise Refusal([f"{source} cannot {running.transition.name}", *errors])
+        raise Refusal(
+            [f"{named(source, running.declaration.root)} cannot {running.transition.name}", *errors]
+        )
 
     # Resolved beside the rebuild, so the check can only name what this run
     # really takes off. The capability keys shed below are not among these.
@@ -432,17 +450,18 @@ def _move(running: _Running) -> Path | str:
     moving = destination.resolve() != source.resolve()
     if moving and destination.exists():
         # The backstop: a duplicate appearing between the read and the write.
-        raise Refusal(_taken(source.stem, destination))
+        raise Refusal(_taken(source.stem, destination, running.declaration.root))
 
     _place(running, destination, head, body)
     if running.check:
         # The seam, inside `_place`: the head is the last thing a run refuses over.
         return _would(
-            f"{running.transition.name} would move {_readable(source)} to "
-            f"{_readable(destination)}"
+            f"{running.transition.name} would move {named(source, running.declaration.root)} to "
+            f"{named(destination, running.declaration.root)}"
             if moving
-            else f"{running.transition.name} would rewrite {_readable(source)}, "
-            f"which stays in {running.transition.to}",
+            else f"{running.transition.name} would rewrite "
+            f"{named(source, running.declaration.root)}, which stays in {running.transition.to}",
+            running.declaration.root,
             entering=entering,
             dropping=dropped,
             claiming=claiming,
@@ -452,7 +471,7 @@ def _move(running: _Running) -> Path | str:
         )
     if moving:
         source.unlink()
-    _apply(claiming)
+    _apply(claiming, running.declaration.root)
     _file(archiving)
     _file_it(running, filing)
     if archiving is not None:
@@ -572,6 +591,34 @@ _TEMPLATE = "template"
 _FILING = ("title", "body")
 
 
+def _unread_errors(
+    running: _Running, original: item.Item, entering: Mapping[str, Any]
+) -> None:
+    """Refuse a mint or a mark into a body carrying a bullet the reader passes
+    over, naming its line.
+
+    A mint hands out the highest ordinal it can read plus one, so a hidden
+    bullet's name comes out twice, and a mark cannot reach it at all. The
+    listing reports the same bullets through `read.unread`.
+    See docs/method.md#sub-phases
+    """
+    if running.transition.marks is None and not running.transition.mints:
+        return
+    state = running.declaration.states[running.transition.to]
+    if passed := read.unread(state, original.body, entering):
+        where = named(original.path, running.declaration.root)
+        raise Refusal(
+            [
+                f"{where} carries a bullet the reader passes over, so this run "
+                "would write beside a sub-phase nothing counts",
+                *(
+                    f"{where}:{original.opening + one.line}: {one.reason}"
+                    for one in passed
+                ),
+            ]
+        )
+
+
 def _disposing(running: _Running, original: item.Item) -> subphase.Bullet | None:
     """The bullet this run disposes of, or `None` where it disposes of none.
 
@@ -591,23 +638,28 @@ def _disposing(running: _Running, original: item.Item) -> subphase.Bullet | None
     # A `marks` into a state that is not `bulleted` refuses back in plan.toml.
     assert state.sub_phases is not None
     wanted = running.asked.get(_MARKING)
-    carried = subphase.bullets(original.body, state.sub_phases, pending=state.pending)
+    carried = subphase.bullets(
+        original.body, state.sub_phases, pending=state.pending, marks=state.marks
+    )
     found = next((one for one in carried if one.name == wanted), None)
     if found is None:
         # One sentence, one home: `show ITEM NAME` refuses in these words too.
         raise Refusal(
-            subphase.unknown(str(original.path), wanted, carried, state.sub_phases)
+            subphase.unknown(
+                named(original.path, running.declaration.root), wanted, carried, state.sub_phases
+            )
         )
     if found.mark is not None:
         raise Refusal(
-            f"{original.path} has already disposed of {found.name}: it is "
+            f"{named(original.path, running.declaration.root)} has already disposed of "
+            f"{found.name}: it is "
             f'marked "{found.mark}". A finding is disposed of once, so '
             "there is one answer on the bullet rather than a history "
             "nobody can read an answer out of"
         )
     if found.unmarkable:
         raise Refusal(
-            f"{original.path} cannot mark {found.name}: it carries "
+            f"{named(original.path, running.declaration.root)} cannot mark {found.name}: it carries "
             f'"{found.rest}" after its bold run, and a mark is read only '
             "immediately after that run — so the word would be written "
             "where nothing reads it. Move the prose inside the bold run, "
@@ -641,7 +693,9 @@ def _bulleting(
         assert state.sub_phases is not None
         note = running.asked.get(_NOTE)
         if note is not None and (wrong := subphase.note_errors(note)):
-            raise Refusal([f"{original.path} cannot take that note", *wrong])
+            raise Refusal(
+                [f"{named(original.path, running.declaration.root)} cannot take that note", *wrong]
+            )
         return (
             subphase.mark(
                 original.body,
@@ -666,15 +720,10 @@ def _bulleting(
         and state.pending is not None
         and state.sub_phase_name is not None
     )
-    # What the form names, the item has to carry: a silently empty prefix would
-    # name this run's bullet differently from the last one's.
-    if absent := [
-        field
-        for field in subphase.fields(state.sub_phase_name)
-        if field != subphase.SLOT and field not in entering
-    ]:
+    # What the form names, the item has to carry.
+    if absent := subphase.absent(state.sub_phase_name, entering):
         raise Refusal(
-            f"{original.path} carries no {', '.join(absent)}, and "
+            f"{named(original.path, running.declaration.root)} carries no {', '.join(absent)}, and "
             f"{state.name} names its bullets \"{state.sub_phase_name}\" — "
             "so this run has nothing to name one from"
         )
@@ -682,7 +731,9 @@ def _bulleting(
     title = running.asked.get(_MINTING[0])
     last = bool(running.asked.get(_MINTING[1]))
     if title is not None and (wrong := subphase.title_errors(title)):
-        raise Refusal([f"{original.path} cannot take that sub-phase", *wrong])
+        raise Refusal(
+            [f"{named(original.path, running.declaration.root)} cannot take that sub-phase", *wrong]
+        )
 
     notice = None
     if (
@@ -757,7 +808,8 @@ def _archiving(
     number = original.get(numbered.KEY)
     if not isinstance(number, int) or isinstance(number, bool):
         raise Refusal(
-            f"{original.path} carries no {numbered.KEY}, and {running.transition.name} "
+            f"{named(original.path, running.declaration.root)} carries no {numbered.KEY}, and "
+            f"{running.transition.name} "
             f"files it in {where} as `## <number>. <title>`. An entry with no "
             "number is the record the register cannot read — fix the item's "
             f"{numbered.KEY} before filing it"
@@ -832,7 +884,7 @@ def _filing(
     title = running.asked.get(_FILING[0]) or disposing.title
     if title is None or not title.strip():
         raise Refusal(
-            f"{original.path}'s {disposing.name} says only its name, so "
+            f"{named(original.path, running.declaration.root)}'s {disposing.name} says only its name, so "
             f"{running.transition.name} has nothing to call the item it files. Give "
             "the bullet a title, or name one with --title TEXT"
         )
@@ -843,7 +895,7 @@ def _filing(
     stem = item.slug(title)
     held = _held_by(running.declaration, stem)
     if held is not None:
-        raise Refusal(_taken(stem, held))
+        raise Refusal(_taken(stem, held, running.declaration.root))
 
     state = running.declaration.states[running.transition.files["state"]]
     path = running.declaration.root / state.path / f"{stem}{item.SUFFIX}"
@@ -858,8 +910,8 @@ def _filing(
         },
         body=_prose(str(body)),
         notice=(
-            f"{_readable(path)}: filed from {disposing.name} in "
-            f"{_readable(moved)}, which this run marked "
+            f"{named(path, running.declaration.root)}: filed from {disposing.name} in "
+            f"{named(moved, running.declaration.root)}, which this run marked "
             f'"{running.transition.marks}"'
         ),
         state=state,
@@ -881,7 +933,9 @@ def _file_it(running: _Running, filing: _Filing | None) -> None:
         with filing.path.open("x"):
             pass
     except FileExistsError:
-        raise Refusal(_taken(filing.path.stem, filing.path)) from None
+        raise Refusal(
+            _taken(filing.path.stem, filing.path, running.declaration.root)
+        ) from None
     _place(running, filing.path, filing.head, filing.body, state=filing.state)
 
 
@@ -910,7 +964,8 @@ def _survivor(running: _Running, original: item.Item) -> item.Item | None:
     into = read.resolve(running.declaration, str(running.asked.get(_INTO) or ""))
     if into.path == original.path:
         raise Refusal(
-            f"{into.path} is the item {running.transition.name} is dissolving, and an "
+            f"{named(into.path, running.declaration.root)} is the item {running.transition.name} is "
+            "dissolving, and an "
             "item cannot continue as itself"
         )
     return into
@@ -953,7 +1008,7 @@ def _clearing(
             head[key] = kept
         edits.append(item.Item(path=one.path, state=one.state, head=head, body=one.body))
         # Computed from what the head actually got, not from the branch taken.
-        where = _readable(one.path)
+        where = named(one.path, running.declaration.root)
         if survivor is not None and survivor.slug in depends.edges(head, key):
             notices.append(
                 f'{where}: pointed "{original.slug}" at "{survivor.slug}" '
@@ -979,18 +1034,6 @@ def _clear(clearing: _Clearing) -> None:
         item.write(one)
 
 
-def _readable(path: Path) -> Path | str:
-    """`path` as a notice names it: relative to the cwd where it can be.
-
-    The CLI has its own copy for what it returns; this is for what a notice
-    says.
-    """
-    try:
-        return path.relative_to(Path.cwd())
-    except ValueError:
-        return path
-
-
 def _dissolve(running: _Running) -> Path | str:
     """Run a verb that takes the item's file away, and clear the edges to it.
 
@@ -1013,15 +1056,20 @@ def _dissolve(running: _Running) -> Path | str:
 
     errors = offer_errors(original.head, running.transition)
     # A second `read.items` beside `_clearing`'s, left as two deliberately.
-    errors += dangle_errors(original, running.transition, read.items(running.declaration))
+    errors += dangle_errors(
+        original, running.transition, read.items(running.declaration), running.declaration.root
+    )
     errors += unmarked_errors(original, running.transition)
     if errors:
-        raise Refusal([f"{source} cannot {running.transition.name}", *errors])
+        raise Refusal(
+            [f"{named(source, running.declaration.root)} cannot {running.transition.name}", *errors]
+        )
 
     if running.check:
         # The seam.
         return _would(
-            f"{running.transition.name} would take {_readable(source)} away",
+            f"{running.transition.name} would take {named(source, running.declaration.root)} away",
+            running.declaration.root,
             claiming=claiming,
             archiving=archiving,
             clearing=clearing,
@@ -1030,13 +1078,15 @@ def _dissolve(running: _Running) -> Path | str:
     source.unlink()
     _file(archiving)
     _clear(clearing)
-    _apply(claiming)
+    _apply(claiming, running.declaration.root)
 
     if archiving is not None:
         running.say(archiving.notice)
     for said in clearing.notices:
         running.say(said)
-    running.say(f"{_readable(source)} is gone: {running.transition.name} took it away")
+    running.say(
+        f"{named(source, running.declaration.root)} is gone: {running.transition.name} took it away"
+    )
 
     # "The file it wrote": the archive, or the path it removed where it files none.
     return archiving.path if archiving is not None else source
@@ -1051,7 +1101,8 @@ def _anchor(declaration: Declaration, state: State, handle: str) -> str:
     one = read.resolve(declaration, handle)
     if one.state.name != state.name:
         raise Refusal(
-            f"{one.path} is in {one.state.name}, and a place beside it would "
+            f"{named(one.path, declaration.root)} is in {one.state.name}, and a "
+            "place beside it would "
             f"be a place in {state.name}"
         )
     return one.slug
@@ -1091,7 +1142,7 @@ def _claiming(running: _Running, *, slug: str) -> _Claiming:
         return _Claiming()
 
     path = claim.path(running.declaration.root, slug)
-    held = claim.read(path) if path.exists() else None
+    held = claim.read(path, running.declaration.root) if path.exists() else None
     who = claim.identity(running.declaration)
 
     if held is not None and not claim.owns(held, who):
@@ -1121,7 +1172,7 @@ def _claiming(running: _Running, *, slug: str) -> _Claiming:
     return _Claiming(path=path, take=claim.record(who, taken=_now()))
 
 
-def _apply(claiming: _Claiming) -> None:
+def _apply(claiming: _Claiming, root: Path) -> None:
     """The claim's half of the effect, after the item has landed.
 
     The item file is written first and the record second: a crash between them
@@ -1132,7 +1183,7 @@ def _apply(claiming: _Claiming) -> None:
     if claiming.take is not None:
         claim.write(claiming.path, claiming.take)
     elif claiming.free:
-        claim.remove(claiming.path)
+        claim.remove(claiming.path, root)
 
 
 def _now() -> dt.datetime:
@@ -1161,13 +1212,13 @@ def release(declaration: Declaration, handle: str) -> tuple[str, dict[str, Any]]
                 f"{one.slug} holds no claim, so there is nothing to free"
             )
 
-        held = claim.read(path)
+        held = claim.read(path, declaration.root)
         who = claim.identity(declaration)
         status = claim.alive(held, who)
         if not claim.owns(held, who) and status != claim.DEAD:
             raise Refusal(_unfreeable(one.slug, held, status, path))
 
-        claim.remove(path)
+        claim.remove(path, declaration.root)
         return one.slug, held
 
 
@@ -1205,7 +1256,7 @@ def _place(
     state = state or running.declaration.states[running.transition.to]
     errors = item.head_errors(head, running.declaration, state)
     if errors:
-        raise Refusal([f"{path} cannot be written", *errors])
+        raise Refusal([f"{named(path, running.declaration.root)} cannot be written", *errors])
     if running.check:
         return
     item.write(item.Item(path=path, state=state, head=head, body=body))
@@ -1235,10 +1286,11 @@ def _held_by(declaration: Declaration, stem: str) -> Path | None:
     return None
 
 
-def _taken(stem: str, held: Path) -> str:
+def _taken(stem: str, held: Path, root: Path) -> str:
     return (
-        f'the slug "{stem}" is already held by {held}. A slug is unique across '
-        "every state, because it is the one handle an item answers to"
+        f'the slug "{stem}" is already held by {named(held, root)}. A slug is '
+        "unique across every state, because it is the one handle an item "
+        "answers to"
     )
 
 

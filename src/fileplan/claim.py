@@ -30,7 +30,13 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from fileplan import item
-from fileplan.declaration import CLAIM_KEYS, Declaration, Refusal, collecting
+from fileplan.declaration import (
+    CLAIM_KEYS,
+    Declaration,
+    Refusal,
+    collecting,
+    named,
+)
 from fileplan.lock import LOCAL_DIR
 
 #: The capability a state opts into. The seam that takes, holds and drops a
@@ -265,27 +271,30 @@ def errors(record: Mapping[str, Any]) -> list[str]:
 # --------------------------------------------------------------------------
 
 
-def read(path: str | os.PathLike[str]) -> dict[str, Any]:
+def read(path: str | os.PathLike[str], root: Path) -> dict[str, Any]:
     """One claim record, parsed, or raise `Refusal`. Not graded — that is
-    `errors`, which is pure and reports every defect at once."""
+    `errors`, which is pure and reports every defect at once. `root` is what
+    a refusal names the record from."""
     path = Path(path)
     try:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
-        raise Refusal(f"{path} is not UTF-8, so it is not a claim record") from None
+        raise Refusal(
+            f"{named(path, root)} is not UTF-8, so it is not a claim record"
+        ) from None
     except OSError as exc:
-        raise Refusal(f"{path} could not be read: {exc.strerror}") from None
+        raise Refusal(f"{named(path, root)} could not be read: {exc.strerror}") from None
 
     try:
         return item.flat(text, noun="claim record")
     except Refusal as refusal:
-        raise Refusal([_not_usable(path), *refusal.messages]) from None
+        raise Refusal([_not_usable(path, root), *refusal.messages]) from None
 
 
-def _not_usable(path: Path) -> str:
+def _not_usable(path: Path, root: Path) -> str:
     """`fileplan.item.read`'s wording over the other kind of file: the line a
     defect is reported under, so one bad record names itself once."""
-    return f"{path} is not a usable claim record"
+    return f"{named(path, root)} is not a usable claim record"
 
 
 def write(path: str | os.PathLike[str], record: Mapping[str, Any]) -> None:
@@ -319,9 +328,10 @@ def holders(declaration: Declaration) -> dict[str, dict[str, str]]:
     found: dict[str, dict[str, str]] = {}
     defects: list[str] = []
     paths = sorted(directory.glob(f"*{SUFFIX}"), key=lambda one: one.stem)
-    for path, held in collecting(read, paths, defects):
+    root = Path(declaration.root)
+    for path, held in collecting(lambda one: read(one, root), paths, defects):
         if problems := errors(held):
-            defects += [_not_usable(path), *problems]
+            defects += [_not_usable(path, root), *problems]
             continue
         found[path.stem] = fields(held, alive(held, who))
     if defects:
@@ -329,8 +339,9 @@ def holders(declaration: Declaration) -> dict[str, dict[str, str]]:
     return found
 
 
-def remove(path: str | os.PathLike[str]) -> None:
-    """Free the claim at `path`. The other edge, beside `read`.
+def remove(path: str | os.PathLike[str], root: Path) -> None:
+    """Free the claim at `path`. The other edge, beside `read`, and named from
+    `root` the same way.
 
     A record that is not there is already gone: a claim dropped twice leaves
     the same tree either way, and a missing record means unclaimed everywhere
@@ -340,4 +351,6 @@ def remove(path: str | os.PathLike[str]) -> None:
     try:
         path.unlink(missing_ok=True)
     except OSError as exc:
-        raise Refusal(f"{path} could not be removed: {exc.strerror}") from None
+        raise Refusal(
+            f"{named(path, root)} could not be removed: {exc.strerror}"
+        ) from None

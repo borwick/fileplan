@@ -41,6 +41,7 @@ be grading a copy.
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -48,8 +49,10 @@ from pathlib import Path
 import click
 import pytest
 
+from conftest import FIXTURE_FILES
+
 from fileplan import read
-from fileplan.cli import HALVES, LIST_HELP, _build_group, contract
+from fileplan.cli import HALVES, LIST_HELP, _build_group, contract, main
 from fileplan.declaration import heading_slugs, load
 
 REPO = Path(__file__).resolve().parent.parent
@@ -1291,3 +1294,62 @@ def test_the_archive_pointer_control_catches_a_fabricated_one() -> None:
     assert any(state.archive is None for state in states.values()), (
         "every state archives, so the filter above is never exercised"
     )
+
+
+# --------------------------------------------------------------------------
+# The listing's JSON envelope, held against what `list --json` emits
+# --------------------------------------------------------------------------
+
+#: How the account of the envelope opens in `docs/method.md#the-listing`.
+ENVELOPE = "**The envelope is one object, and these are its fields.**"
+
+
+def _envelope_account(text: str) -> str:
+    """The envelope's paragraph and the list under it, and nothing else, so
+    a field named elsewhere in the section cannot stand in for it."""
+    blocks = text.split("\n\n")
+    (at,) = [n for n, block in enumerate(blocks) if block.startswith(ENVELOPE)]
+    return blocks[at] + blocks[at + 1]
+
+
+def _unaccounted(keys: list[str], text: str) -> list[str]:
+    account = _envelope_account(text)
+    return [key for key in keys if f"`{key}`" not in account]
+
+
+def _emitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> list[str]:
+    """Every top-level key `list --json` emits over the fixture declaration,
+    which turns on every conditional array: it claims, carries a cursor,
+    reads dependencies, numbers, marks, counts sub-phases and closes a key."""
+    fixtures = REPO / "tests" / "fixtures"
+    for name in FIXTURE_FILES:
+        (tmp_path / name).write_text((fixtures / name).read_text())
+    for state in load(tmp_path / "plan.toml").states.values():
+        (tmp_path / state.path).mkdir(parents=True)
+    monkeypatch.setenv("FILEPLAN_PLAN_TOML", str(tmp_path / "plan.toml"))
+    monkeypatch.chdir(tmp_path)
+    capsys.readouterr()
+    assert main(["list", "--json"]) == 0
+    return list(json.loads(capsys.readouterr().out))
+
+
+def test_every_field_of_the_listing_envelope_is_written_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Section 23: scripts a consumer's sessions wrote crashed on the
+    envelope twice, reading `items`, which is the `kind`, as the array. The
+    account is in one place now, and this holds it against the code."""
+    emitted = _emitted(tmp_path, monkeypatch, capsys)
+    assert len(emitted) > 6, "the fixture turned on no arrays, so this proves little"
+    assert _unaccounted(emitted, (REPO / METHOD).read_text()) == []
+
+
+def test_the_envelope_guard_catches_a_field_the_account_leaves_out() -> None:
+    """The mutation check, kept: a field dropped from the account is found,
+    so the guard cannot pass by reading the whole section."""
+    text = (REPO / METHOD).read_text()
+    assert "`undeclared`" in _envelope_account(text)
+    dropped = text.replace("* `undeclared` is present wherever", "* It is present wherever")
+    assert _unaccounted(["undeclared"], dropped) == ["undeclared"]

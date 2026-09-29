@@ -42,6 +42,7 @@ from fileplan.declaration import (
     State,
     Template,
     load,
+    named,
     pointer_errors,
     shape_errors,
 )
@@ -751,7 +752,7 @@ def test_a_dependency_key_naming_an_undeclared_key_refuses_by_name() -> None:
     )
 
 
-@pytest.mark.parametrize("name", ["position", "title", "blocked-by"])
+@pytest.mark.parametrize("name", ["position", "title", "blocked-by", "blocks"])
 def test_a_dependency_key_naming_a_key_the_tool_owns_refuses(name: str) -> None:
     """Through `_key_reference_error` and with no message of its own: a
     capability-given key, an intrinsic one and a derived one are already
@@ -780,8 +781,9 @@ def test_declaring_the_blocked_by_field_as_a_key_refuses_by_name() -> None:
         error for error in shape_errors(document) if f"keys.{depends.BLOCKED} " in error
     ] == [
         f'keys.{depends.BLOCKED} redeclares "{depends.BLOCKED}", which every '
-        "listing derives from the tree around the item. What an item waits on "
-        "is read off the key its state names, against what is still filed. "
+        "listing derives from the tree around the item. What an item waits on, "
+        "and what waits on it, is read off the key its state names, against "
+        "what is still filed. "
         f"Drop keys.{depends.BLOCKED}"
     ]
 
@@ -802,7 +804,7 @@ def test_a_declaration_reading_dependencies_carries_the_derived_field() -> None:
     """The fixture's `orchard` names one, so `--has blocked-by` reaches it."""
     declaration = load(FIXTURES / "plan.toml")
     assert declaration.has_dependencies
-    assert depends.BLOCKED in declaration.carried
+    assert {depends.BLOCKED, depends.BLOCKS} <= set(declaration.carried)
 
 
 def test_a_declaration_with_no_dependencies_carries_neither(
@@ -819,7 +821,7 @@ def test_a_declaration_with_no_dependencies_carries_neither(
         (tmp_path / name).write_text((FIXTURES / name).read_text())
     declaration = load(source)
     assert not declaration.has_dependencies
-    assert depends.BLOCKED not in declaration.carried
+    assert not {depends.BLOCKED, depends.BLOCKS} & set(declaration.carried)
 
 
 # --------------------------------------------------------------------------
@@ -863,7 +865,7 @@ def test_an_owner_naming_an_undeclared_key_refuses_by_name() -> None:
     )
 
 
-@pytest.mark.parametrize("name", ["position", "title", "blocked-by", "stale-days"])
+@pytest.mark.parametrize("name", ["position", "title", "blocked-by", "blocks", "stale-days"])
 def test_an_owner_naming_a_key_the_tool_owns_refuses(name: str) -> None:
     """Through `_key_reference_error` and with no message of its own: an
     intrinsic, a capability-given and a derived name are already things a
@@ -2137,7 +2139,7 @@ def test_an_archive_the_repo_does_not_ship_refuses_at_every_invocation(
         for one in pointer_errors(document, tmp_path)
         if one.startswith("states.orchard.archive")
     ]
-    assert str(tmp_path / "nowhere.md") in error
+    assert "names nowhere.md, which" in error
     assert "which does not exist" in error
 
 
@@ -2584,8 +2586,7 @@ def test_a_template_naming_a_document_this_tree_does_not_ship_refuses() -> None:
     document = with_template(doc="nowhere.md")
     (error,) = pointer_errors(document, FIXTURES)
     assert error.startswith(
-        f"templates.hardwood.doc names {FIXTURES / 'nowhere.md'}, "
-        "which does not exist"
+        "templates.hardwood.doc names nowhere.md, which does not exist"
     )
 
 
@@ -2599,7 +2600,7 @@ def test_an_empty_template_document_refuses(tmp_path: Path) -> None:
     document = with_template(doc="blank.md")
     (error,) = pointer_errors(document, tmp_path)
     assert error.startswith(
-        f"templates.hardwood.doc names {tmp_path / 'blank.md'}, which is empty"
+        "templates.hardwood.doc names blank.md, which is empty"
     )
 
 
@@ -2688,11 +2689,32 @@ def test_a_valid_pointer_has_no_errors() -> None:
     assert pointer_errors(well_formed(), FIXTURES) == []
 
 
+def test_a_path_outside_the_root_is_named_as_given(tmp_path: Path) -> None:
+    """A message names a file the way a row does, from the folder holding
+    plan.toml. A path outside it has no such form, so it is named as given.
+    See docs/method.md#the-listing"""
+    root = tmp_path / "tree"
+    assert named(root / "greenhouse" / "x.md", root) == "greenhouse/x.md"
+    assert named(Path("/elsewhere/x.md"), root) == "/elsewhere/x.md"
+
+
+def test_a_root_reached_through_a_symlink_still_names_from_the_root(
+    tmp_path: Path,
+) -> None:
+    """The case `state_at` resolves for: a `/tmp` that is itself a symlink."""
+    real = tmp_path / "real"
+    (real / "greenhouse").mkdir(parents=True)
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    assert named(real / "greenhouse" / "x.md", link) == "greenhouse/x.md"
+    assert named(link / "greenhouse" / "x.md", real) == "greenhouse/x.md"
+
+
 def test_a_missing_doc_file_refuses_naming_the_path_tried() -> None:
     document = well_formed()
     document["keys"]["cultivar"]["doc"] = "nowhere.md#cultivar"
     (error,) = pointer_errors(document, FIXTURES)
-    assert error == f"keys.cultivar.doc names {FIXTURES / 'nowhere.md'}, which does not exist"
+    assert error == "keys.cultivar.doc names nowhere.md, which does not exist"
 
 
 def test_a_missing_heading_refuses_naming_the_anchor() -> None:
@@ -2759,8 +2781,7 @@ def test_a_policy_naming_a_document_this_tree_does_not_ship_refuses() -> None:
     document["transitions"]["sprout"]["policy"] = "nowhere.md#sprout"
     (error,) = pointer_errors(document, FIXTURES)
     assert error == (
-        f"transitions.sprout.policy names {FIXTURES / 'nowhere.md'}, "
-        "which does not exist"
+        "transitions.sprout.policy names nowhere.md, which does not exist"
     )
 
 
