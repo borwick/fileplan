@@ -236,8 +236,9 @@ register plan: floor 1, highest 1, in docs/archive.md
 
 The file moved, and two columns appeared that nobody typed. The `plan` state
 is declared `queued` and `numbered`, so an item arriving in `plan` is given a
-place in the order and a number of its own. The order is what makes the listing
-answer *what is next* rather than *what exists*.
+place and a number of its own. The `plan` state also declares
+`sort = "position"`, so the listing reads `plan` in place order. The order is
+what makes the listing answer *what is next* rather than *what exists*.
 
 `work` leaves the item where it is and stamps a key into its head:
 
@@ -368,6 +369,9 @@ interpreter.
 
 **`/do-next` is a worked example of composing runs.** It reads the tree, works
 out which of three arms a session is in, and hands every move to `/fileplan`.
+It acts on the head item, or on the one a section number, a sub-phase name or
+a slug prefix names, and it stops rather than guessing when the name matches
+nothing.
 `/do-next` expects a workflow that has grown sub-phases and a cursor over them,
 so it has nothing to act on in the loop `init` writes. Read `/do-next` once
 your declaration has more than that loop in it. A repo that already has a

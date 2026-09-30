@@ -1,6 +1,6 @@
 ---
 name: do-next
-description: Run this repo's cycle on the head item in `fileplan list` — write its sub-phases if it has none, plan its next sub-phase if it does, or implement the pending plan if one is saved. Use when invoked as /do-next.
+description: Run this repo's cycle on one item in `plan` — the head item, or the one a section number, sub-phase name or slug prefix names. Write its sub-phases if it has none, plan its next sub-phase if it does, or implement the pending plan if one is saved. Use when invoked as /do-next.
 disable-model-invocation: true
 ---
 
@@ -11,36 +11,57 @@ are in is a fact about the working tree, not something to ask about.
 
 What is here is the **composition**: which arm, what to ask, when to stop.
 Every transition an arm reaches runs through
-[`/fileplan`](../fileplan/SKILL.md), which asks the tool what the run takes.
-`/fileplan` also points at what to read (`docs/method.md#the-interpreter`).
-Nothing below spells an invocation or an option. A second copy of either would
-rot the first time the declaration changed.
+[`/fileplan`](../fileplan/SKILL.md), which asks the tool what the run takes
+and what to read. Nothing below spells an invocation or an option. A second
+copy of either would rot the first time the declaration changed.
+
+Every command below is spelled `fileplan`, as installed. fileplan's own
+source tree runs it as `uv run fileplan`.
+
+## Which item
+
+Invoked as `/do-next [WHICH]`. The argument is optional, and it says which
+item in `plan` the session is for:
+
+| What you were given | How to find the item |
+|---|---|
+| Nothing | the head item: the lowest position in `fileplan list --state plan` |
+| Anything else: a slug prefix, a number such as `20`, or a sub-phase name such as `20-3` | `fileplan show WHICH` |
+
+`show` finds a live section by its number, and a sub-phase name by its
+section and its bullet. Either way the row it prints names the slug, and
+every verb after it takes the slug, because a verb that writes never takes a
+number.
+
+If nothing matches, or the item found is not in `plan`, **stop and say so**.
+Never fall back to the head item: a session on the wrong section is worse than
+a session that asks.
 
 ## Which arm
 
-Run both of these first, always:
+Run this too, always:
 
 ```bash
-uv run fileplan list          # the head item is the one at the lowest position
 ls local/plans/ 2>/dev/null   # a pending plan, if any
 ```
 
 | What you find | Arm |
 |---|---|
-| A file in `local/plans/` | **C — implement it** |
-| The head item shows `sub-phases 0` | **A — mint the section's sub-phases** |
+| A plan in `local/plans/` for the chosen item | **C — implement it** |
+| The chosen item shows `sub-phases 0` | **A — mint the section's sub-phases** |
 | Otherwise | **B — plan the next sub-phase** |
 
-Both facts come out of the two commands above. `sub-phases` is counted off the
-item's body by the tool, so nothing here reads the body to find out where the
-session is, and the cursor is not a thing to move by hand.
+The facts come out of the listing and the `ls`. `sub-phases` is counted off
+the item's body by the tool, so nothing here reads the body to find out where
+the session is, and the cursor is not a thing to move by hand.
 
-If `local/plans/` holds a plan for an item that is no longer the head, stop and
-say so — that is a tree in a state nobody intended.
+If `local/plans/` holds a plan for some other item, stop and say so. Either
+the tree is in a state nobody intended, or another section's plan is waiting,
+and which to take up is the user's call.
 
 ## Which transition
 
-Ask the tool. `uv run fileplan` prints every declared transition and, under
+Ask the tool. `fileplan` prints every declared transition and, under
 `Declares`, the halves each one declares — **that is what you select on, never
 the transition's name.**
 
@@ -95,9 +116,9 @@ The item has a decision, a done line, and nothing minted into its body yet.
 ## Arm B — plan the next sub-phase
 
 Take the sub-phase `fileplan list` names in **`next-sub-phase`**. It comes
-with `sub-phases` and `sub-phases-left`.
-`docs/procedures.md#planning-and-working-a-sub-phase` says how to read the
-three together. Read that section before planning anything.
+with `sub-phases` and `sub-phases-left`. The procedure the `claims`
+transition's `Running it` block names says how to read the three together.
+Read that section before planning anything.
 
 One reading of the three is this skill's own, because it picks the arm. A
 `next-sub-phase` of `pending` means the sub-phases themselves are what is
@@ -169,7 +190,6 @@ the key to `/fileplan` for symmetry. The tool already guards every write below
 this point, computing each refusal before the first write.
 
 `do-next` is a **session**, not a transition, and the declaration can hold no
-transition for a session. A `policy =` reaches a section of
-`docs/procedures.md`, so a session nothing can point at would orphan a
-section. What a single run needs lives in the procedures, and what composes
+transition for a session. A `policy =` reaches a section of the workflow's
+procedures, so a session nothing can point at would orphan a section. What a single run needs lives in the procedures, and what composes
 several runs lives here.

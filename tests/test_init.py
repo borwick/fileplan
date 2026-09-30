@@ -150,6 +150,15 @@ def test_the_starter_declares_no_capability_commented_out_in_place(
     assert COMMENTED_OUT.match(WAS_COMMENTED_OUT)
 
 
+def test_the_starter_names_the_tool_table_in_prose(tmp_path: Path) -> None:
+    """26-1: a consumer learns `[fileplan]` exists from the file they edit,
+    and the guard above keeps it a sentence rather than a line to uncomment.
+    The starter is copied verbatim, so a live line would need a version
+    literal nothing under `src/` spells."""
+    assert main(["init", str(tmp_path)]) == 0
+    assert "[fileplan]" in (tmp_path / PLAN_TOML_NAME).read_text()
+
+
 def test_a_mutation_of_the_shipped_example_is_caught_by_the_loader(
     tmp_path: Path,
 ) -> None:

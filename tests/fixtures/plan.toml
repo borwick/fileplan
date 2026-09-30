@@ -20,6 +20,7 @@ doc  = "method.md#greenhouse"
 path              = "orchard"
 doc               = "method.md#orchard"
 capabilities      = ["queued", "numbered", "bulleted"]
+sort              = "position"
 archive           = "orchard-archive.md"
 sub-phases        = "Steps"
 sub-phase-pending = "**unpruned — Say what the rest of the training is.**"
@@ -141,7 +142,7 @@ from     = "greenhouse"
 to       = "orchard"
 requires = ["cultivar"]
 refuses  = { cultivar = ["hybrid"] }
-sets     = ["rootstock", "pest"]
+sets     = ["rootstock", "pest", "after"]
 drops    = ["tag"]
 
 [transitions.sprout]
@@ -319,6 +320,31 @@ help      = "Join a seedling to another and let it continue as that one."
 from      = "greenhouse"
 dissolves = true
 absorbs   = true
+carries   = true
+
+# The renaming half, in the three states whose references differ: `orchard`
+# is what `after` names, `propagator` is what `batch` and `for-tree` sit
+# beside, and `potting-bench` is claimed, so the claim has a slug to follow.
+[transitions.relabel]
+doc      = "method.md#relabel"
+help     = "Give a tree a new label, and move it to the slug that makes."
+from     = "orchard"
+to       = "orchard"
+retitles = true
+
+[transitions.relabel-batch]
+doc      = "method.md#relabel-batch"
+help     = "Give a batch a new label."
+from     = "propagator"
+to       = "propagator"
+retitles = true
+
+[transitions.relabel-pot]
+doc      = "method.md#relabel-pot"
+help     = "Give a seedling on the bench a new label."
+from     = "potting-bench"
+to       = "potting-bench"
+retitles = true
 
 # Who a session is. The control in test_claim.py asserts no real agent's
 # variable appears under src/, which means nothing unless these differ.

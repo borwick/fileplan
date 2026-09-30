@@ -471,16 +471,17 @@ def test_a_draft_in_a_head_is_a_citation_the_guard_grades() -> None:
             assert (match.group(1), None) in citations(text)
 
 
-def test_the_citation_guard_reads_every_skill_this_repo_ships() -> None:
-    """The mutation check on the skills being in the haystack at all. A skill
-    is nothing but pointers at the documents it tells a session to read, so a
-    dead one sends the session to a document that is not there — and no other
-    reader grades them: they are not `doc =` fields and not `src/`. Every
-    skill, not a sample: one left out is one whose pointers nothing checks."""
-    shipped = {str(path.relative_to(REPO)) for path in (REPO / SKILLS).rglob("*.md")}
+def test_the_citation_guard_reads_every_skill_and_no_skill_cites_a_document() -> None:
+    """The skills are in the haystack, every one, and none of them cites a
+    document under `docs/`. The wheel carries the skills and not `docs/`, so a
+    citation there sends an installed session to a file it does not have.
+    What travels with the tool is `--help` and `--json`, and the `Reading`
+    and `Running it` blocks name the consumer's own documents."""
+    shipped = {path for path in (REPO / SKILLS).rglob("*.md")}
     assert shipped, "this repo ships no skills, so this guard proves nothing"
-    read = {where for where, _, _ in _cited() if where in shipped}
-    assert read == shipped
+    assert shipped <= set(_haystack())
+    names = {str(path.relative_to(REPO)) for path in shipped}
+    assert [cited for cited in _cited() if cited[0] in names] == []
 
 
 def test_every_skill_this_repo_ships_opens_with_a_name_and_a_description() -> None:
@@ -797,6 +798,13 @@ def _epilogs() -> dict[str, str]:
     }
 
 
+def _verb(name: str) -> str:
+    """A verb's name as a whole word, where a hyphen is part of the word: the
+    slug boundary `transition._mentions` reads prose with. 27-1 forced it,
+    because `retitle-idea`'s contract names itself and so held `retitle`."""
+    return rf"(?<![\w-]){re.escape(name)}(?![\w-])"
+
+
 def _named(epilog: str) -> str:
     """An epilog with its citations taken out, the way the no-per-verb-code
     control strips them: a `doc =` pointer is a pointer at prose, and the
@@ -817,7 +825,7 @@ def test_no_transitions_contract_names_another_verb_this_repo_declares() -> None
     for name, epilog in epilogs.items():
         others = set(epilogs) - {name}
         for verb in others:
-            assert not re.search(rf"\b{re.escape(verb)}\b", _named(epilog)), (
+            assert not re.search(_verb(verb), _named(epilog)), (
                 name,
                 verb,
             )
@@ -829,10 +837,10 @@ def test_the_contract_control_catches_a_verb_written_into_an_epilog() -> None:
     above would pass forever by looking at nothing."""
     epilogs = _epilogs()
     verb = next(iter(epilogs))
-    assert re.search(rf"\b{re.escape(verb)}\b", _named(f"Run {verb} first"))
-    assert not re.search(
-        rf"\b{re.escape(verb)}\b", _named(f"docs/method.md#{verb}")
-    )
+    assert re.search(_verb(verb), _named(f"Run {verb} first"))
+    assert not re.search(_verb(verb), _named(f"docs/method.md#{verb}"))
+    # A hyphen joins a name, so `retitle` is not named by `retitle-idea`.
+    assert not re.search(_verb("retitle"), "Reading retitle-idea")
 
 
 # --------------------------------------------------------------------------

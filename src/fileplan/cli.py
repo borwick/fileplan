@@ -163,10 +163,26 @@ SEEDING, TEMPLATE = "from", "template"
 #: See docs/method.md#marking
 BULLET, MARKING, MARKING_METAVAR = "bullet", "name", "NAME"
 
+#: The second positional a verb that `retitles` takes: the item's new title.
+#: The parameter, which is also the key the executor reads it back under, and
+#: the metavar. A positional, so it cannot collide with the `--title` a mint or
+#: a filing takes. See docs/method.md#retitle
+RETITLING, RETITLE_METAVAR = "new_title", "TITLE"
+
 #: The option a verb that `marks` takes beside that positional: why the finding
 #: was disposed of this way. Optional, and on every marking verb. It needs the
 #: `sets` collision check. See docs/method.md#marking
 NOTE = "note"
+
+#: The flag a verb that `claims` takes: hold this claim beside the others this
+#: session already holds. The flag and the key the executor reads it back
+#: under. It needs the `sets` collision check.
+#: See docs/method.md#the-claimed-state
+KEEP_CLAIMS, KEEPING = "keep-claims", "keep_claims"
+
+#: The flag a verb that `carries` takes, and the key the executor reads it
+#: back under. See docs/method.md#merge
+CARRY = "carry"
 
 #: The flag every generated transition carries: run the verb's whole path and
 #: stop at the seam where nothing has been written. A declared key of the same
@@ -186,6 +202,8 @@ HALVES = (
     "archives",
     "dissolves",
     "absorbs",
+    "carries",
+    "retitles",
 )
 
 #: What the JSON envelope calls this listing, and the noun the text frame
@@ -341,7 +359,7 @@ def _build_group(declaration: Declaration) -> click.Group:
                     f"`fileplan {ctx.invoked_subcommand} --json`"
                 )
             return
-        _contents(declaration, as_json)
+        _contents(declaration, ctx.command, as_json)
 
     # The read's own flag, from the one function that spells it, rather than a
     # second spelling of the same option on the group.
@@ -378,16 +396,19 @@ def _build_group(declaration: Declaration) -> click.Group:
 def _command(declaration: Declaration, transition: Transition) -> click.Command:
     creating = transition.source is None
     params: list[click.Parameter] = [
-        click.Argument(
-            ["name"],
-            # One positional either way, and never variadic.
-            metavar="TITLE" if creating else "ITEM",
-        )
+        # One positional, variadic only where the verb absorbs: several
+        # items can continue as one survivor. See docs/method.md#merge
+        click.Argument(["name"], nargs=-1, required=True, metavar="ITEM...")
+        if transition.absorbs
+        else click.Argument(["name"], metavar="TITLE" if creating else "ITEM")
     ]
     if transition.marks is not None:
         # After the item's, so the usage line reads ITEM NAME.
         params.append(click.Argument([BULLET], metavar=MARKING_METAVAR))
         params.append(_note_option(transition))
+    if transition.retitles:
+        # After the item's too: ITEM TITLE, as `idea TITLE` takes one.
+        params.append(click.Argument([RETITLING], metavar=RETITLE_METAVAR))
     if creating:
         if "body" in transition.sets:
             raise Refusal(
@@ -420,9 +441,13 @@ def _command(declaration: Declaration, transition: Transition) -> click.Command:
     absorbing = transition.absorbs
     if absorbing:
         params.append(_into_option())
+    if transition.carries:
+        params.append(_carry_option())
     seeding = transition.seeds
     if seeding:
         params.append(_from_option(declaration, transition))
+    if transition.claims:
+        params.append(_keep_claims_option(transition))
     params.append(_check_option(transition))
 
     def run(**given: Any) -> None:
@@ -437,13 +462,19 @@ def _command(declaration: Declaration, transition: Transition) -> click.Command:
         if transition.marks is not None:
             asked[MARKING] = given.pop(BULLET)
             asked[NOTE] = given.pop(NOTE)
+        if transition.retitles:
+            asked[RETITLING] = given.pop(RETITLING)
         if recording:
             asked[RECORD] = _prose(given.pop(RECORD))
         if absorbing:
             asked[INTO] = given.pop(INTO)
+        if transition.carries:
+            asked[CARRY] = given.pop(CARRY)
         if seeding:
             # Before the `values=` comprehension below sweeps what is left.
             asked[TEMPLATE] = given.pop(TEMPLATE)
+        if transition.claims:
+            asked[KEEPING] = given.pop(KEEPING)
         wrote = execute(
             declaration,
             transition,
@@ -458,7 +489,12 @@ def _command(declaration: Declaration, transition: Transition) -> click.Command:
             check=check,
         )
         # A check hands back its sentence rather than a path.
-        click.echo(wrote if isinstance(wrote, str) else named(wrote, declaration.root))
+        # An absorbing verb hands back a tuple, one removed path per line.
+        if isinstance(wrote, str):
+            click.echo(wrote)
+        else:
+            for path in wrote if isinstance(wrote, tuple) else (wrote,):
+                click.echo(named(path, declaration.root))
 
     return click.Command(
         name=transition.name,
@@ -518,6 +554,9 @@ def contract(declaration: Declaration, transition: Transition) -> dict[str, Any]
     shape a consumer writes against must not depend on which verbs a
     declaration happens to declare. That is the listing's corpus-independence
     rule, one level up. The text form goes on omitting an empty block.
+    The blocks only. A row's `options` are added by `_contents`, off the built
+    command, because this runs before the command exists: `_epilog` renders
+    from it while the command is being built.
     See docs/method.md#the-contract
     """
     return {
@@ -530,7 +569,9 @@ def contract(declaration: Declaration, transition: Transition) -> dict[str, Any]
         "from": transition.source,
         "to": transition.to,
         "requires": list(transition.requires),
-        "refuses": {key: list(values) for key, values in transition.refuses.items()},
+        # `true` where the key is refused on presence, as `plan.toml` spells it.
+        "refuses": {key: list(values) for key, values in transition.refuses.items()}
+        | {key: True for key in transition.refuses_any},
         "drops": list(transition.drops),
         # Not in the epilog, which names each set key in `Reading` instead.
         # Here because it is what the verb's options are, and a consumer
@@ -565,9 +606,9 @@ def _epilog(declaration: Declaration, transition: Transition) -> str:
     if row["requires"]:
         blocks.append(("Requires", row["requires"]))
     if refused := [
-        f'{key} = "{value}"'
+        f"{key} (any value)" if values is True else f'{key} = "{value}"'
         for key, values in row["refuses"].items()
-        for value in values
+        for value in ([values] if values is True else values)
     ]:
         blocks.append(("Refuses", refused))
     # After what the verb reads off the head, and not in `Reading`: a dropped
@@ -750,6 +791,29 @@ def _note_option(transition: Transition) -> click.Option:
     )
 
 
+def _keep_claims_option(transition: Transition) -> click.Option:
+    """Take this claim though this session holds a claim on another item.
+
+    A flag, and it needs the `sets` collision check. Without it the run
+    refuses and names each held item. See docs/method.md#the-claimed-state
+    """
+    if KEEP_CLAIMS in transition.sets:
+        raise Refusal(
+            f'transitions.{transition.name}.sets names "{KEEP_CLAIMS}", and a '
+            f"transition that claims an item already takes --{KEEP_CLAIMS} to "
+            "hold a second claim on purpose. One option cannot mean two things"
+        )
+    return click.Option(
+        [f"--{KEEP_CLAIMS}", KEEPING],
+        is_flag=True,
+        help=(
+            "Take this claim even though this session already holds a claim "
+            "on another item. Without it, the run refuses and names the held "
+            "items."
+        ),
+    )
+
+
 def _into_option() -> click.Option:
     """The survivor a verb that absorbs points every edge at.
 
@@ -764,6 +828,23 @@ def _into_option() -> click.Option:
         help=(
             "The item the work continues as. Every dependency naming the "
             "item being absorbed is pointed at ITEM instead."
+        ),
+    )
+
+
+def _carry_option() -> click.Option:
+    """Carry each absorbed body into the survivor, rather than lose it.
+
+    A flag, so the default run is a plain merge, and it needs no `sets`
+    collision check for `--into`'s reason: a dissolving verb sets nothing.
+    See docs/method.md#merge
+    """
+    return click.Option(
+        [f"--{CARRY}", CARRY],
+        is_flag=True,
+        help=(
+            "Append each absorbed item's body to ITEM, under a heading "
+            "holding its title."
         ),
     )
 
@@ -959,6 +1040,15 @@ Use `~` to find a word in a value, ignoring case: `--has 'title~review'`.
 A key with declared values refuses it, since those compare by order.
 
 Use `--lacks KEY` to find every item not carrying KEY.
+
+States come in the order plan.toml declares them. Items within a state come
+by the key the state's `sort` names, then slug, or by slug where it names
+none. An item without that key comes last, and the listing names it.
+
+Use `--sort KEY` to order the items within each state by KEY instead of any
+declared sort, and `--sort -KEY` for descending. A repeat breaks the ties of the one before it,
+and the slug breaks the last. KEY compares the way `--has` does. An item
+without KEY comes last, and the listing names it.
 """
 
 #: What the claim adds to the read's help, appended where a state opts in, so
@@ -1023,6 +1113,16 @@ def _read_params(declaration: Declaration) -> list[click.Parameter]:
             multiple=True,
             help="Only items not carrying KEY.",
         ),
+        click.Option(
+            ["--sort", "sort"],
+            metavar="[-]KEY",
+            multiple=True,
+            help=(
+                "Order the items within each state by KEY, and `-KEY` for "
+                "descending. A repeat breaks the ties of the one before it. "
+                "KEY is one --has names."
+            ),
+        ),
         _json_option(),
     ]
 
@@ -1073,15 +1173,47 @@ def _read_run(
         wanted = given.pop(bulleting) if bulleting else None
         # A disposition's offer takes no filters either: a bullet is not an item.
         tests = [] if naming or marking else _tests(declaration, given)
+        sorts = _sorts(declaration, given.pop("sort", ()))
+        # `--sort` replaces every state's declared sort, and a read naming one
+        # item or offering bullets has nothing to sort.
+        by_state = (
+            {}
+            if naming or marking
+            else {
+                name: sorts or [read.sorting(declaration, state.sort)]
+                for name, state in declaration.states.items()
+                if sorts or state.sort
+            }
+        )
         found = read.listing(declaration, offering=offering, marking=marking)
         if handle is not None:
-            slug = read.chosen(
-                [(row[read.SLUG], row[read.PATH]) for row in found.rows], handle
-            )
+            named = [(row[read.SLUG], row[read.PATH]) for row in found.rows]
+            carrying = {
+                str(row[numbered.KEY]): row[read.SLUG]
+                for row in found.rows
+                if row.get(numbered.KEY) is not None
+            }
+            # Only `show` reads a number; a verb that writes stays on slugs.
+            hit = read.numbered_handle(named, handle, carrying)
+            if hit is None:
+                slug = read.chosen(named, handle, carrying)
+            else:
+                slug, sub_phase = hit
+                if sub_phase is not None and wanted not in (None, sub_phase):
+                    raise Refusal(
+                        f"{handle} and {wanted} name two sub-phases, and show "
+                        "prints one: say which"
+                    )
+                wanted = sub_phase or wanted
             found = dataclasses.replace(
                 found, rows=[row for row in found.rows if row[read.SLUG] == slug]
             )
         chosen = read.matching(found.rows, tests)
+        unsorted: list[dict[str, Any]] = []
+        if by_state:
+            chosen, unsorted = read.ordered(
+                chosen, by_state, tuple(declaration.states)
+            )
         # The one narrowing that changes what a row is: after the handle's, and
         # before the renderers.
         reading, verbatim = kind, None
@@ -1115,6 +1247,13 @@ def _read_run(
         # And the undeclared report, wherever any key declares its values.
         if any(key.values for key in declaration.keys.values()):
             beside["undeclared"] = found.undeclared
+        # And the unfound report, wherever any verb files an item.
+        if declaration.files:
+            beside["unfound"] = found.unfound
+        # And the unsorted report, whenever the read sorts anything: the shape
+        # follows the invocation and the declaration, never the corpus.
+        if by_state:
+            beside["unsorted"] = unsorted
         if as_json:
             # stderr stays silent: the counts live in the envelope instead.
             click.echo(
@@ -1173,6 +1312,14 @@ def _read_run(
                 f"do not declare ({one[read.PATH]})",
                 err=True,
             )
+        for one in found.unfound:
+            click.echo(_unfound(one), err=True)
+        for one in unsorted:
+            click.echo(
+                f"unsorted: {one[read.SLUG]} carries no {one[read.KEY]}, so it "
+                f"comes last ({one[read.PATH]})",
+                err=True,
+            )
 
     return run
 
@@ -1198,6 +1345,17 @@ def _unknown(one: Mapping[str, Any]) -> str:
         f"unknown dependency: {one[depends.SLUG]} names "
         f'"{one[depends.NAMES]}" in {one[depends.KEY]}, and no item carries '
         "that slug"
+    )
+
+
+def _unfound(one: Mapping[str, Any]) -> str:
+    """One filed item naming a bullet its carrier no longer has.
+
+    See docs/method.md#carried
+    """
+    return (
+        f"unfound finding: {one[read.PATH]} carries \"{one[read.VALUE]}\" from "
+        f"{one[read.CARRIER]}, and no bullet there is named {one[read.VALUE]}"
     )
 
 
@@ -1318,6 +1476,22 @@ def _tests(declaration: Declaration, given: dict[str, Any]) -> list[read.Test]:
     return tests
 
 
+def _sorts(declaration: Declaration, given: tuple[str, ...]) -> list[read.Sort]:
+    """Every `--sort`, parsed before the walk, or refuse.
+
+    A key sorted twice refuses, as a repeated `--state` does: keeping one
+    would drop the other without saying so.
+    """
+    sorts = [read.sorting(declaration, one) for one in given]
+    keys = [one.key for one in sorts]
+    if twice := next((key for key in keys if keys.count(key) > 1), None):
+        raise Refusal(
+            f"--sort names {twice} {keys.count(twice)} times, and a key sorts "
+            "one way. Keeping one would drop the others without saying so"
+        )
+    return sorts
+
+
 # --------------------------------------------------------------------------
 # The read named by the verb: one subcommand per transition that moves
 # --------------------------------------------------------------------------
@@ -1326,8 +1500,8 @@ NEXT_HELP = """What {name} could take right now, as readable records or as JSON.
 
 An item is offered when it sits in {name}'s `from` state, satisfies
 everything {name} requires and refuses, and no other session holds it. This
-read takes the listing's filters, so an offer narrows the same way a listing
-does.
+read takes the listing's filters and its sort, so an offer narrows and orders
+the same way a listing does.
 
 Some defects are in the **tree** rather than in one item: a gap in the
 register, or an exhausted gap in the order. Those block every item alike, and
@@ -1525,7 +1699,9 @@ SHOW_HELP = """The listing's row for one item.
 
 ITEM is a unique prefix of a slug, resolved over the whole tree. A full slug
 always names itself. An ambiguous prefix refuses, naming its candidates, and
-a prefix matching nothing refuses, naming its near misses.
+a prefix matching nothing refuses, naming its near misses. Where no slug
+starts with it, ITEM may be a live section's number, such as 28, or a
+sub-phase name, such as 28-1, which shows that bullet.
 
 Show prints the **row**, not the body. `cat` the path the row names to read
 the prose. The row carries what the file does not: who holds the item, what
@@ -1570,7 +1746,9 @@ def _show_command(declaration: Declaration) -> click.Command:
 # --------------------------------------------------------------------------
 
 
-def _contents(declaration: Declaration, as_json: bool = False) -> None:
+def _contents(
+    declaration: Declaration, group: click.Command, as_json: bool = False
+) -> None:
     """What this workflow is: its states, then its verbs, in declared order.
 
     Both are read off `plan.toml`. A third block indexes the halves, so a
@@ -1584,17 +1762,40 @@ def _contents(declaration: Declaration, as_json: bool = False) -> None:
     The states ride in the envelope, as the text prints them — what a
     declaration says about its own states is in the consumer's `plan.toml`
     already, and what only the tool knows is what it derives from it.
+
+    Each row's `options`, and the tool's own `commands`, are read off the
+    built `group` rather than the declaration: the same parameters `--help`
+    renders, so the two cannot drift.
     See docs/method.md#the-interpreter and docs/method.md#the-contract
     """
     if as_json:
+        assert isinstance(group, click.Group)
         click.echo(
             render.document(
                 DECLARATION_KIND,
-                [contract(declaration, one) for one in declaration.transitions.values()],
+                [
+                    contract(declaration, one)
+                    | {"options": _options(group.commands[one.name])}
+                    for one in declaration.transitions.values()
+                ],
                 source=str(declaration.source),
                 states=[
                     {"name": state.name, "path": state.path}
                     for state in declaration.states.values()
+                ],
+                keys=[
+                    {
+                        "name": key.name,
+                        "help": key.help,
+                        "doc": key.doc,
+                        "values": None if key.values is None else list(key.values),
+                    }
+                    for key in declaration.keys.values()
+                ],
+                commands=[
+                    _described(command)
+                    for name, command in group.commands.items()
+                    if name not in declaration.transitions
                 ],
             ),
             nl=False,
@@ -1635,6 +1836,40 @@ def _contents(declaration: Declaration, as_json: bool = False) -> None:
         f"Run `fileplan {SHOW_COMMAND} ITEM` to see one item's row.\n"
         "Run `fileplan COMMAND --help` to see what COMMAND takes."
     )
+
+
+def _described(command: click.Command) -> dict[str, Any]:
+    """One of the tool's own commands as the contract gives it, nested the
+    way click holds it: `next`'s offers each take their own options."""
+    return {
+        "name": command.name,
+        "help": command.short_help or command.help,
+        "options": _options(command),
+        "commands": [
+            _described(one) for one in command.commands.values()
+        ]
+        if isinstance(command, click.Group)
+        else [],
+    }
+
+
+def _options(command: click.Command) -> list[dict[str, Any]]:
+    """Every option `command --help` prints, `--help` itself aside, as data."""
+    context = click.Context(command)
+    return [
+        {
+            "name": param.opts[0],
+            "takes": None if param.is_flag else param.make_metavar(context),
+            "required": param.required,
+            "multiple": param.multiple,
+            "values": list(param.type.choices)
+            if isinstance(param.type, click.Choice)
+            else None,
+            "help": param.help,
+        }
+        for param in command.params
+        if isinstance(param, click.Option)
+    ]
 
 
 def _refuse(refusal: Refusal) -> int:

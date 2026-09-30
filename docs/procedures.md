@@ -124,6 +124,33 @@ cannot get wrong. Nothing auto-releases, and ending the session is its own run
 ([release](method.md#release)). Afterwards, `rm` the saved plan: it is spent,
 and its content is in the item body and the commit now.
 
+## when a handle changes
+
+A handle is what other items point at: an item's slug, or a bullet's name.
+When one changes, everything pointing at it has to follow.
+
+**After renaming an item**, the run has already repointed every head that
+named the old slug, and it names each file it edited. What is left is prose.
+
+1. Read each line saying a file's prose still names the old slug. Edit the
+   prose where the mention is a reference. Leave it where it is history.
+2. Rename any saved plan for the item, `local/plans/<old-slug>--N.md`, to
+   the new slug.
+3. Stage the new path, the removed old path and each edited file. A run never
+   stages anything ([the head](method.md#the-head)).
+
+**Splitting a bullet** is a hand edit, because it is rare and each item
+pointing at the bullet has to be decided one by one.
+
+1. Edit the bullet into two, and give **both** halves new names: `f12`
+   becomes `f12a` and `f12b`. A letter after the number is safe, because the
+   mint still counts `f12a` as 12 ([sub-phases](method.md#sub-phases)).
+2. Run `fileplan list`. No bullet is named `f12` any more, so every item whose
+   `carried` names it is an `unfound` line. Keeping `f12` as one half would
+   leave those items quietly pointing at whichever half kept the name.
+3. Point each one at the half it meant, by editing its `carried`.
+4. Stop when the listing prints no `unfound` line.
+
 ## closing a section out
 
 Closing out is the **last** sub-phase's job, whether or not that sub-phase is
@@ -162,6 +189,7 @@ What the run costs, so the next close-out does not rediscover it:
   whether a section is closeable. A forgotten sub-phase blocks the close
   rather than passing it;
 - the claim is freed by the run itself, so nothing is released afterwards;
-- `git add` the deleted path to stage the removal; there is no `git rm`;
+- `git add` the deleted path to stage the removal; there is no `git rm`,
+  and a run never stages anything ([the head](method.md#the-head));
 - if the entry needs fixing afterwards, edit the archive document. The item
   body is gone from the tree, and only git has it.

@@ -136,6 +136,26 @@ def test_the_wheel_carries_the_interpreter_skills(wheel: Path) -> None:
     assert shipped <= carried
 
 
+def test_every_link_in_a_shipped_skill_resolves_inside_the_wheel(wheel: Path) -> None:
+    """A skill copied out of an install has the wheel and nothing else, so a
+    relative link has to land on a wheel member, and a `docs/` document is
+    never one. Graded against the built wheel's file list, not the source
+    tree, because the source tree has `docs/` and would pass either way."""
+    archive = zipfile.ZipFile(wheel)
+    carried = set(archive.namelist())
+    skills = [name for name in carried if name.endswith("/SKILL.md")]
+    assert skills, "the wheel carries no skills, so this guard proves nothing"
+    linked = 0
+    for name in skills:
+        text = archive.read(name).decode()
+        assert not re.search(r"docs/[A-Za-z0-9_./-]+\.md", text), name
+        for target in re.findall(r"\]\(([^)#:]+)(?:#[^)]*)?\)", text):
+            linked += 1
+            resolved = os.path.normpath(f"{os.path.dirname(name)}/{target}")
+            assert resolved in carried, (name, target)
+    assert linked, "no skill links anywhere, so the resolution half proves nothing"
+
+
 def test_the_skills_flag_prints_a_directory_that_holds_them(
     wheel: Path, tmp_path: Path
 ) -> None:

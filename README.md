@@ -134,6 +134,7 @@ path = "inbox"
 [states.plan]
 path         = "plan"
 capabilities = ["queued", "numbered"]
+sort         = "position"
 
 [keys.status]
 help   = "How the work is going."

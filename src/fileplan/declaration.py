@@ -15,6 +15,7 @@ import os
 import re
 import tomllib
 from dataclasses import dataclass
+from importlib.metadata import version
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Callable, Iterable, Iterator, Mapping
@@ -41,8 +42,16 @@ TABLES = (*ANCHORED, TEMPLATES)
 #: The one table that is a single entry rather than a table of them.
 IDENTITY = "identity"
 
+#: The single-entry table naming the oldest tool a plan.toml was written for,
+#: and its one field. Graded before every other load error, so an old tool
+#: says "upgrade" rather than blaming the declaration.
+#: See docs/method.md#the-version
+TOOL = "fileplan"
+MINIMUM = "minimum"
+DOTTED_RE = re.compile(r"^\d+(\.\d+)*$")
+
 #: Every table a plan.toml may hold, for the refusal that names an unknown one.
-KNOWN_TABLES = (*TABLES, IDENTITY)
+KNOWN_TABLES = (*TABLES, IDENTITY, TOOL)
 
 #: The capability whose key is minted from a corpus, and the state field naming
 #: where the corpus's closed half lives. Spelled here as well as in
@@ -58,6 +67,10 @@ FIRST_NUMBER = "first-number"
 #: The state field naming which declared key holds the item a carrier was
 #: opened for. See docs/method.md#the-dangle-check
 OPENED_FOR = "opened-for"
+
+#: The state field naming the order its items list in when no `--sort` is
+#: given: one key, in `--sort`'s spelling. See docs/method.md#the-listing
+SORT = "sort"
 
 #: The key field saying a head value is several.
 #: See docs/method.md#list-valued
@@ -82,6 +95,7 @@ STATE_FIELDS = frozenset(
         subphase.PENDING,
         subphase.FORM,
         OPENED_FOR,
+        SORT,
     }
 )
 KEY_FIELDS = frozenset({"doc", "help", "values", LIST_VALUED})
@@ -107,7 +121,9 @@ TRANSITION_FIELDS = frozenset(
         "archives",
         "dissolves",
         "absorbs",
+        "carries",
         "seeds",
+        "retitles",
     }
 )
 IDENTITY_FIELDS = frozenset({"doc", "pid"})
@@ -271,6 +287,10 @@ class State:
     #: nothing. The literal here rather than in `fileplan.numbered`, which
     #: imports this module; the two are pinned together.
     first_number: int = 1
+    #: The key this state's items list by when no `--sort` is given, in
+    #: `--sort`'s spelling, or `None` where they list by slug. A `queued` state
+    #: must declare one. See docs/method.md#the-listing
+    sort: str | None = None
     #: The words the declared verbs mark into this state, or `None` where
     #: none does. A second bold run holding any other word is not a mark.
     #: Derived from the transitions at load. See docs/method.md#marking
@@ -352,6 +372,10 @@ class Transition:
     #: `{}` default, and a tuple default would fail the first time something
     #: built a Transition without one.
     refuses: Mapping[str, tuple[str, ...]] = MappingProxyType({})
+    #: The keys refused on presence alone, written `key = true` in the same
+    #: table: an item carrying any value of one is refused. How a verb that
+    #: stays in its state says it runs once. See docs/method.md#the-next-read
+    refuses_any: tuple[str, ...] = ()
     sets: tuple[str, ...] = ()
     drops: tuple[str, ...] = ()
     #: Whether running this verb picks the item up: the transition half of
@@ -401,11 +425,22 @@ class Transition:
     #: while the item is still filed would leave two items where the workflow
     #: says one. Default `False`. See docs/method.md#dissolving
     absorbs: bool = False
+    #: Whether this verb takes `--carry`, which appends each absorbed item's
+    #: body to the survivor under a heading holding its title. A rider on
+    #: `absorbs`, because without a survivor there is nowhere to carry to.
+    #: Default `False`. See docs/method.md#merge
+    carries: bool = False
     #: Whether this verb may body the item it creates from a declared template:
     #: the transition half of `TEMPLATES`, and the one opt-in that is `mints`'
     #: rule inverted. Default `False`, and refused on a verb that has a `from`.
     #: See docs/method.md#seeds
     seeds: bool = False
+    #: Whether this verb renames the item: a new title, and the file moved to
+    #: the slug it makes, with every reference to the old slug repointed. A
+    #: rider on a move, so refused with no `from`, beside `dissolves`, which
+    #: leaves no file to rename, and beside `marks`, which wants the same
+    #: positional. Default `False`. See docs/method.md#retitle
+    retitles: bool = False
 
     @property
     def leaves(self) -> bool:
@@ -431,7 +466,9 @@ class Transition:
             or self.archives
             or self.dissolves
             or self.absorbs
+            or self.carries
             or self.seeds
+            or self.retitles
         )
 
 
@@ -504,6 +541,18 @@ class Declaration:
         `counts_sub_phases`' shape, and for its reason. Corpus-independent.
         """
         return any(state.dependencies for state in self.states.values())
+
+    @property
+    def files(self) -> tuple[Mapping[str, str], ...]:
+        """The `files` table of every verb that declares one, in order.
+
+        What a retitle repoints through and the listing's unfound report reads
+        through, asked once. Empty where no verb files. See
+        docs/method.md#filing
+        """
+        return tuple(
+            one.files for one in self.transitions.values() if one.files is not None
+        )
 
     @property
     def marked_states(self) -> frozenset[str]:
@@ -635,6 +684,7 @@ def shape_errors(document: Mapping[str, Any]) -> list[str]:
     errors += _archiving_errors(tables["states"], tables["transitions"])
     errors += _template_errors(tables[TEMPLATES])
     errors += _identity_errors(document.get(IDENTITY))
+    errors += _tool_errors(document.get(TOOL))
     return errors
 
 
@@ -1101,6 +1151,57 @@ def _identity_errors(entry: Any) -> list[str]:
     return errors
 
 
+def _tool_errors(entry: Any) -> list[str]:
+    """Every way `[fileplan]` is not one. Absent is not an error; empty is,
+    since a table saying nothing is vacuous, the way `[identity]` without a
+    pid is."""
+    if entry is None:
+        return []
+    if not isinstance(entry, dict):
+        return [f"{TOOL} must be a table"]
+    errors = _unknown_fields(TOOL, entry, frozenset({MINIMUM}), "tool")
+    if MINIMUM not in entry:
+        return errors + [
+            f'{TOOL} has no {MINIMUM} — the oldest fileplan release this '
+            'plan.toml reads under, such as "1.2.3"'
+        ]
+    if not (isinstance(entry[MINIMUM], str) and DOTTED_RE.match(entry[MINIMUM])):
+        errors.append(
+            f"{TOOL}.{MINIMUM} must be a version of dotted integers, "
+            'such as "1.2.3"'
+        )
+    return errors
+
+
+def _dotted(spelled: str) -> tuple[int, ...]:
+    """A version as integers, trailing zeros stripped, so 0.7 equals 0.7.0."""
+    parts = [int(part) for part in spelled.split(".")]
+    while parts and parts[-1] == 0:
+        parts.pop()
+    return tuple(parts)
+
+
+def _too_old(document: Mapping[str, Any], source: Path) -> None:
+    """Refuse when `[fileplan].minimum` is newer than this tool.
+
+    Run before every other check: a plan.toml written for a newer release
+    may use a field this one does not know, and that refusal would blame the
+    declaration for the tool's age. A malformed table is `_tool_errors`'s.
+    """
+    entry = document.get(TOOL)
+    wanted = entry.get(MINIMUM) if isinstance(entry, dict) else None
+    if not (isinstance(wanted, str) and DOTTED_RE.match(wanted)):
+        return
+    installed = version("fileplan")
+    leading = re.match(r"\d+(\.\d+)*", installed)
+    if leading and _dotted(leading.group()) >= _dotted(wanted):
+        return
+    raise Refusal(
+        f"{source} needs fileplan {wanted} or newer, and this is fileplan "
+        f"{installed}: upgrade fileplan to read it"
+    )
+
+
 def _state_errors(corpus: _Corpus) -> list[str]:
     errors: list[str] = []
     for name, entry in corpus.state_table.items():
@@ -1123,7 +1224,47 @@ def _state_errors(corpus: _Corpus) -> list[str]:
         errors += _first_number_errors(where, entry)
         errors += _bulleted_errors(at)
         errors += _key_field_errors(at, OPENED_FOR)
+        errors += _sort_errors(at)
     return errors
+
+
+def _sort_errors(at: _Entry) -> list[str]:
+    """A state's declared sort, against the keys a row in that state carries.
+
+    A key no row here can carry would put every item under `unsorted` on
+    every read, which is a declaration defect, so it refuses here. A `queued`
+    state must declare one: `queued` holds places, and a forgotten `sort`
+    would list them by slug with nothing said. See docs/method.md#the-queue
+    """
+    where, entry = at.where, at.entry
+    declared = _declared_capabilities(entry)
+    if SORT not in entry:
+        if "queued" not in declared:
+            return []
+        return [
+            f'{where}.capabilities names "queued", and this state declares no '
+            f"{SORT}. Places order nothing until a sort reads them. Add "
+            f'{SORT} = "{CAPABILITY_KEYS["queued"]}" to {where}'
+        ]
+    named = entry[SORT]
+    if not isinstance(named, str):
+        return [f"{where}.{SORT} must be a string"]
+    carried = [*INTRINSIC_KEYS, *sorted(at.keys)]
+    carried += [CAPABILITY_KEYS[one] for one in declared if one in CAPABILITY_KEYS]
+    for gate, derived in (
+        (CLAIMED in declared, CLAIM_KEYS),
+        (DATED in declared, STALE_KEYS),
+        (subphase.NAME in entry, subphase.DERIVED),
+        (depends.FIELD in entry, depends.DERIVED),
+    ):
+        carried += derived if gate else ()
+    if named.removeprefix("-") in carried:
+        return []
+    return [
+        f'{where}.{SORT} names "{named.removeprefix("-")}", which no item in '
+        f"this state carries, so every item would list as unsorted "
+        f"(this state carries: {', '.join(carried)})"
+    ]
 
 
 def _bulleted_errors(at: _Entry) -> list[str]:
@@ -1546,7 +1687,9 @@ def _transition_errors(corpus: _Corpus) -> list[str]:
                 "archives",
                 "dissolves",
                 "absorbs",
+                "carries",
                 "seeds",
+                "retitles",
             )
             if field in entry and not isinstance(entry[field], bool)
         ]
@@ -1604,6 +1747,8 @@ def _vacuity_errors(where: str, name: str, entry: Mapping[str, Any]) -> list[str
                 "archives",
                 "dissolves",
                 "absorbs",
+                "carries",
+                "retitles",
             )
             if field in entry
         ]
@@ -1632,6 +1777,7 @@ def _vacuity_errors(where: str, name: str, entry: Mapping[str, Any]) -> list[str
                 "marks",
                 "files",
                 "claims",
+                "retitles",
             )
             if field in entry
         ]
@@ -1646,6 +1792,24 @@ def _vacuity_errors(where: str, name: str, entry: Mapping[str, Any]) -> list[str
             "still filed would leave two items, not one. Add the dissolves, "
             "or drop the absorbs"
         )
+
+    # And its own rider: a carry appends to the survivor, and only `absorbs`
+    # names one. See docs/method.md#merge
+    if entry.get("carries") is True and entry.get("absorbs") is not True:
+        errors.append(
+            f"{where}.carries is true, and {name} does not absorb the item "
+            "into a survivor, so there is nowhere to carry its body. Add the "
+            "absorbs, or drop the carries"
+        )
+
+    # Both take the argument after the item: a retitle its new title, a mark
+    # its bullet. See docs/method.md#retitle
+    if entry.get("retitles") is True and "marks" in entry:
+        errors.append(
+            f"{where}.retitles is true, and {name} marks a bullet. Both take "
+            "the argument after the item, so one run could not say which it "
+            "means. Declare two transitions"
+        )
     return errors
 
 
@@ -1655,15 +1819,24 @@ def _refuses_errors(at: _Entry) -> list[str]:
         return []
     refuses = entry["refuses"]
     if not isinstance(refuses, dict):
-        return [f"{where}.refuses must be a table of key = [values]"]
+        return [f"{where}.refuses must be a table of key = true or key = [values]"]
 
     errors: list[str] = []
     for key, values in refuses.items():
         if error := _key_reference_error(where, "refuses", key, at.keys):
             errors.append(error)
             continue
+        if values is True:
+            # Presence: the item carries the key at all.
+            continue
+        if values is False:
+            errors.append(
+                f"{where}.refuses.{key} is false, which refuses nothing. "
+                "Write true, or a list of values"
+            )
+            continue
         if not _is_string_list(values):
-            errors.append(f"{where}.refuses.{key} must be a list of strings")
+            errors.append(f"{where}.refuses.{key} must be true, or a list of strings")
             continue
         if key not in closed_values:
             # Free text, or a key whose own `values` is already complained about.
@@ -1942,6 +2115,7 @@ def load(path: str | os.PathLike[str] | None = None) -> Declaration:
     except OSError as exc:
         raise Refusal(f"{source} could not be read: {exc.strerror}") from None
 
+    _too_old(document, source)
     root = source.parent
     errors = shape_errors(document)
     if not errors:
@@ -2009,6 +2183,7 @@ def _states(
             opened_for=entry.get(OPENED_FOR),
             archive=entry.get(ARCHIVE),
             first_number=entry.get(FIRST_NUMBER, 1),
+            sort=entry.get(SORT),
             marks=frozenset(marks[name]) if name in marks else None,
         )
         for name, entry in entries.items()
@@ -2048,8 +2223,13 @@ def _transitions(entries: Mapping[str, Any]) -> dict[str, Transition]:
             policy=entry.get("policy"),
             requires=tuple(entry.get("requires", ())),
             refuses={
-                key: tuple(values) for key, values in entry.get("refuses", {}).items()
+                key: tuple(values)
+                for key, values in entry.get("refuses", {}).items()
+                if values is not True
             },
+            refuses_any=tuple(
+                key for key, values in entry.get("refuses", {}).items() if values is True
+            ),
             sets=tuple(entry.get("sets", ())),
             drops=tuple(entry.get("drops", ())),
             claims=bool(entry.get("claims", False)),
@@ -2059,7 +2239,9 @@ def _transitions(entries: Mapping[str, Any]) -> dict[str, Transition]:
             archives=bool(entry.get("archives", False)),
             dissolves=bool(entry.get("dissolves", False)),
             absorbs=bool(entry.get("absorbs", False)),
+            carries=bool(entry.get("carries", False)),
             seeds=bool(entry.get("seeds", False)),
+            retitles=bool(entry.get("retitles", False)),
         )
         for name, entry in entries.items()
     }

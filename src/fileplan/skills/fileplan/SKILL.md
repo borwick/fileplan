@@ -7,8 +7,7 @@ description: Run one declared fileplan transition end to end. Ask the tool for t
 
 One procedure for **any** transition the declaration holds — this repo's or a
 consumer's. The tool holds the vocabulary. This skill only interprets the
-vocabulary, and the sections the tool points at are the program
-(`docs/method.md#the-interpreter`).
+vocabulary, and the sections the tool points at are the program.
 
 Invoked as `/fileplan <transition> <item>`. The transition and the item are
 all you bring, and everything else is asked of the tool. **Nothing below
@@ -16,17 +15,21 @@ branches on which transition it is.** Reasoning from a transition's name
 rather than from the tool's answer is the bug this procedure exists to
 prevent.
 
+Every command below is spelled `fileplan`, as installed. fileplan's own
+source tree runs it as `uv run fileplan`.
+
 ## 1. Ask for the contract
 
 ```bash
-uv run fileplan <transition> --help
+fileplan <transition> --help
 ```
 
 What comes back is the options the run takes, and then the contract. The
 contract says where the item goes, what the run `Requires` and `Refuses`, and
 any keys it `Drops`. The contract also names the halves the run `Declares`
 and a `Reading` block. A `Running it` block follows if the transition declares
-a procedure (`docs/method.md#the-contract`).
+a procedure. `fileplan --json` gives every transition's contract at once, as
+data.
 
 **The contract is the example to follow.** The tool generates the contract
 from the declaration you actually have. So the contract is right for a
@@ -35,11 +38,11 @@ transition nobody has ever seen before.
 ## 2. Ask whether this item passes
 
 ```bash
-uv run fileplan <transition> <item> --check
+fileplan <transition> <item> --check
 ```
 
 Pass whatever options the contract said the run requires; a check is of a
-**run**, so a required option is still required (`docs/method.md#the-check`).
+**run**, so a required option is still required.
 
 * **rc 2** — report the refusal verbatim and **stop**. Nothing was written,
   and the message is the one a real run gives. Do not go on to read the
@@ -86,6 +89,13 @@ Guided by the halves under `Declares`, never by the transition's name:
   still need out of it first; afterwards only git has it.
 * **`absorbs`** — the edges pointing at this item are repointed at the
   survivor the run names, rather than cleared.
+* **`carries`** — the run takes `--carry`, which appends each absorbed body
+  to the survivor under its title. Pass it when the absorbed text is the
+  specification, and read the survivor afterwards.
+* **`retitles`** — the run gives the item a new title, the second handle it
+  takes, and moves the file to the slug that title makes. The run repoints
+  every head that named the old slug. It only names the prose that still
+  does, so act on each line it prints.
 
 No half named is a half that does not happen. If the contract named none, the
 run moves the item and writes nothing else.

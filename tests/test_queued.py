@@ -251,28 +251,3 @@ def test_anything_that_is_not_a_whole_number_refuses(value: object) -> None:
     """`True` included: a bool is an `int` in Python, and 1-2's writer already
     keeps that distinction on the way out."""
     assert queued.errors({queued.KEY: value})
-
-
-# --------------------------------------------------------------------------
-# The ordering rule
-# --------------------------------------------------------------------------
-
-
-def test_order_is_by_place_then_slug() -> None:
-    rows = [
-        {"slug": "c", "position": 200},
-        {"slug": "a", "position": 100},
-        {"slug": "b", "position": 100},
-    ]
-    assert [row["slug"] for row in queued.order(rows)] == ["a", "b", "c"]
-
-
-def test_an_entry_with_no_place_sorts_last() -> None:
-    """It shows no place, too. The listing is how you find out what to fix."""
-    rows = [{"slug": "a", "position": None}, {"slug": "b", "position": 200}]
-    assert [row["slug"] for row in queued.order(rows)] == ["b", "a"]
-
-
-def test_places_order_as_numbers_not_as_text() -> None:
-    rows = [{"slug": "a", "position": 1000}, {"slug": "b", "position": 200}]
-    assert [row["slug"] for row in queued.order(rows)] == ["b", "a"]

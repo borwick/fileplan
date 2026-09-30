@@ -684,12 +684,13 @@ def opens(body: str, *, heading: str, pending: str) -> bool:
 
     Asked so the executor can say so, and a question about the body rather
     than a fourth step in `mint`, because the answer is wanted whether or not
-    the mint goes on to write anything.
+    the mint goes on to write anything. A body with no `heading` was never
+    decomposed, so there is nothing to re-open.
     """
     lines = body.splitlines()
     bounds = _bounds(lines, heading)
     if bounds is None:
-        return True
+        return False
     marker = _pending_name(pending)
     ok = _unfenced(lines)
     start, end = bounds

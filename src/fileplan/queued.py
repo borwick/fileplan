@@ -20,7 +20,7 @@ See docs/method.md#the-queue
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
 from fileplan.declaration import Refusal
 
@@ -37,10 +37,6 @@ SPACING = 100
 #: The floor a place ahead of the first row halves towards. It is a floor
 #: rather than a refusal, so the first row can always be got in front of.
 FLOOR = 0
-
-#: What a row is called in a listing. Spelled here rather than imported from
-#: `fileplan.read`, which imports this module to order a state.
-SLUG = "slug"
 
 
 def place(
@@ -154,25 +150,3 @@ def errors(head: Mapping[str, Any]) -> list[str]:
         "written as a bare integer"
     ]
 
-
-def order(entries: Iterable[Any]) -> list[Any]:
-    """`entries` in place order, then slug. Stable, so slug order carries.
-
-    Takes rows or items: a row is a mapping and an item is not. An entry
-    carrying no place sorts last and keeps none, the listing being how you
-    find out what to fix.
-    """
-    return sorted(entries, key=_rank)
-
-
-def _rank(entry: Any) -> tuple[bool, int, str]:
-    position = entry.get(KEY)
-    if not isinstance(position, int) or isinstance(position, bool):
-        return (True, 0, _handle(entry))
-    return (False, position, _handle(entry))
-
-
-def _handle(entry: Any) -> str:
-    if isinstance(entry, Mapping):
-        return str(entry.get(SLUG, ""))
-    return entry.slug

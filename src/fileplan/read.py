@@ -70,6 +70,10 @@ BULLET_LINE = "line"
 #: See docs/method.md#the-listing
 KEY, VALUE = "key", "value"
 
+#: The field an `unfound` record adds to those two: the carrier the filed
+#: item names, which no longer has the bullet. See docs/method.md#carried
+CARRIER = "carrier"
+
 #: Why the reader passed a bullet over, in the `unread` report's records.
 #: Report-only, like `BULLET_REST`. See docs/method.md#sub-phases
 BULLET_REASON = "reason"
@@ -80,6 +84,10 @@ CANDIDATES = 10
 
 #: How like a slug's start a handle has to be to be offered as a near miss.
 NEAR = 0.6
+
+#: A number-shaped handle: a section's number, then perhaps a sub-phase's
+#: rest. See docs/method.md#the-handle
+NUMBERED = re.compile(r"^(\d+)(-\S+)?$")
 
 #: The comparison operators a filter value may carry, longest first so `>=`
 #: is never read as `>`. A bare value means `=`.
@@ -133,11 +141,8 @@ def items(declaration: Declaration) -> list[Item]:
 
     A state whose directory does not exist yet is empty, not broken. A `path`
     is a literal directory, so the glob is flat and a file below one is in no
-    state at all.
-
-    A state with the `queued` capability comes back in its own order instead:
-    by place, then by slug, because the slug sort below is stable. An item
-    there carrying no place sorts last and shows none.
+    state at all. A state's declared `sort` is the listing's to apply, so
+    `ordered` reads it and this does not.
     """
     found: list[Item] = []
     errors: list[str] = []
@@ -156,7 +161,7 @@ def items(declaration: Declaration) -> list[Item]:
                     f"{named(path, declaration.root)}: {message}"
                     for message in subphase.errors(one.body, state.sub_phases)
                 ]
-        found += queued.order(here) if state.has(queued.NAME) else here
+        found += here
     if errors:
         raise Refusal(errors)
     return found
@@ -330,6 +335,11 @@ class Listing:
     #: hand edit is found here. It gates nothing: grading at read would break
     #: the whole listing over one item. See docs/method.md#the-listing
     undeclared: list[dict[str, Any]] = field(default_factory=list)
+    #: The filed items naming a bullet their carrier no longer has, one record
+    #: per entry: what a split leaves behind until each is repointed. Only
+    #: while the carrier is filed, because provenance outlives its carrier.
+    #: It gates nothing. See docs/method.md#carried
+    unfound: list[dict[str, Any]] = field(default_factory=list)
     #: **Not** an exception report. One record per numbered state, saying what
     #: the register holds rather than what is wrong with it: its name, its
     #: archive, its floor and the highest number it holds. A report is silent
@@ -385,6 +395,7 @@ def listing(
     unmarkable = _unmarkable(declaration, found)
     passed = _unread(declaration, found)
     undeclared = _undeclared(declaration, found)
+    unfound = _unfound(declaration, found)
     ages = stale.ages(
         declaration.root,
         [(one.slug, one.path) for one in found if one.state.has(DATED)],
@@ -440,6 +451,7 @@ def listing(
         unmarkable=unmarkable,
         unread=passed,
         undeclared=undeclared,
+        unfound=unfound,
         register=register,
     )
 
@@ -578,6 +590,47 @@ def _undeclared(
         for entry in _entries(one.head[name])
         if str(entry) not in values
     ]
+
+
+def _unfound(
+    declaration: Declaration, found: Sequence[Item]
+) -> list[dict[str, Any]]:
+    """The `unfound` report: every name a filed item carries that its carrier's
+    bullets do not.
+
+    Read through each verb's `files` table, so the two keys are the ones that
+    verb wrote. A carrier that is gone, or that sits where no bullets are
+    counted, contributes nothing. See docs/method.md#carried
+    """
+    by_slug = {one.slug: one for one in found}
+    said: list[dict[str, Any]] = []
+    pairs = dict.fromkeys((files["item"], files["name"]) for files in declaration.files)
+    for one in found:
+        for source, name in pairs:
+            carrier = by_slug.get(str(one.get(source, "")))
+            if carrier is None or not carrier.state.sub_phases or name not in one.head:
+                continue
+            names = {
+                bullet.name
+                for bullet in subphase.bullets(
+                    carrier.body,
+                    carrier.state.sub_phases,
+                    pending=carrier.state.pending,
+                    marks=carrier.state.marks,
+                )
+            }
+            said += [
+                {
+                    SLUG: one.slug,
+                    PATH: str(one.path.relative_to(declaration.root)),
+                    KEY: name,
+                    VALUE: entry,
+                    CARRIER: carrier.slug,
+                }
+                for entry in _entries(one.head[name])
+                if str(entry) not in names
+            ]
+    return said
 
 
 def _register(
@@ -923,6 +976,87 @@ def _place(entry: Any, order: tuple[str, ...]) -> int | None:
 
 
 # --------------------------------------------------------------------------
+# The sort: within each state, by the rules a comparison uses
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Sort:
+    """One `--sort [-]KEY`, parsed. `order` is as `Test`'s is."""
+
+    key: str
+    descending: bool = False
+    order: tuple[str, ...] | None = None
+
+
+def sorting(declaration: Declaration, given: str) -> Sort:
+    """One `--sort [-]KEY` as a `Sort`, or refuse. Pure.
+
+    The key is checked the way `--has` checks it, and a closed key carries its
+    set, so `claim-status` sorts in the probe's order.
+    """
+    descending = given.startswith("-")
+    key = known(declaration, "--sort", given.removeprefix("-").strip())
+    return Sort(key=key, descending=descending, order=_closed(declaration, key))
+
+
+def _rank(entry: Any, order: tuple[str, ...] | None) -> tuple[int, Any]:
+    """`_pair`'s three rules in `_pair`'s order, made total.
+
+    A comparison may answer nothing for a mixed pair, and a sort has to answer
+    every pair. So a declared value comes first by its place, a number next by
+    value, and anything else last as text, an undeclared value included.
+    """
+    if order is not None and (place := _place(entry, order)) is not None:
+        return (0, place)
+    if (number := _number(entry)) is not None:
+        return (1, number)
+    return (2, str(entry))
+
+
+def ordered(
+    rows: Sequence[Mapping[str, Any]],
+    sorts: Mapping[str, Sequence[Sort]],
+    states: Sequence[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The rows sorted within each state, and one record per missing key. Pure.
+
+    `sorts` maps a state to its sorts, and a state it does not name sorts by
+    slug. The first sort is the primary key and the slug is the last
+    tie-break, so the passes run from the slug up. A row missing a key follows
+    the others in either direction, since the point of putting it there is
+    that it is seen. The states keep their declared order.
+    See docs/method.md#the-listing
+    """
+    result: list[dict[str, Any]] = []
+    unsorted: list[dict[str, Any]] = []
+    for state in states:
+        here = sorted(
+            (dict(row) for row in rows if row[STATE] == state),
+            key=lambda row: row[SLUG],
+        )
+        mine = sorts.get(state, ())
+        for one in reversed(mine):
+            carrying = [row for row in here if not _empty(row.get(one.key))]
+            missing = [row for row in here if _empty(row.get(one.key))]
+            carrying.sort(
+                key=lambda row: tuple(
+                    _rank(entry, one.order) for entry in _entries(row[one.key])
+                ),
+                reverse=one.descending,
+            )
+            here = carrying + missing
+        result += here
+        unsorted += [
+            {SLUG: row[SLUG], KEY: one.key, PATH: row[PATH]}
+            for row in here
+            for one in mine
+            if _empty(row.get(one.key))
+        ]
+    return result, unsorted
+
+
+# --------------------------------------------------------------------------
 # The handle: a unique slug prefix, tree-wide
 # --------------------------------------------------------------------------
 
@@ -941,19 +1075,32 @@ def resolve(declaration: Declaration, handle: str) -> Item:
     """
     found = items(declaration)
     slug = chosen(
-        [(one.slug, named(one.path, declaration.root)) for one in found], handle
+        [(one.slug, named(one.path, declaration.root)) for one in found],
+        handle,
+        {
+            str(one.head[numbered.KEY]): one.slug
+            for one in found
+            if numbered.KEY in one.head
+        },
     )
     return next(one for one in found if one.slug == slug)
 
 
-def chosen(named: Sequence[tuple[str, str]], handle: str) -> str:
+def chosen(
+    named: Sequence[tuple[str, str]],
+    handle: str,
+    carrying: Mapping[str, str] = MappingProxyType({}),
+) -> str:
     """The one slug `handle` names, or refuse. Pure.
 
     `named` is `(slug, where)`, `where` being whatever text names the file:
     the only refusal that needs it is the duplicated slug, and what a reader
     wants there is somewhere to look. One home for the three rules, because
     two callers have them — the handle a verb resolves and the handle `show`
-    names.
+    names. `carrying` maps a live number, as text, to the slug carrying it,
+    so a number-shaped handle that is no slug can say which item it meant.
+    It still refuses, because a verb that writes takes a slug. `show` asks
+    `numbered_handle` first, and reaches this only when that finds nothing.
     """
     exact = [where for slug, where in named if slug == handle]
     if len(exact) == 1:
@@ -979,13 +1126,63 @@ def chosen(named: Sequence[tuple[str, str]], handle: str) -> str:
         )
 
     said = [f'no item starts with "{handle}"{_nearest(named, handle)}']
-    if re.match(r"\d+(-|$)", handle):
+    numeric = NUMBERED.match(handle)
+    live = carrying.get(numeric.group(1)) if numeric else None
+    if live is not None and numeric.group(2):
         said.append(
-            "a number names an archived section and is never a handle: "
-            "`fileplan list --has number=N` finds the item carrying it, and a "
-            "sub-phase is reached as `show ITEM NAME`"
+            f"{handle} is a sub-phase of `{live}`: `fileplan show {live} {handle}`"
+        )
+    elif live is not None:
+        said.append(f"{handle} is the number `{live}` carries: `fileplan show {live}`")
+    elif re.match(r"\d+(-|$)", handle):
+        said.append(
+            f"no live item carries {handle.split('-')[0]}, so it names an "
+            "archived section, if any: `fileplan show` finds a live section by "
+            "its number, and a verb that writes takes a slug"
         )
     raise Refusal(said)
+
+
+def numbered_handle(
+    named: Sequence[tuple[str, str]],
+    handle: str,
+    carrying: Mapping[str, str],
+) -> tuple[str, str | None] | None:
+    """The live item a number-shaped `handle` names, and the sub-phase name
+    it carries if it has one, or `None`. Pure; `show` alone asks it.
+
+    `named` and `carrying` are `chosen`'s. A slug outranks a number, so this
+    finds something only where no slug starts with `handle`, and the slug
+    rules would have found nothing. See docs/method.md#the-handle
+    """
+    numeric = NUMBERED.match(handle)
+    if numeric is None or any(slug.startswith(handle) for slug, _ in named):
+        return None
+    live = carrying.get(numeric.group(1))
+    if live is None:
+        return None
+    return live, handle if numeric.group(2) else None
+
+
+def edge_errors(
+    declaration: Declaration, state: State, given: Mapping[str, Any]
+) -> list[str]:
+    """Every edge a run was handed for `state`'s dependencies key that names
+    no item, with the near misses a handle gets.
+
+    A run's check on a value it was handed, so nothing is resolved or
+    rewritten: an exact slug is required. An edge that dangles later, after a
+    rename or an abandon, is still only reported. See docs/method.md#dependencies
+    """
+    edges = depends.edges(given, state.dependencies)
+    if not edges:
+        return []
+    named = [(one.slug, "") for one in items(declaration)]
+    return [
+        f'{state.dependencies} names "{edge}", and no item carries that '
+        f"slug{_nearest(named, edge)}"
+        for edge in depends.unknown(edges, {slug for slug, _ in named})
+    ]
 
 
 def _nearest(named: Sequence[tuple[str, str]], handle: str) -> str:

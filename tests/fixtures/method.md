@@ -87,6 +87,12 @@ Say a step of the training will not be done.
 What `line-out` means: a cutting is lined out as a seedling of its own, in the
 greenhouse, and the cutting is marked `lined`.
 
+## relabel
+
+## relabel-batch
+
+## relabel-pot
+
 ## batch
 
 What `batch` means: the batch a seedling was lined out of.

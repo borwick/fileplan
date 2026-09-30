@@ -887,7 +887,8 @@ def test_opens_says_whether_a_mint_would_re_open():
     ask = lambda lines: subphase.opens(body(*lines), heading=HEADING, pending=PENDING)
     assert ask(pending) is False
     assert ask(finished) is True
-    assert ask(("no heading at all",)) is True
+    # Never decomposed, so nothing to re-open.
+    assert ask(("no heading at all",)) is False
 
 
 @pytest.mark.parametrize(

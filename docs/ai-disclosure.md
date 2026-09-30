@@ -29,6 +29,16 @@ history behind this repository was rewritten before publication, and those
 trailers did not survive it. This page is where that record lives now. That
 is why the disclosure is a document rather than a commit convention.
 
+## the history the tree mentions
+
+Two kinds of reference here point at history that is not published. A number
+like `13-2`, in a test or in the reference, names a piece of this project's
+own plan: section 13, sub-phase 2. "The old tool" is the project's
+predecessor, which `fileplan` replaced. The record behind both was kept while
+the work was done. It is not part of this repository, so there is nothing to
+look either one up in. Each sentence that mentions one is meant to stand
+without it.
+
 ## no endorsement
 
 Anthropic did not build `fileplan`. Anthropic does not sponsor it, and does

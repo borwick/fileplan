@@ -18,6 +18,7 @@ import datetime as dt
 import os
 import socket
 from pathlib import Path
+from typing import Any
 
 import pytest
 from dulwich.repo import Repo
@@ -740,7 +741,7 @@ def test_a_head_value_keeps_its_toml_type(tree: Declaration) -> None:
 
 
 # --------------------------------------------------------------------------
-# A queued state comes back in its own order
+# A queued state comes back in slug order: its sort is the listing's
 # --------------------------------------------------------------------------
 
 
@@ -752,37 +753,13 @@ def placed(declaration: Declaration, name: str, position: int | None) -> Path:
     )
 
 
-def test_a_queued_state_comes_back_in_place_order_not_slug_order(
-    tree: Declaration,
-) -> None:
+def test_a_queued_state_comes_back_in_slug_order(tree: Declaration) -> None:
+    """Place order is the declared `sort = "position"`, which `ordered`
+    applies. The traversal has no special case for `queued`."""
     placed(tree, "c-tree", 100)
     placed(tree, "a-tree", 300)
-    placed(tree, "b-tree", 200)
-    assert [one.slug for one in read.items(tree)] == ["c-tree", "b-tree", "a-tree"]
-
-
-def test_places_order_as_numbers_not_as_text(tree: Declaration) -> None:
-    """`"1000"` sorts ahead of `"200"` as text, which is why the key is a bare
-    integer and the order is arithmetic."""
-    placed(tree, "a-tree", 1000)
-    placed(tree, "b-tree", 200)
-    assert [one.slug for one in read.items(tree)] == ["b-tree", "a-tree"]
-
-
-def test_two_items_at_one_place_fall_back_to_slug_order(tree: Declaration) -> None:
-    """A tree only a hand edit can produce. The listing still shows both, in
-    an order that is at least the same twice — it is how you find out."""
-    placed(tree, "b-tree", 100)
-    placed(tree, "a-tree", 100)
-    assert [one.slug for one in read.items(tree)] == ["a-tree", "b-tree"]
-
-
-def test_an_item_with_no_place_sorts_last_and_shows_none(tree: Declaration) -> None:
-    """The listing is how you find out what to fix — 1-4's rule for a slug
-    held by two files, applied to a row with no place."""
-    placed(tree, "a-tree", None)
-    placed(tree, "b-tree", 200)
-    assert [one.slug for one in read.items(tree)] == ["b-tree", "a-tree"]
+    placed(tree, "b-tree", None)
+    assert [one.slug for one in read.items(tree)] == ["a-tree", "b-tree", "c-tree"]
     assert read.rows(tree, read.items(tree))[1]["position"] is None
 
 
@@ -1484,6 +1461,128 @@ def test_two_filters_and_together() -> None:
     assert slugs(read.matching(ROWS, tests)) == ["b"]
 
 
+# --------------------------------------------------------------------------
+# The sort: within each state, by the rules a comparison uses
+# --------------------------------------------------------------------------
+
+#: A synthetic order, because the fixture's declared values happen to be
+#: alphabetical, and an order that is alphabetical proves nothing.
+SIZES = ("S", "M", "L", "XL")
+STATES = ("greenhouse", "orchard")
+
+
+def sized(slug: str, size: Any = None, state: str = "greenhouse") -> dict[str, Any]:
+    return {"slug": slug, "state": state, "size": size, "path": f"{state}/{slug}.md"}
+
+
+def by_size(rows, *sorts: read.Sort) -> list[str]:
+    """Every state sorted the same way, as a `--sort` does."""
+    given = sorts or [read.Sort("size", order=SIZES)]
+    return slugs(read.ordered(rows, dict.fromkeys(STATES, given), STATES)[0])
+
+
+def test_a_sort_follows_the_declared_order_rather_than_the_alphabet() -> None:
+    rows = [sized("a", "XL"), sized("b", "S"), sized("c", "L"), sized("d", "M")]
+    assert by_size(rows) == ["b", "d", "c", "a"]
+
+
+def test_a_sort_compares_numbers_as_numbers() -> None:
+    assert by_size([sized("a", "10"), sized("b", 9)], read.Sort("size")) == ["b", "a"]
+
+
+def test_a_sort_ranks_declared_values_then_numbers_then_text() -> None:
+    """`_pair`'s three rules in its order, made total: a value the key never
+    declared sorts after the declared ones rather than matching nothing."""
+    rows = [sized("a", "zinnia"), sized("b", 3), sized("c", "XL"), sized("d", "S")]
+    assert by_size(rows) == ["d", "c", "b", "a"]
+
+
+def test_descending_reverses_the_values_and_a_missing_key_stays_last() -> None:
+    rows = [sized("a"), sized("b", "S"), sized("c", "XL"), sized("d", "")]
+    assert by_size(rows, read.Sort("size", descending=True, order=SIZES)) == [
+        "c", "b", "a", "d"
+    ]
+    assert by_size(rows) == ["b", "c", "a", "d"]
+
+
+def test_a_second_sort_breaks_the_ties_of_the_first() -> None:
+    rows = [
+        {**sized("a", "S"), "rank": 2},
+        {**sized("b", "L"), "rank": 1},
+        {**sized("c", "S"), "rank": 1},
+    ]
+    assert by_size(
+        rows, read.Sort("size", order=SIZES), read.Sort("rank", descending=True)
+    ) == ["a", "c", "b"]
+
+
+def test_the_slug_is_the_last_tie_break() -> None:
+    rows = [sized("c", "S"), sized("a", "S"), sized("b", "S")]
+    assert by_size(rows) == ["a", "b", "c"]
+    assert by_size(rows, read.Sort("size", descending=True, order=SIZES)) == [
+        "a", "b", "c"
+    ]
+
+
+def test_a_sort_keeps_the_states_in_their_declared_order() -> None:
+    rows = [sized("a", "S", "orchard"), sized("b", "XL"), sized("c", None, "greenhouse")]
+    assert by_size(rows) == ["b", "c", "a"]
+
+
+def test_each_state_sorts_by_its_own_sorts_and_one_with_none_by_slug() -> None:
+    """The declared default: `greenhouse` by size, `orchard` by rank
+    descending, and a third state named in no sort comes back by slug."""
+    rows = [
+        {**sized("a", "XL"), "rank": 1},
+        {**sized("b", "S"), "rank": 2},
+        {**sized("c", "XL", "orchard"), "rank": 1},
+        {**sized("d", "S", "orchard"), "rank": 2},
+        sized("f", "S", "shed"),
+        sized("e", "XL", "shed"),
+    ]
+    sorts = {
+        "greenhouse": [read.Sort("size", order=SIZES)],
+        "orchard": [read.Sort("rank", descending=True)],
+    }
+    result, unsorted = read.ordered(rows, sorts, (*STATES, "shed"))
+    assert slugs(result) == ["b", "a", "d", "c", "e", "f"]
+    assert unsorted == []
+
+
+def test_a_list_value_sorts_by_its_entries_in_order() -> None:
+    rows = [sized("a", ["M", "S"]), sized("b", ["S", "XL"]), sized("c", ["S"])]
+    assert by_size(rows) == ["c", "b", "a"]
+
+
+def test_the_sort_names_each_row_missing_each_key() -> None:
+    rows = [sized("a"), {**sized("b", "S"), "rank": 1}]
+    given = [read.Sort("size", order=SIZES), read.Sort("rank")]
+    _, unsorted = read.ordered(rows, dict.fromkeys(STATES, given), STATES)
+    assert unsorted == [
+        {"slug": "a", "key": "size", "path": "greenhouse/a.md"},
+        {"slug": "a", "key": "rank", "path": "greenhouse/a.md"},
+    ]
+
+
+def test_a_sort_naming_no_key_refuses_by_name(tree: Declaration) -> None:
+    with pytest.raises(Refusal) as refusal:
+        read.sorting(tree, "-cultivarr")
+    assert "--sort" in str(refusal.value) and "cultivarr" in str(refusal.value)
+
+
+def test_a_leading_dash_sorts_descending_by_the_keys_declared_order(
+    tree: Declaration,
+) -> None:
+    assert read.sorting(tree, "-cultivar") == read.Sort(
+        "cultivar", descending=True, order=("heirloom", "hybrid")
+    )
+    assert read.sorting(tree, "rootstock") == read.Sort("rootstock")
+
+
+def test_claim_status_sorts_in_the_probes_order(tree: Declaration) -> None:
+    assert read.sorting(tree, "claim-status").order == claim.STATUSES
+
+
 def test_a_value_nothing_carries_gives_no_rows() -> None:
     assert read.matching(ROWS, [read.comparison("state", "cold-frame")]) == []
 
@@ -1933,12 +2032,66 @@ def test_a_near_miss_is_ranked_by_the_start_of_each_slug() -> None:
 
 @pytest.mark.parametrize("handle", ["235", "23-1"])
 def test_a_number_as_a_handle_is_told_where_numbers_are_found(handle) -> None:
-    """A number never resolves, by the register's rule, and that stays. The
-    refusal says so, and where a number and a sub-phase name are found."""
+    """A number no live item carries never resolves, and that stays. The
+    refusal says so, and that `show` is where a live number is found."""
     with pytest.raises(Refusal) as refusal:
         read.chosen(NAMED, handle)
-    assert "`fileplan list --has number=N`" in str(refusal.value)
-    assert "`show ITEM NAME`" in str(refusal.value)
+    said = str(refusal.value)
+    assert f"no live item carries {handle.split('-')[0]}, so it names an archived" in said
+    assert "`fileplan show` finds a live section by its number" in said
+    assert "a verb that writes takes a slug" in said
+
+
+@pytest.mark.parametrize(
+    "handle, said",
+    [
+        ("23-1", "23-1 is a sub-phase of `a-seedling`: `fileplan show a-seedling 23-1`"),
+        ("23-4a", "23-4a is a sub-phase of `a-seedling`: `fileplan show a-seedling 23-4a`"),
+        ("23", "23 is the number `a-seedling` carries: `fileplan show a-seedling`"),
+    ],
+)
+def test_a_live_number_as_a_handle_names_its_item_and_the_command(handle, said) -> None:
+    """Still a refusal, since a number is never a handle for a verb that
+    writes. A live number says which item carries it rather than calling it
+    archived. `show` asks `numbered_handle` first, and never gets here."""
+    with pytest.raises(Refusal) as refusal:
+        read.chosen(NAMED, handle, {"23": "a-seedling"})
+    assert str(refusal.value).endswith(said)
+    assert "archived" not in str(refusal.value)
+
+
+def test_a_number_no_live_item_carries_keeps_the_archived_wording() -> None:
+    with pytest.raises(Refusal) as refusal:
+        read.chosen(NAMED, "7-2", {"23": "a-seedling"})
+    assert "no live item carries 7, so it names an archived section" in str(
+        refusal.value
+    )
+
+
+@pytest.mark.parametrize(
+    "handle, found",
+    [
+        ("23", ("a-seedling", None)),
+        ("23-1", ("a-seedling", "23-1")),
+        ("23-4a", ("a-seedling", "23-4a")),
+        ("7", None),
+        ("7-2", None),
+        ("a-seed", None),
+    ],
+)
+def test_a_live_number_is_found_for_show_and_nothing_else_is(handle, found) -> None:
+    """`show`'s one extra rule. A live number gives its slug, and a sub-phase
+    name gives the slug and the name. A number nobody carries, and a handle
+    that is no number, give nothing, and `chosen` has the last word."""
+    assert read.numbered_handle(NAMED, handle, {"23": "a-seedling"}) == found
+
+
+def test_a_slug_outranks_a_number() -> None:
+    """A slug starting with the digits wins, as it does in `chosen` today, so
+    nothing is guessed: the number is tried only where the slugs found none."""
+    named = (*NAMED, ("23-skidoo", "orchard/23-skidoo.md"))
+    assert read.numbered_handle(named, "23", {"23": "a-seedling"}) is None
+    assert read.chosen(named, "23", {"23": "a-seedling"}) == "23-skidoo"
 
 
 def test_a_handle_matching_nothing_names_its_near_misses_purely() -> None:
@@ -2009,3 +2162,57 @@ def test_a_declaration_that_derives_nothing_carries_none_of_them(
     assert plain.derived == ()
     [row] = read.rows(plain, read.items(plain))
     assert [key for key in row if key in DERIVABLE_KEYS] == []
+
+
+# --------------------------------------------------------------------------
+# `unfound`: a `cutting` naming a bullet its batch no longer has
+# --------------------------------------------------------------------------
+
+
+def lined_out(tree: Declaration, cutting: str, *, batch: bool = True) -> None:
+    """A seedling lined out of `a-batch` as `cutting`, and the batch holding
+    `c1` and `c2a`: what a hand split of `c2` leaves behind. ``batch=False``
+    leaves the batch out, as when a closed investigation is gone."""
+    if batch:
+        file(
+            tree,
+            "propagator",
+            "a-batch.md",
+            '+++\ntitle = "A batch"\n+++\n\n### Cuttings\n'
+            "- **c1 — The first**\n- **c2a — Half of the second**\n",
+        )
+    file(
+        tree,
+        "greenhouse",
+        "a-seedling.md",
+        f'+++\ntitle = "A seedling"\nbatch = "a-batch"\ncutting = "{cutting}"\n+++\n\nProse.\n',
+    )
+
+
+def test_the_listing_names_a_cutting_whose_bullet_is_missing(
+    tree: Declaration,
+) -> None:
+    """**The done line's report.** A split done by hand is loud: the seedling
+    still names `c2`, and no bullet in its batch is called that any more."""
+    lined_out(tree, "c2")
+    assert read.listing(tree).unfound == [
+        {
+            "slug": "a-seedling",
+            "path": "greenhouse/a-seedling.md",
+            "key": "cutting",
+            "value": "c2",
+            "carrier": "a-batch",
+        }
+    ]
+
+
+def test_a_cutting_whose_bullet_is_there_is_not_named(tree: Declaration) -> None:
+    lined_out(tree, "c2a")
+    assert read.listing(tree).unfound == []
+
+
+def test_a_cutting_whose_batch_is_gone_is_not_named(tree: Declaration) -> None:
+    """Provenance outlives its carrier, so a closed batch is normal rather
+    than a report."""
+    lined_out(tree, "c2", batch=False)
+    assert read.listing(tree).unfound == []

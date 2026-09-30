@@ -3,7 +3,8 @@
 `execute` holds the run lock for the whole of its body. `execute` then
 branches three ways on what the declaration says. A transition with no `from`
 creates an item. A transition declaring `dissolves` takes the file away.
-Everything else moves the file between directories. No transition's name
+Everything else moves the file between directories, and one declaring
+`retitles` moves it to a new name as well. No transition's name
 appears here, or anywhere under `src/`.
 
 The capability arms resolve before anything is written. So every refusal
@@ -19,7 +20,8 @@ See docs/method.md#the-check
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -47,6 +49,7 @@ def offer_errors(head: Mapping[str, Any], transition: Transition) -> list[str]:
     Its `requires` and `refuses`, and nothing else. A key present but empty
     carries nothing, so it reads as missing rather than as satisfied, and
     `refuses` asks `read.carries` so a list is the several values it holds.
+    A key refused on presence refuses any value at all.
     Pure: no filesystem, no cwd.
     See docs/method.md#the-next-read
     """
@@ -61,6 +64,11 @@ def offer_errors(head: Mapping[str, Any], transition: Transition) -> list[str]:
         if not _missing(head, key)
         for entry in refused
         if read.carries(head[key], entry)
+    ]
+    errors += [
+        f'{transition.name} refuses an item carrying "{key}"'
+        for key in transition.refuses_any
+        if not _missing(head, key)
     ]
     return errors
 
@@ -194,19 +202,21 @@ def execute(
     declaration: Declaration,
     transition: Transition,
     *,
-    name: str,
+    name: str | Sequence[str],
     body: str | None = None,
     values: Mapping[str, Any] | None = None,
     asked: Mapping[str, Any] | None = None,
     announce: Callable[[str], None] | None = None,
     check: bool = False,
-) -> Path | str:
+) -> Path | str | tuple[Path, ...]:
     """Run `transition`, returning the file it wrote, or raise `Refusal`.
 
     `name` is the title of a verb that creates, the item handle of one that
-    moves. `values` holds the verb's `sets` keys, `asked` what the destination
-    state's capabilities were asked for, and `announce` is where a run says
-    something it was not asked to do. `check` runs this identical path and
+    moves. A verb that absorbs also takes a sequence of handles, and then
+    hands back a tuple of paths, or its check's sentences one per line: the
+    shape follows what was passed, never how many. `values` holds the verb's
+    `sets` keys, `asked` what the destination state's capabilities were asked
+    for, and `announce` is where a run says something it was not asked to do. `check` runs this identical path and
     stops at the seam each arm documents, handing back `_would`'s sentence
     instead of a path.
     See docs/method.md#the-check
@@ -215,10 +225,17 @@ def execute(
     # Before the lock and before either arm, so `--check` says it in the same words.
     if wrong := value_errors(given, transition, declaration.keys):
         raise Refusal(wrong)
+    several = not isinstance(name, str)
+    handles = (name,) if isinstance(name, str) else tuple(name)
+    if several and not transition.absorbs:
+        raise Refusal(
+            f"{transition.name} takes one item, and only a transition that "
+            "absorbs takes several"
+        )
     running = _Running(
         declaration=declaration,
         transition=transition,
-        name=name,
+        name="" if several else handles[0],
         body=body,
         given=given,
         asked=dict(asked or {}),
@@ -229,7 +246,8 @@ def execute(
         if transition.source is None:
             return _create(running)
         if transition.dissolves:
-            return _dissolve(running)
+            wrote = _dissolve(running, handles)
+            return wrote if several or isinstance(wrote, str) else wrote[0]
         return _move(running)
 
 
@@ -253,6 +271,8 @@ def _would(
     clearing: _Clearing | None = None,
     filing: _Filing | None = None,
     writing: str | None = None,
+    renaming: _Renaming | None = None,
+    carrying: Path | None = None,
 ) -> str:
     """The one sentence `--check` prints: what this run would do.
 
@@ -276,6 +296,13 @@ def _would(
             said.append("free the claim")
     if writing is not None:
         said.append(writing)
+    if renaming is not None:
+        said.append(f'title it "{renaming.title}"')
+        if renaming.follows:
+            said.append(f"move the claim to {renaming.slug}")
+        if renaming.clearing.edits:
+            where = ", ".join(named(one.path, root) for one in renaming.clearing.edits)
+            said.append(f"repoint the references to it in {where}")
     if filing is not None:
         said.append(f"file {named(filing.path, root)}")
     if archiving is not None:
@@ -285,6 +312,8 @@ def _would(
     if clearing is not None and clearing.edits:
         where = ", ".join(named(one.path, root) for one in clearing.edits)
         said.append(f"clear the edge to it in {where}")
+    if carrying is not None:
+        said.append(f"carry its body into {named(carrying, root)}")
     return f"{opening}, and would {_listed(said)}" if said else opening
 
 
@@ -328,6 +357,9 @@ def _create(running: _Running) -> Path | str:
     held = _held_by(running.declaration, stem)
     if held is not None:
         raise Refusal(_taken(stem, held, running.declaration.root))
+    state = running.declaration.states[running.transition.to]
+    if errors := read.edge_errors(running.declaration, state, running.given):
+        raise Refusal([f"{running.transition.name} cannot file {stem}", *errors])
 
     # Both before the reservation below, which is itself a write.
     claiming = _claiming(running, slug=stem)
@@ -426,8 +458,12 @@ def _move(running: _Running) -> Path | str:
     # the number the item carried in the state it is leaving.
     archiving = _archiving(running, original)
     filing = _filing(running, original, disposing)
+    renaming = _renaming(running, original, claiming)
 
     errors = offer_errors(original.head, running.transition)
+    errors += read.edge_errors(
+        running.declaration, running.declaration.states[running.transition.to], running.given
+    )
     errors += _cursor_errors(running, original, body)
     if errors:
         # Nothing written yet, and nothing will be.
@@ -445,13 +481,19 @@ def _move(running: _Running) -> Path | str:
     }
     head.update({key: running.given[key] for key in running.transition.sets if key in running.given})
     head.update(entering)
+    if renaming is not None:
+        head["title"] = renaming.title
 
-    destination = _directory(running, make=not running.check) / source.name
+    destination = _directory(running, make=not running.check) / (
+        source.name if renaming is None else f"{renaming.slug}{item.SUFFIX}"
+    )
     moving = destination.resolve() != source.resolve()
     if moving and destination.exists():
         # The backstop: a duplicate appearing between the read and the write.
         raise Refusal(_taken(source.stem, destination, running.declaration.root))
 
+    # Read before the write, so a run that leaves the file as it was can say so.
+    before = None if moving or running.check else source.read_bytes()
     _place(running, destination, head, body)
     if running.check:
         # The seam, inside `_place`: the head is the last thing a run refuses over.
@@ -468,10 +510,13 @@ def _move(running: _Running) -> Path | str:
             archiving=archiving,
             filing=filing,
             writing=writing,
+            renaming=renaming,
         )
     if moving:
         source.unlink()
     _apply(claiming, running.declaration.root)
+    if renaming is not None:
+        _rename(running, original, renaming)
     _file(archiving)
     _file_it(running, filing)
     if archiving is not None:
@@ -481,7 +526,28 @@ def _move(running: _Running) -> Path | str:
     if notice is not None:
         # After the write: a notice says what a run did.
         running.say(notice)
+    if before == destination.read_bytes():
+        running.say(
+            f"{named(destination, running.declaration.root)} is unchanged: "
+            f"{_unchanged(running, claiming)}"
+        )
     return destination
+
+
+def _unchanged(running: _Running, claiming: _Claiming) -> str:
+    """Why a run that wrote the item's file left every byte as it was.
+
+    A claim taken with nothing else given is a real effect and exits 0, as
+    does a bare mint on a section already open. The notice is what tells
+    either apart from a run that wrote.
+    See docs/method.md#bulleted and docs/method.md#the-claimed-state
+    """
+    if claiming.take is not None:
+        return "the claim was taken, and nothing else was given"
+    state = running.declaration.states[running.transition.to]
+    if running.transition.mints and not any(running.asked.get(key) for key in _MINTING):
+        return f'"{state.sub_phases}" is already open, so a bare run writes nothing'
+    return "nothing given changes it"
 
 
 def _entering(running: _Running, *, moving: str | None = None) -> dict[str, Any]:
@@ -581,9 +647,23 @@ _RECORD = "record"
 #: there and resolved tree-wide. See docs/method.md#dissolving
 _INTO = "into"
 
+#: The flag a verb that `carries` takes: append each absorbed item's body to
+#: the survivor. See docs/method.md#merge
+_CARRY = "carry"
+
+#: The one a verb that retitles takes: the item's new title, a positional on
+#: the command line. See docs/method.md#retitle
+_RETITLE = "new_title"
+
 #: The one a verb that seeds takes: the declared template the new item's body
 #: is copied from, entire. The CLI spells it `--from`. See docs/method.md#seeds
 _TEMPLATE = "template"
+
+#: The one a verb that `claims` takes: hold this claim beside others this
+#: session already holds, rather than refusing over them. A flag, and the
+#: less safe of the two, so the default stays the loud one.
+#: See docs/method.md#the-claimed-state
+_KEEP_CLAIMS = "keep_claims"
 
 #: The two a verb that files takes: what to call the item it creates, and the
 #: prose that goes in it. `title` is optional, `body` is not.
@@ -952,144 +1032,352 @@ class _Clearing:
     notices: tuple[str, ...] = ()
 
 
-def _survivor(running: _Running, original: item.Item) -> item.Item | None:
+def _survivor(running: _Running) -> item.Item | None:
     """The item `--into` names, or `None` when the verb does not absorb.
 
     Resolved tree-wide, like every other handle, and neither graded nor
-    edited. One refusal of its own: a survivor that is the item itself.
-    See docs/method.md#dissolving
+    edited. Resolved once per run, so a bad `--into` refuses at once rather
+    than once per item. See docs/method.md#dissolving
     """
     if not running.transition.absorbs:
         return None
-    into = read.resolve(running.declaration, str(running.asked.get(_INTO) or ""))
-    if into.path == original.path:
+    return read.resolve(running.declaration, str(running.asked.get(_INTO) or ""))
+
+
+def _itself(running: _Running, original: item.Item, survivor: item.Item | None) -> None:
+    """Refuse a survivor that is the item being dissolved."""
+    if survivor is not None and survivor.path == original.path:
         raise Refusal(
-            f"{named(into.path, running.declaration.root)} is the item {running.transition.name} is "
+            f"{named(survivor.path, running.declaration.root)} is the item {running.transition.name} is "
             "dissolving, and an "
             "item cannot continue as itself"
         )
-    return into
 
 
 def _clearing(
-    running: _Running, original: item.Item, survivor: item.Item | None = None
+    root: Path,
+    gone: item.Item,
+    into: str | None,
+    tree: Sequence[item.Item],
+    keys: Callable[[item.Item], Sequence[str]],
 ) -> _Clearing:
-    """Every referent whose dependency key names `original`, rewritten. No writes.
+    """Every referent in `tree` whose `keys` name `gone`, rewritten.
 
-    Cleared means taken out, or pointed at the survivor where the verb
-    absorbs. Four rules: scope is every item in every state, read through its
-    own state's `dependencies` key; a list loses or repoints its entry and
-    stays a list, while a value the clearing empties loses the key; a referent
-    another session holds is edited anyway; and the referent's head is not
-    graded.
-    See docs/method.md#dissolving and docs/method.md#dependencies
+    Cleared means taken out, or pointed at `into` where there is one: the
+    survivor a verb that absorbs names, or the slug a retitle moves to. Four
+    rules: scope is every item in every state, read through the keys `keys`
+    gives for it; a list loses or repoints its entry and stays a list, while
+    a value the clearing empties loses the key; a referent another session
+    holds is edited anyway; and the referent's head is not graded. `tree` is
+    handed in, so several items clear over each other's edits. No writes.
+    See docs/method.md#dissolving and docs/method.md#retitle
     """
-    if not running.transition.dissolves:
-        return _Clearing()
-
     edits: list[item.Item] = []
     notices: list[str] = []
-    for one in read.items(running.declaration):
-        if one.path == original.path:
-            continue
-        key = one.state.dependencies
-        if key is None or original.slug not in depends.edges(one.head, key):
+    for one in tree:
+        if one.path == gone.path:
             continue
         head = dict(one.head)
-        if survivor is None:
-            kept = depends.without(head[key], original.slug)
-        else:
-            kept = depends.repoint(
-                head[key], original.slug, survivor.slug, own=one.slug
-            )
-        if kept is None:
-            del head[key]
-        else:
-            head[key] = kept
-        edits.append(item.Item(path=one.path, state=one.state, head=head, body=one.body))
-        # Computed from what the head actually got, not from the branch taken.
-        where = named(one.path, running.declaration.root)
-        if survivor is not None and survivor.slug in depends.edges(head, key):
-            notices.append(
-                f'{where}: pointed "{original.slug}" at "{survivor.slug}" '
-                f"in {key}"
-            )
-        elif survivor is not None:
-            notices.append(
-                f'{where}: took "{original.slug}" out of {key} — it is this '
-                "item now"
-            )
-        else:
-            notices.append(f'{where}: took "{original.slug}" out of {key}')
+        where = named(one.path, root)
+        for key in keys(one):
+            if gone.slug not in depends.edges(head, key):
+                continue
+            if into is None:
+                kept = depends.without(head[key], gone.slug)
+            else:
+                kept = depends.repoint(head[key], gone.slug, into, own=one.slug)
+            if kept is None:
+                del head[key]
+            else:
+                head[key] = kept
+            # Computed from what the head actually got, not from the branch taken.
+            if into is not None and into in depends.edges(head, key):
+                notices.append(f'{where}: pointed "{gone.slug}" at "{into}" in {key}')
+            elif into is not None:
+                notices.append(
+                    f'{where}: took "{gone.slug}" out of {key} — it is this item now'
+                )
+            else:
+                notices.append(f'{where}: took "{gone.slug}" out of {key}')
+        if head != one.head:
+            edits.append(item.Item(path=one.path, state=one.state, head=head, body=one.body))
     return _Clearing(edits=tuple(edits), notices=tuple(notices))
 
 
-def _clear(clearing: _Clearing) -> None:
+def _dependency(one: item.Item) -> tuple[str, ...]:
+    """The key a dissolve clears: the referent's own state's `dependencies`."""
+    return () if one.state.dependencies is None else (one.state.dependencies,)
+
+
+def _references(declaration: Declaration, one: item.Item) -> tuple[str, ...]:
+    """Every head key the tool reads a slug out of, for an item like `one`.
+
+    Its state's `dependencies` and `opened-for`, and the key each verb that
+    `files` names for where a filed item came from. What a retitle repoints.
+    See docs/method.md#retitle
+    """
+    carried = [files["item"] for files in declaration.files]
+    named_by = (one.state.dependencies, one.state.opened_for, *carried)
+    return tuple(dict.fromkeys(key for key in named_by if key is not None))
+
+
+def _clear(edits: Sequence[item.Item]) -> None:
     """The referents' half of the effect, after the item is gone.
 
     The unlink is first: a crash between them leaves referents naming a closed
     item, which the default read names as an `unknown dependency:` line.
     """
-    for one in clearing.edits:
+    for one in edits:
         item.write(one)
 
 
-def _dissolve(running: _Running) -> Path | str:
-    """Run a verb that takes the item's file away, and clear the edges to it.
+def _dissolve(running: _Running, handles: Sequence[str]) -> tuple[Path, ...] | str:
+    """Run a verb that takes each item's file away, and clear the edges to it.
 
     A verb that dissolves refuses `to`, `sets`, `drops`, `mints` and `claims`
     back in `plan.toml`, so what is left is the record that outlives the item
     and the edges other items hold to it, taken out or pointed at the survivor
     `--into` names. The order is delete, file, clear, free, and every refusal
-    is computed before any of it.
-    See docs/method.md#dissolving
+    is computed before any of it. Several handles are all or nothing: each is
+    checked, the refusal names every one that fails, and one handle's refusal
+    is raised as it stands.
+    See docs/method.md#dissolving and docs/method.md#merge
     """
-    original, claiming = _reading(running)
-    source = original.path
-
-    # All three before the checks, and all three writing nothing.
-    archiving = _archiving(
-        running, original, record=str(running.asked.get(_RECORD) or "")
-    )
-    survivor = _survivor(running, original)
-    clearing = _clearing(running, original, survivor)
-
-    errors = offer_errors(original.head, running.transition)
-    # A second `read.items` beside `_clearing`'s, left as two deliberately.
-    errors += dangle_errors(
-        original, running.transition, read.items(running.declaration), running.declaration.root
-    )
-    errors += unmarked_errors(original, running.transition)
-    if errors:
+    root = running.declaration.root
+    verb = running.transition.name
+    if len(handles) > 1 and running.transition.archives:
         raise Refusal(
-            [f"{named(source, running.declaration.root)} cannot {running.transition.name}", *errors]
+            f"{verb} takes one item, because one --record is one archive "
+            f"entry, and this run named {len(handles)}"
+        )
+    survivor = _survivor(running)
+    whole = read.items(running.declaration)
+    failed: dict[int, list[str]] = {}
+    taken: dict[int, tuple[item.Item, _Claiming, _Archiving | None]] = {}
+    for index, handle in enumerate(handles):
+        one = replace(running, name=handle)
+        try:
+            original, claiming = _reading(one)
+            if any(original.path == seen.path for seen, *_ in taken.values()):
+                raise Refusal(f'"{handle}" is named twice')
+            archiving = _archiving(one, original, record=str(running.asked.get(_RECORD) or ""))
+            _itself(one, original, survivor)
+            taken[index] = (original, claiming, archiving)
+        except Refusal as refusal:
+            if len(handles) == 1:
+                raise
+            failed[index] = refusal.messages
+
+    # Every item being dissolved leaves the tree, so none of them is edited.
+    gone = {original.path for original, *_ in taken.values()}
+    tree = {one.path: one for one in whole if one.path not in gone}
+    clearings: list[_Clearing] = []
+    for index, (original, claiming, archiving) in taken.items():
+        clearing = _clearing(
+            root,
+            original,
+            None if survivor is None else survivor.slug,
+            list(tree.values()),
+            _dependency,
+        )
+        # Each clearing sees the last one's edits, so the edges compose.
+        tree.update((one.path, one) for one in clearing.edits)
+        clearings.append(clearing)
+        errors = offer_errors(original.head, running.transition)
+        errors += dangle_errors(original, running.transition, whole, root)
+        errors += unmarked_errors(original, running.transition)
+        if errors:
+            refusal = [f"{named(original.path, root)} cannot {verb}", *errors]
+            if len(handles) == 1:
+                raise Refusal(refusal)
+            failed[index] = refusal
+    carried = None
+    if survivor is not None and running.transition.carries and running.asked.get(_CARRY):
+        if not failed:
+            carried = _carrying(running, tree[survivor.path], [one for one, *_ in taken.values()])
+            tree[survivor.path] = carried
+    if failed:
+        raise Refusal(
+            [
+                f"{verb} took nothing away: {len(failed)} of {len(handles)} items refuse",
+                *(said for index in sorted(failed) for said in failed[index]),
+            ]
         )
 
+    runs = list(zip(taken.values(), clearings))
     if running.check:
-        # The seam.
-        return _would(
-            f"{running.transition.name} would take {named(source, running.declaration.root)} away",
-            running.declaration.root,
-            claiming=claiming,
-            archiving=archiving,
-            clearing=clearing,
+        # The seam: one sentence per item, each from its own claim and clearing.
+        return "\n".join(
+            _would(
+                f"{verb} would take {named(original.path, root)} away",
+                root,
+                claiming=claiming,
+                archiving=archiving,
+                clearing=clearing,
+                carrying=None if carried is None else carried.path,
+            )
+            for (original, claiming, archiving), clearing in runs
         )
 
-    source.unlink()
-    _file(archiving)
-    _clear(clearing)
-    _apply(claiming, running.declaration.root)
+    for original, *_ in taken.values():
+        original.path.unlink()
+    for _, _, archiving in taken.values():
+        _file(archiving)
+    # One write per referent, of its head after every clearing.
+    edited = dict.fromkeys(one.path for clearing in clearings for one in clearing.edits)
+    if carried is not None:
+        edited[carried.path] = None
+    _clear([tree[path] for path in edited])
+    for _, claiming, _ in taken.values():
+        _apply(claiming, root)
 
-    if archiving is not None:
-        running.say(archiving.notice)
-    for said in clearing.notices:
+    for _, _, archiving in taken.values():
+        if archiving is not None:
+            running.say(archiving.notice)
+    for clearing in clearings:
+        for said in clearing.notices:
+            running.say(said)
+    slugs = [original.slug for original, *_ in taken.values()]
+    for said in _mentions(list(tree.values()), slugs, root, f"which {verb} took away"):
         running.say(said)
-    running.say(
-        f"{named(source, running.declaration.root)} is gone: {running.transition.name} took it away"
-    )
+    for original, *_ in taken.values():
+        running.say(f"{named(original.path, root)} is gone: {verb} took it away")
 
     # "The file it wrote": the archive, or the path it removed where it files none.
-    return archiving.path if archiving is not None else source
+    return tuple(
+        archiving.path if archiving is not None else original.path
+        for original, _, archiving in taken.values()
+    )
+
+
+def _carrying(
+    running: _Running, survivor: item.Item, gone: Sequence[item.Item]
+) -> item.Item:
+    """`survivor` with each of `gone`'s bodies appended, in the order given.
+
+    Each lands under `### <its title>`, stripped of blank lines at either
+    end. Two refusals, both before any write: a survivor another session
+    holds, since a carry writes prose into a body that session may be
+    rewriting, and a composed body its state's sub-phase check refuses, so
+    the next listing cannot. The head is not graded. No writes.
+    See docs/method.md#merge
+    """
+    root = running.declaration.root
+    state = survivor.state
+    if state.has(claim.NAME):
+        path = claim.path(root, survivor.slug)
+        if path.exists():
+            _foreign(running, survivor.slug, claim.read(path, root))
+    body = survivor.body.rstrip("\n")
+    for one in gone:
+        carried = one.body.strip("\n")
+        body += f"\n\n### {one.get('title')}\n\n{carried}"
+    body += "\n"
+    if state.sub_phases and (errors := subphase.errors(body, state.sub_phases)):
+        raise Refusal(
+            [
+                f"{running.transition.name} cannot carry into "
+                f"{named(survivor.path, root)}",
+                *errors,
+            ]
+        )
+    return item.Item(path=survivor.path, state=state, head=survivor.head, body=body)
+
+
+def _mentions(
+    tree: Sequence[item.Item], gone: Sequence[str], root: Path, tail: str
+) -> list[str]:
+    """One line per item whose prose still names a slug this run took away.
+
+    A whole-word match over bodies only, since the heads' edges are the
+    clearing's. It warns, and never rewrites what a person wrote. `tail` says
+    what happened to the slug. See docs/method.md#dissolving
+    """
+    patterns = {slug: re.compile(rf"(?<![\w-]){re.escape(slug)}(?![\w-])") for slug in gone}
+    said: list[str] = []
+    for one in tree:
+        if found := [f'"{slug}"' for slug, pattern in patterns.items() if pattern.search(one.body)]:
+            said.append(
+                f"{named(one.path, root)}: its prose still names {_listed(found)}, "
+                + tail
+            )
+    return said
+
+
+@dataclass(frozen=True)
+class _Renaming:
+    """The new name a retitle gives the item, resolved before any write."""
+
+    title: str
+    #: The slug the title makes, which is the item's own where the title keeps it.
+    slug: str
+    #: The referents whose references to the old slug are repointed.
+    clearing: _Clearing = _Clearing()
+    #: Whether this session's claim record moves to the new slug.
+    follows: bool = False
+
+
+def _renaming(
+    running: _Running, original: item.Item, claiming: _Claiming
+) -> _Renaming | None:
+    """The name a verb that `retitles` gives `original`, or `None`. No writes.
+
+    Two refusals: a title that slugs to nothing, in `item.slug`'s words, and a
+    slug another file holds, in `_taken`'s. A title that keeps the slug is a
+    rewrite in place, and repoints nothing. A claim another session holds has
+    already refused in `_claiming`, so a record still at the old slug is this
+    session's, or is the one this run takes. See docs/method.md#retitle
+    """
+    if not running.transition.retitles:
+        return None
+    root = running.declaration.root
+    title = str(running.asked.get(_RETITLE) or "")
+    stem = item.slug(title)
+    if stem == original.slug:
+        return _Renaming(title=title, slug=stem)
+    if (held := _held_by(running.declaration, stem)) is not None:
+        raise Refusal(_taken(stem, held, root))
+    clearing = _clearing(
+        root,
+        original,
+        stem,
+        read.items(running.declaration),
+        lambda one: _references(running.declaration, one),
+    )
+    claimed = running.declaration.states[running.transition.to].has(claim.NAME)
+    record = claim.path(root, original.slug)
+    return _Renaming(
+        title=title,
+        slug=stem,
+        clearing=clearing,
+        follows=claimed and (record.exists() or claiming.take is not None),
+    )
+
+
+def _rename(running: _Running, original: item.Item, renaming: _Renaming) -> None:
+    """A retitle's half of the effect, after the new file is written and the
+    old one gone: the claim, then the referents, then the notices.
+
+    A crash before the claim moves strands it, and one before the referents
+    are written leaves `unknown dependency:` lines. The default read names
+    both. See docs/method.md#retitle
+    """
+    if renaming.slug == original.slug:
+        return
+    root = running.declaration.root
+    if renaming.follows:
+        claim.path(root, original.slug).replace(claim.path(root, renaming.slug))
+    _clear(renaming.clearing.edits)
+    for said in renaming.clearing.notices:
+        running.say(said)
+    # Read after the writes, so the renamed item's own body is asked too.
+    for said in _mentions(
+        read.items(running.declaration),
+        [original.slug],
+        root,
+        f'which {running.transition.name} renamed to "{renaming.slug}"',
+    ):
+        running.say(said)
 
 
 def _anchor(declaration: Declaration, state: State, handle: str) -> str:
@@ -1126,11 +1414,12 @@ class _Claiming:
 def _claiming(running: _Running, *, slug: str) -> _Claiming:
     """What this transition does to `slug`'s claim, or refuse. No writes.
 
-    Five rules: a record another session holds refuses, on the way out as much
+    Six rules: a record another session holds refuses, on the way out as much
     as on the way in; a missing record means unclaimed; entering a claimed
     state with no pid available refuses by name; a claim this session already
-    holds is kept rather than re-stamped; and only a transition that declares
-    `claims` takes one.
+    holds is kept rather than re-stamped; only a transition that declares
+    `claims` takes one; and taking one while this session holds a claim on
+    another item refuses, unless the run was asked to keep them.
     See docs/method.md#the-claimed-state
     """
     source = running.declaration.states[running.transition.source] if running.transition.source else None
@@ -1145,12 +1434,8 @@ def _claiming(running: _Running, *, slug: str) -> _Claiming:
     held = claim.read(path, running.declaration.root) if path.exists() else None
     who = claim.identity(running.declaration)
 
-    if held is not None and not claim.owns(held, who):
-        raise Refusal(
-            f"{slug} is claimed by {claim.describe(held, claim.alive(held, who))}, "
-            f"and {running.transition.name} is that session's to run. If it is gone, "
-            f"free the claim with `fileplan release {slug}`"
-        )
+    if held is not None:
+        _foreign(running, slug, held)
 
     if not entering:
         return _Claiming(path=path, free=held is not None)
@@ -1169,7 +1454,47 @@ def _claiming(running: _Running, *, slug: str) -> _Claiming:
             "holding it is not a claim. Export one of: "
             f"{', '.join(running.declaration.pid_names)}"
         )
+    if not running.asked.get(_KEEP_CLAIMS) and (others := _held(running, who, slug)):
+        raise Refusal(
+            f"{running.transition.name} would claim {slug}, and this session "
+            f"already holds a claim on {' and '.join(others)}. A pid is one agent "
+            "process, and one process runs many conversations, so a claim taken "
+            "before a conversation ended is still held after it. Free "
+            + ", and ".join(f"{one} with `fileplan release {one}`" for one in others)
+            + ", or pass --keep-claims to hold them all on purpose"
+        )
     return _Claiming(path=path, take=claim.record(who, taken=_now()))
+
+
+def _foreign(running: _Running, slug: str, held: Mapping[str, Any]) -> None:
+    """Refuse when `held`, the claim record on `slug`, is another session's."""
+    who = claim.identity(running.declaration)
+    if not claim.owns(held, who):
+        raise Refusal(
+            f"{slug} is claimed by {claim.describe(held, claim.alive(held, who))}, "
+            f"and {running.transition.name} is that session's to run. If it is gone, "
+            f"free the claim with `fileplan release {slug}`"
+        )
+
+
+def _held(running: _Running, who: claim.Identity, slug: str) -> list[str]:
+    """The items other than `slug` that `who` holds a claim on.
+
+    A record is counted only while its item sits in a claimed state. Any other
+    record is stranded, which the listing already names with its own fix.
+    Checked by path rather than by reading the tree, so an unrelated malformed
+    item cannot refuse a claim. See docs/method.md#the-listing
+    """
+    root = running.declaration.root
+    claimed = [
+        state for state in running.declaration.states.values() if state.has(claim.NAME)
+    ]
+    return [
+        one
+        for one in claim.mine(running.declaration, who)
+        if one != slug
+        and any((root / state.path / f"{one}{item.SUFFIX}").exists() for state in claimed)
+    ]
 
 
 def _apply(claiming: _Claiming, root: Path) -> None:

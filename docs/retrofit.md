@@ -424,7 +424,8 @@ Four things, named here rather than left for you to find out.
 4. **Numbers and positions are not inferred.** `0001-store-notes-as-files.md`
    listed as an item with that handle and no number, rather than becoming
    `number = 1`. Declare a `numbered` or `queued` state later and every
-   existing file in it starts unplaced. Ordering is a fact an item carries in
+   existing file in it starts unplaced. A queued state lists each unplaced
+   file last and names it under `unsorted`. Ordering is a fact an item carries in
    its head, not one recovered from a naming convention. Filling it in for
    existing items is hand work, once.
 

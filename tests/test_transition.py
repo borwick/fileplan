@@ -21,6 +21,7 @@ import os
 import re
 import socket
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -36,6 +37,7 @@ from fileplan.declaration import (
 )
 from fileplan.item import Item, read, write
 from fileplan.read import items as read_items
+from fileplan.read import listing as read_listing
 from fileplan.read import rows as read_rows
 from fileplan.transition import (
     execute,
@@ -134,6 +136,21 @@ def test_a_key_present_but_empty_reads_as_missing(transplant: Transition) -> Non
     assert offer_errors({"cultivar": ""}, transplant) == [
         'transplant requires "cultivar", which this item does not carry'
     ]
+
+
+def test_a_key_refused_on_presence_refuses_any_value_and_names_the_key(
+    transplant: Transition,
+) -> None:
+    """`rootstock = true`: any value at all, and the message names the key
+    rather than a value nobody declared."""
+    once = dataclasses.replace(transplant, refuses_any=("rootstock",))
+    head = {"cultivar": "heirloom"}
+    assert offer_errors(head | {"rootstock": "M9"}, once) == [
+        'transplant refuses an item carrying "rootstock"'
+    ]
+    assert offer_errors(head, once) == []
+    # Present but empty carries nothing, which is `_missing`'s rule again.
+    assert offer_errors(head | {"rootstock": ""}, once) == []
 
 
 @pytest.fixture
@@ -1402,6 +1419,102 @@ def test_a_claiming_verb_re_run_keeps_the_claim_rather_than_restamping(
     before = claim.path(tree.root, "a-seedling").read_bytes()
     execute(tree, tree.transitions["tend"], name="a-seedling", values={"rootstock": "M26"})
     assert claim.path(tree.root, "a-seedling").read_bytes() == before
+
+
+def kept(tree: Declaration, name: str) -> Path:
+    """`benched`, taking the claim beside one this session already holds."""
+    seedling(tree, name, READY)
+    execute(tree, tree.transitions["bench"], name=name)
+    return execute(
+        tree, tree.transitions["tend"], name=name, asked={"keep_claims": True}
+    )
+
+
+def test_claiming_a_second_item_while_holding_one_refuses_naming_it(
+    tree: Declaration, session: Identity
+) -> None:
+    """**Section 25's governing measure.** A pid is one agent process, and an
+    agent's `/clear` keeps the process, so a claim the cleared conversation
+    forgot is still this session's. The default run refuses at the next
+    claim, which is when the forgotten `release` matters, and writes nothing."""
+    benched(tree)
+    seedling(tree, "b-seedling", READY)
+    execute(tree, tree.transitions["bench"], name="b-seedling")
+    before = (tree.root / "potting-bench" / "b-seedling.md").read_bytes()
+
+    with pytest.raises(Refusal) as refused:
+        execute(tree, tree.transitions["tend"], name="b-seedling")
+    said = str(refused.value)
+    assert "would claim b-seedling" in said
+    assert "a-seedling with `fileplan release a-seedling`" in said
+    assert "--keep-claims" in said
+    assert (tree.root / "potting-bench" / "b-seedling.md").read_bytes() == before
+    assert not claim.path(tree.root, "b-seedling").exists()
+
+
+def test_every_held_item_is_named_beside_its_own_release(
+    tree: Declaration, session: Identity
+) -> None:
+    """Two held, so the refusal names two, each with the command that frees it."""
+    benched(tree)
+    kept(tree, "b-seedling")
+    seedling(tree, "c-seedling", READY)
+    execute(tree, tree.transitions["bench"], name="c-seedling")
+    with pytest.raises(Refusal) as refused:
+        execute(tree, tree.transitions["tend"], name="c-seedling")
+    said = str(refused.value)
+    assert "a-seedling with `fileplan release a-seedling`" in said
+    assert "b-seedling with `fileplan release b-seedling`" in said
+
+
+def test_keeping_claims_takes_the_second_and_the_listing_shows_both(
+    tree: Declaration, session: Identity
+) -> None:
+    """The opt-in. It allows the less safe thing, so only a run that asks for
+    it holds two, and the listing then names both as this session's."""
+    benched(tree)
+    kept(tree, "b-seedling")
+    by = {row["slug"]: row[claim.BY] for row in read_listing(tree).rows}
+    mine = f"{session.host} pid {MINE}"
+    assert by == {"a-seedling": mine, "b-seedling": mine}
+
+
+def test_a_re_run_on_a_held_item_is_kept_while_others_are_held_too(
+    tree: Declaration, session: Identity
+) -> None:
+    """Re-running on the item already held returns before the refusal is
+    asked, so holding others on purpose does not break saying where a
+    session has got to."""
+    benched(tree)
+    kept(tree, "b-seedling")
+    before = claim.path(tree.root, "a-seedling").read_bytes()
+    tended(tree)
+    assert claim.path(tree.root, "a-seedling").read_bytes() == before
+
+
+def test_a_stranded_record_of_this_sessions_does_not_refuse_a_claim(
+    tree: Declaration, session: Identity
+) -> None:
+    """Both flavours of stranded: a slug naming no item, and an item since
+    moved to a state that claims nothing. The listing already names each with
+    its `rm`, and `release` may not resolve the first, so counting them would
+    be a refusal whose own fix fails. See docs/method.md#the-listing"""
+    someone_else(tree, "gone", pid=MINE)
+    seedling(tree, "moved-on", READY)
+    someone_else(tree, "moved-on", pid=MINE)
+    benched(tree)
+    assert record(tree)["pid"] == MINE
+
+
+def test_another_sessions_claim_on_another_item_does_not_refuse(
+    tree: Declaration, session: Identity
+) -> None:
+    """The refusal is about this session's forgotten claims, not anybody's."""
+    seedling(tree, "b-seedling", READY)
+    execute(tree, tree.transitions["bench"], name="b-seedling")
+    someone_else(tree, "b-seedling", pid=1)
+    benched(tree)
+    assert record(tree)["pid"] == MINE
 
 
 def test_leaving_a_claimed_state_drops_the_claim(
@@ -3398,6 +3511,337 @@ def test_a_dissolving_verb_that_does_not_absorb_still_removes_the_edge(
 
 
 # --------------------------------------------------------------------------
+# Several items in one run, and the prose that still names them
+# --------------------------------------------------------------------------
+#
+# Only an absorbing verb takes several handles, and they are all or nothing:
+# every item is checked before anything is written. A tuple in hands back a
+# tuple out. The mention notice is every dissolving run's, and a real run's
+# only. See docs/method.md#merge and docs/method.md#dissolving
+
+
+def merged(tree: Declaration, *names: str, into: str = "b-seedling", **given: Any) -> Any:
+    """Several seedlings, absorbed into one item in one run."""
+    return execute(
+        tree, tree.transitions["inarch"], name=names, asked={"into": into}, **given
+    )
+
+
+def prose(path: Path, tree: Declaration, body: str) -> Path:
+    """``path``'s body, rewritten by hand, the way a person writes prose."""
+    one = read(path, tree)
+    write(Item(path=one.path, state=one.state, head=one.head, body=body))
+    return path
+
+
+def test_two_items_merge_into_a_third_in_one_run(tree: Declaration) -> None:
+    """**The done line.** Both files go, and a referent waiting on both holds
+    the survivor once: the second clearing ran over the first one's edit."""
+    first = seedling(tree, "a-seedling", READY)
+    seedling(tree, "b-seedling", READY)
+    second = seedling(tree, "c-seedling", READY)
+    orchard(tree, "d-seedling")
+    waits(tree, "d-seedling", ["a-seedling", "c-seedling"])
+
+    returned = merged(tree, "a-seedling", "c-seedling")
+    assert returned == (first, second)
+    assert not first.exists() and not second.exists()
+    assert read(tree.root / "orchard" / "d-seedling.md", tree)["after"] == ["b-seedling"]
+
+
+def test_one_failing_item_refuses_the_whole_run_and_writes_nothing(
+    tree: Declaration,
+) -> None:
+    """All or nothing: the good item is not merged either, and the refusal
+    names the failure on a line of its own."""
+    seedling(tree, "a-seedling", READY)
+    seedling(tree, "b-seedling", READY)
+    orchard(tree, "d-seedling")
+    waits(tree, "d-seedling", ["a-seedling"])
+    before = snapshot(tree)
+
+    with pytest.raises(Refusal) as refused:
+        merged(tree, "a-seedling", "no-such-seedling")
+    assert snapshot(tree) == before
+    head, *rest = refused.value.messages
+    assert head == "inarch took nothing away: 1 of 2 items refuse"
+    assert len(rest) == 1 and "no-such-seedling" in rest[0]
+
+
+def test_two_failing_items_give_two_lines(tree: Declaration) -> None:
+    """One naming nothing, one in the wrong state: each its own line."""
+    seedling(tree, "a-seedling", READY)
+    seedling(tree, "b-seedling", READY)
+    orchard(tree, "d-seedling")
+    before = snapshot(tree)
+
+    with pytest.raises(Refusal) as refused:
+        merged(tree, "a-seedling", "no-such-seedling", "d-seedling")
+    assert snapshot(tree) == before
+    head, *rest = refused.value.messages
+    assert head == "inarch took nothing away: 2 of 3 items refuse"
+    assert "no-such-seedling" in rest[0]
+    assert rest[1].startswith("orchard/d-seedling.md is in orchard")
+
+
+def test_a_handle_named_twice_refuses(tree: Declaration) -> None:
+    seedling(tree, "a-seedling", READY)
+    seedling(tree, "b-seedling", READY)
+
+    with pytest.raises(Refusal, match='"a-seedling" is named twice'):
+        merged(tree, "a-seedling", "a-seedling")
+    assert (tree.root / "greenhouse" / "a-seedling.md").exists()
+
+
+def test_an_item_that_is_also_the_survivor_refuses(tree: Declaration) -> None:
+    seedling(tree, "a-seedling", READY)
+    seedling(tree, "b-seedling", READY)
+
+    with pytest.raises(Refusal, match="cannot continue as itself"):
+        merged(tree, "a-seedling", "b-seedling")
+    assert (tree.root / "greenhouse" / "a-seedling.md").exists()
+
+
+def test_a_check_on_two_items_gives_two_lines_and_writes_nothing(
+    tree: Declaration,
+) -> None:
+    """One sentence per item, each from its own clearing."""
+    seedling(tree, "a-seedling", READY)
+    seedling(tree, "b-seedling", READY)
+    seedling(tree, "c-seedling", READY)
+    orchard(tree, "d-seedling")
+    waits(tree, "d-seedling", ["c-seedling"])
+    before = snapshot(tree)
+
+    said = merged(tree, "a-seedling", "c-seedling", check=True)
+    assert said.splitlines() == [
+        "inarch would take greenhouse/a-seedling.md away",
+        "inarch would take greenhouse/c-seedling.md away, and would clear "
+        "the edge to it in orchard/d-seedling.md",
+    ]
+    assert snapshot(tree) == before
+
+
+def test_several_items_on_a_verb_that_does_not_absorb_refuse(
+    tree: Declaration,
+) -> None:
+    """The CLI cannot produce it, and `execute` refuses it anyway."""
+    seedling(tree, "a-seedling", READY)
+
+    with pytest.raises(Refusal, match="compost takes one item"):
+        execute(tree, tree.transitions["compost"], name=("a-seedling",))
+    assert (tree.root / "greenhouse" / "a-seedling.md").exists()
+
+
+def test_several_items_on_a_verb_that_also_archives_refuse_by_name(
+    tree: Declaration,
+) -> None:
+    """One `--record` is one archive entry, so it cannot record two items.
+    No fixture verb archives and absorbs, so this one is built here."""
+    both = dataclasses.replace(tree.transitions["fell"], absorbs=True)
+    orchard(tree, "a-seedling")
+    orchard(tree, "c-seedling")
+
+    with pytest.raises(Refusal, match="one --record is one archive entry") as refused:
+        execute(tree, both, name=("a-seedling", "c-seedling"), asked={"record": RECORD})
+    assert refused.value.messages[0].startswith("fell ")
+
+
+def test_prose_still_naming_a_merged_slug_is_named_on_stderr(
+    tree: Declaration,
+) -> None:
+    """**The done line.** A body in another state and the survivor's own body
+    each get a line. A longer slug that merely starts with it gets none, and
+    no body is rewritten."""
+    said: list[str] = []
+    seedling(tree, "a-seedling", READY)
+    survivor = prose(
+        seedling(tree, "b-seedling", READY), tree, "Absorbs `a-seedling`.\n"
+    )
+    other = prose(
+        orchard(tree, "c-seedling"), tree, "See someday/a-seedling.md for it.\n"
+    )
+    longer = prose(orchard(tree, "d-seedling"), tree, "Not a-seedling-two.\n")
+    bodies = {path: path.read_bytes() for path in (survivor, other, longer)}
+
+    inarched(tree, announce=said.append)
+    mentions = [one for one in said if "its prose still names" in one]
+    assert sorted(mentions) == [
+        'greenhouse/b-seedling.md: its prose still names "a-seedling", which '
+        "inarch took away",
+        'orchard/c-seedling.md: its prose still names "a-seedling", which '
+        "inarch took away",
+    ]
+    assert {path: path.read_bytes() for path in bodies} == bodies
+
+
+def test_one_body_naming_two_merged_slugs_gets_one_line(tree: Declaration) -> None:
+    said: list[str] = []
+    seedling(tree, "a-seedling", READY)
+    seedling(tree, "b-seedling", READY)
+    seedling(tree, "c-seedling", READY)
+    prose(orchard(tree, "d-seedling"), tree, "Both a-seedling and c-seedling.\n")
+
+    merged(tree, "a-seedling", "c-seedling", announce=said.append)
+    assert [one for one in said if "prose" in one] == [
+        'orchard/d-seedling.md: its prose still names "a-seedling" and '
+        '"c-seedling", which inarch took away'
+    ]
+    # The order each half happens in: edges, mentions, then the removals.
+    assert said[-2:] == [
+        "greenhouse/a-seedling.md is gone: inarch took it away",
+        "greenhouse/c-seedling.md is gone: inarch took it away",
+    ]
+
+
+@pytest.mark.parametrize("verb", ["compost", "fell"])
+def test_every_dissolving_verb_gives_the_mention_notice(
+    tree: Declaration, verb: str
+) -> None:
+    """Not merge's alone: a verb that dissolves and absorbs nothing, and one
+    that archives, both say where the gone slug is still written."""
+    said: list[str] = []
+    if verb == "fell":
+        orchard(tree, "a-seedling")
+    else:
+        seedling(tree, "a-seedling", READY)
+    prose(orchard(tree, "c-seedling"), tree, "Waits for a-seedling.\n")
+
+    execute(
+        tree,
+        tree.transitions[verb],
+        name="a-seedling",
+        asked={"record": RECORD},
+        announce=said.append,
+    )
+    assert f'its prose still names "a-seedling", which {verb} took away' in "\n".join(said)
+
+
+def test_a_check_gives_no_mention_notice(tree: Declaration) -> None:
+    """The check says what the run would do, and a notice is not that."""
+    said: list[str] = []
+    seedling(tree, "a-seedling", READY)
+    seedling(tree, "b-seedling", READY)
+    prose(orchard(tree, "c-seedling"), tree, "Waits for a-seedling.\n")
+
+    sentence = execute(
+        tree,
+        tree.transitions["inarch"],
+        name="a-seedling",
+        asked={"into": "b-seedling"},
+        announce=said.append,
+        check=True,
+    )
+    assert said == []
+    assert "prose" not in sentence
+
+
+# --------------------------------------------------------------------------
+# The `carries` half: the absorbed body moves house
+# --------------------------------------------------------------------------
+#
+# `inarch` declares it, so `--carry` appends each absorbed body to the
+# survivor under its title, in the run that deletes the absorbed file. Without
+# the flag the survivor is byte-identical, which
+# `test_the_survivors_file_is_byte_identical_after_a_merge` pins.
+# See docs/method.md#merge
+
+
+def carried(tree: Declaration, *names: str, into: str = "c-seedling", **given: Any) -> Any:
+    """Seedlings absorbed into one item, their bodies carried along."""
+    return execute(
+        tree,
+        tree.transitions["inarch"],
+        name=names,
+        asked={"into": into, "carry": True},
+        **given,
+    )
+
+
+def titled(title: str, body: str) -> str:
+    """A seedling's file, with its own title and prose."""
+    return READY.replace('"A seedling"', f'"{title}"').partition("# A seedling")[0] + body
+
+
+def test_a_carry_leaves_both_bodies_in_the_survivor_under_their_titles_in_merge_order(
+    tree: Declaration,
+) -> None:
+    """**The done line.** Both absorbed files are gone, and their text is in
+    the survivor, each under its title, in the order the run named them."""
+    b = seedling(tree, "b-seedling", titled("Bee", "\n\nThe bee's body.\n\n"))
+    a = seedling(tree, "a-seedling", titled("Ay", "The ay body.\n"))
+    survivor = seedling(tree, "c-seedling", titled("Sea", "The sea body.\n"))
+
+    carried(tree, "b-seedling", "a-seedling")
+    assert not a.exists() and not b.exists()
+    assert read(survivor, tree).body == (
+        "\nThe sea body.\n\n### Bee\n\nThe bee's body.\n\n### Ay\n\nThe ay body.\n"
+    )
+
+
+def test_a_carry_and_a_self_edge_compose_into_one_write(tree: Declaration) -> None:
+    """The survivor waited on the item it absorbs: the edge goes, and the body
+    arrives, and neither write loses the other."""
+    seedling(tree, "a-seedling", titled("Ay", "The ay body.\n"))
+    survivor = orchard(tree, "c-seedling")
+    waits(tree, "c-seedling", ["a-seedling"])
+
+    carried(tree, "a-seedling")
+    after = read(survivor, tree)
+    assert "after" not in after
+    assert after.body.endswith("### Ay\n\nThe ay body.\n")
+
+
+def test_a_carry_that_would_give_the_survivor_a_second_sub_phases_heading_refuses(
+    tree: Declaration,
+) -> None:
+    """Graded before any write, with the check every listing runs, so the
+    next listing cannot refuse the tree this run left."""
+    seedling(tree, "a-seedling", titled("Ay", "## Steps\n\n- **1-1 — Dig**\n"))
+    survivor = orchard(tree, "c-seedling")
+    prose(survivor, tree, "## Steps\n\n- **1-1 — Plant**\n")
+    before = snapshot(tree)
+
+    with pytest.raises(Refusal, match='2 "Steps" headings') as refused:
+        carried(tree, "a-seedling")
+    assert "inarch cannot carry into orchard/c-seedling.md" in refused.value.messages
+    assert snapshot(tree) == before
+
+
+def test_a_survivor_another_session_holds_refuses_a_carry_but_not_a_merge(
+    tree: Declaration, session: Identity
+) -> None:
+    """A carry writes prose into a body the holding session may be rewriting,
+    which a head edge edit does not. Dropping --carry gets past it."""
+    seedling(tree, "a-seedling", READY)
+    seedling(tree, "b-seedling", READY)
+    seedling(tree, "c-seedling", READY)
+    execute(tree, tree.transitions["bench"], name="c-seedling")
+    someone_else(tree, "c-seedling", pid=os.getpid())
+    before = snapshot(tree)
+
+    with pytest.raises(Refusal, match="c-seedling is claimed by .*that session's to run"):
+        carried(tree, "a-seedling", "b-seedling")
+    assert snapshot(tree) == before
+
+    merged(tree, "a-seedling", "b-seedling", into="c-seedling")
+    assert not (tree.root / "greenhouse" / "a-seedling.md").exists()
+
+
+def test_a_check_names_the_carry_and_writes_nothing(tree: Declaration) -> None:
+    seedling(tree, "a-seedling", READY)
+    seedling(tree, "c-seedling", READY)
+    before = snapshot(tree)
+
+    said = carried(tree, "a-seedling", check=True)
+    assert said == (
+        "inarch would take greenhouse/a-seedling.md away, and would carry its "
+        "body into greenhouse/c-seedling.md"
+    )
+    assert snapshot(tree) == before
+
+
+# --------------------------------------------------------------------------
 # `check`: the run, stopped at the seam
 # --------------------------------------------------------------------------
 #
@@ -3593,3 +4037,167 @@ def test_a_check_says_nothing_about_a_claim_a_verb_would_not_take(
     )
     assert "take the claim" in taken
     assert not claim.path(tree.root, "b-seedling").exists()
+
+
+# --------------------------------------------------------------------------
+# Retitling: a new title, a new slug, and every reference to the old one
+# follows. `relabel` renames an orchard tree, which `after` and `for-tree`
+# name; `relabel-batch` renames a propagator batch, which `batch` names; and
+# `relabel-pot` renames on the claimed bench. See docs/method.md#retitle
+# --------------------------------------------------------------------------
+
+
+def relabelled(
+    tree: Declaration,
+    title: str,
+    name: str = "a-seedling",
+    verb: str = "relabel",
+    **given: Any,
+) -> Any:
+    return execute(
+        tree, tree.transitions[verb], name=name, asked={"new_title": title}, **given
+    )
+
+
+def test_a_retitle_moves_the_file_to_the_new_slug_and_rewrites_the_title(
+    tree: Declaration,
+) -> None:
+    """**The done line's first clause.** The old path is gone, the new one
+    holds the item, and its head carries the new title and everything else it
+    carried, place and number included."""
+    old = orchard(tree, "a-seedling")
+    before = read(old, tree).head
+
+    moved = relabelled(tree, "A pear tree")
+
+    assert moved == tree.root / "orchard" / "a-pear-tree.md"
+    assert not old.exists()
+    assert read(moved, tree).head == {**before, "title": "A pear tree"}
+
+
+def test_a_retitle_repoints_an_inbound_after_edge(tree: Declaration) -> None:
+    said: list[str] = []
+    orchard(tree, "a-seedling")
+    orchard(tree, "c-seedling")
+    waits(tree, "c-seedling", ["a-seedling", "d-seedling"])
+
+    relabelled(tree, "A pear tree", announce=said.append)
+
+    after = read(tree.root / "orchard" / "c-seedling.md", tree)["after"]
+    assert after == ["a-pear-tree", "d-seedling"]
+    assert 'orchard/c-seedling.md: pointed "a-seedling" at "a-pear-tree" in after' in said
+
+
+def test_a_retitle_repoints_carried_from_naming_a_renamed_carrier(
+    tree: Declaration,
+) -> None:
+    """The filing key follows the carrier it names, where a dissolve leaves
+    it alone: provenance outlives a carrier that is gone, not one renamed."""
+    lined(tree)
+
+    relabelled(tree, "B batch", name="a-batch", verb="relabel-batch")
+
+    assert read(tree.root / "greenhouse" / "the-first.md", tree)["batch"] == "b-batch"
+
+
+def test_a_retitle_repoints_opened_for(tree: Declaration) -> None:
+    """Not in the bullet's wording, and included because a batch still naming
+    the old slug would drop out of the dangle check without a word."""
+    orchard(tree, "a-seedling")
+    batch(tree, "A cutting", owner="a-seedling")
+
+    relabelled(tree, "A pear tree")
+
+    assert read(tree.root / "propagator" / "a-batch.md", tree)["for-tree"] == "a-pear-tree"
+
+
+def test_a_body_naming_the_old_slug_gets_the_notice(tree: Declaration) -> None:
+    """Another item's body and the renamed item's own both get a line, and
+    neither is rewritten."""
+    said: list[str] = []
+    prose(orchard(tree, "a-seedling"), tree, "Was a-seedling once.\n")
+    other = prose(orchard(tree, "c-seedling"), tree, "Waits for a-seedling.\n")
+    written = other.read_bytes()
+
+    relabelled(tree, "A pear tree", announce=said.append)
+
+    tail = 'which relabel renamed to "a-pear-tree"'
+    assert sorted(one for one in said if "prose" in one) == [
+        f'orchard/a-pear-tree.md: its prose still names "a-seedling", {tail}',
+        f'orchard/c-seedling.md: its prose still names "a-seedling", {tail}',
+    ]
+    assert other.read_bytes() == written
+
+
+def test_a_refused_retitle_leaves_the_tree_byte_identical(tree: Declaration) -> None:
+    """A slug another file holds refuses in the creating verb's words, and
+    before any of the three writes: the move, the referent, the claim."""
+    orchard(tree, "a-seedling")
+    orchard(tree, "b-seedling")
+    orchard(tree, "c-seedling")
+    waits(tree, "c-seedling", "a-seedling")
+    before = snapshot(tree)
+
+    with pytest.raises(Refusal) as refusal:
+        relabelled(tree, "B seedling")
+
+    assert 'the slug "b-seedling" is already held by orchard/b-seedling.md' in str(
+        refusal.value
+    )
+    assert snapshot(tree) == before
+
+
+def test_a_title_with_no_letters_refuses_and_writes_nothing(tree: Declaration) -> None:
+    orchard(tree, "a-seedling")
+    before = snapshot(tree)
+    with pytest.raises(Refusal, match="reduces to an empty filename"):
+        relabelled(tree, "!!")
+    assert snapshot(tree) == before
+
+
+def test_a_retitle_check_writes_nothing_and_gives_no_notice(tree: Declaration) -> None:
+    said: list[str] = []
+    prose(orchard(tree, "a-seedling"), tree, "Was a-seedling once.\n")
+    orchard(tree, "c-seedling")
+    waits(tree, "c-seedling", "a-seedling")
+    before = snapshot(tree)
+
+    sentence = relabelled(tree, "A pear tree", announce=said.append, check=True)
+
+    assert sentence.startswith(
+        "relabel would move orchard/a-seedling.md to orchard/a-pear-tree.md, and "
+    )
+    assert sentence.endswith(
+        'title it "A pear tree" and repoint the references to it in '
+        "orchard/c-seedling.md"
+    )
+    assert said == []
+    assert snapshot(tree) == before
+
+
+def test_a_title_that_keeps_the_slug_rewrites_in_place(tree: Declaration) -> None:
+    """A change of case or punctuation: nothing moves, nothing is repointed
+    and nothing is said."""
+    said: list[str] = []
+    path = prose(orchard(tree, "a-seedling"), tree, "Was a-seedling once.\n")
+
+    moved = relabelled(tree, "A Seedling!", announce=said.append)
+
+    assert moved == path
+    assert read(path, tree)["title"] == "A Seedling!"
+    assert said == []
+
+
+def test_the_claim_follows_the_slug(tree: Declaration, session: Identity) -> None:
+    """A claim this session holds moves with the item, where leaving it would
+    strand it and leave the renamed item reading as free."""
+    benched(tree)
+    old = claim.path(tree.root, "a-seedling")
+    assert old.exists()
+
+    relabelled(tree, "A pear tree", verb="relabel-pot")
+
+    assert not old.exists()
+    assert claim.owns(
+        claim.read(claim.path(tree.root, "a-pear-tree"), tree.root), session
+    )

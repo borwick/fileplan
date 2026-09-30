@@ -22,22 +22,30 @@
 # The tool does more than this file uses. An item can be claimed by one
 # session at a time. It can be cut into named bullets and marked off one by
 # one. It can carry its age in days, or a list of what it waits on. A new
-# item can be bodied from a template. None of that is on until you say so,
+# item can be bodied from a template. A transition declaring `retitles` renames
+# an item, and points everything that named the old name at the new one. None of that is on until you say so,
 # and each has a section in fileplan's method document, which the project's
 # own repository ships.
+#
+# A [fileplan] table with a `minimum` names the oldest fileplan release this
+# file needs. An older release then tells you to upgrade, instead of blaming
+# the file for a word it does not know yet.
 
 # Where an idea lands before anybody has decided about it.
 [states.inbox]
 path = "inbox"
 doc  = "docs/method.md#inbox"
 
-# Where it goes once you have committed to it. `queued` gives this state an
-# order, so the listing answers what is next. `numbered` gives each item a
-# number, and `archive` is the document a closed item's entry is filed in.
+# Where it goes once you have committed to it. `queued` gives each item a
+# place, and `sort` lists the state by those places, so the listing answers
+# what is next. A queued state must say how it sorts. `numbered` gives each
+# item a number, and `archive` is the document a closed item's entry is
+# filed in.
 [states.plan]
 path         = "plan"
 doc          = "docs/method.md#plan"
 capabilities = ["queued", "numbered"]
+sort         = "position"
 archive      = "docs/archive.md"
 
 # `values` closes the set, so any other word refuses by name. There is no

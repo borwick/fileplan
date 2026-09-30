@@ -227,6 +227,10 @@ The finding an item was [filed](#filing) from, by the name its bullet carries:
 keys. A single key holding `cache-misses/f1` would put a join character back
 inside the tool, and a bullet's own ident is what took it out.
 
+A `carried` naming a bullet its carrier no longer has is named by the
+listing's `unfound` report ([the listing](#the-listing)). That is what a split
+bullet leaves behind until each item is pointed at the half it meant.
+
 ### opened-for
 
 The section a [carrier](#carrier) was opened for, by its slug.
@@ -269,6 +273,13 @@ An item's **state is the directory it sits in**. The directory is the only
 answer, and a `state` key beside it would be a second one that can disagree
 with the tree.
 
+**A run writes the working tree and never writes git's index.** A move leaves
+the old path deleted and the new one untracked, and a run that takes an item
+away leaves a deletion, all unstaged. Staging is the session's act, because a
+sibling session may have its own work in the same index. The recipe is to
+stage the paths the run printed, and to `git add` a deleted path, since there
+is no `git rm`.
+
 ### title
 
 The one line that names the item — **intrinsic**, not a declared key. An item
@@ -276,10 +287,10 @@ is a head, a body, a location and a name. The tool knows all of them without
 being told, so `[keys.title]` refuses as a redeclaration. A transition's
 `sets` naming `title` refuses too.
 
-A retitle is a real transition. [dependencies](#dependencies) holds the rule
-for the inbound edges naming the old slug. A slug is the item's one handle, so
-a rename leaves those edges naming a slug nothing carries, and the default
-read names every one of them.
+A retitle is a real transition, and [retitle](#retitle) is its home. The
+slug is the item's one handle, so a new title that makes a new slug moves the
+file, and every reference naming the old slug is pointed at the new one in the
+same run.
 
 The **body is the description**. An item needs a title and a body to exist, so
 a transition that creates one refuses without prose.
@@ -302,7 +313,8 @@ list-valued = true
 The head then holds a TOML list. Every reader treats the value as
 [the several values it holds](#the-listing) rather than as one value: a filter
 matches an entry, a comparison compares each entry, and a `refuses` fires on
-an entry. The refusal names **that entry** rather than the list. One filter
+an entry. The refusal names **that entry** rather than the list. A
+`refuses` of `true` fires on any list that is not empty. One filter
 asks about the **whole** list instead, and the filter that does is
 [`--has 'KEY:VALUE,…'`](#the-listing).
 
@@ -381,6 +393,15 @@ An identity is **a host and a pid**. `local/` is gitignored, but a tree may
 sit on a syncing filesystem. Records then reach machines that never ran the
 session that wrote them. The host is what makes the pid mean anything at all.
 The host also tells a person which machine to go and look at.
+
+**A pid is one agent process, not one conversation.** An agent such as Claude
+Code runs many conversations in a row inside one process. Its `/clear` starts
+a new conversation and keeps the process, so the pid does not change. A claim
+the old conversation took is still this session's, and the new conversation
+has no memory of it. A sibling cannot free it either, because
+[`release`](#release) refuses while the holder's pid is alive. What catches
+the forgotten claim is the next claim this session takes, which [refuses and
+names it](#the-claimed-state).
 
 The liveness probe is `os.kill(pid, 0)`, asked only about a record written on
 **this** host. On any other host the tool reports the claim as held elsewhere
@@ -481,6 +502,32 @@ transition both pick a section up and, run again, say where the session has
 got to. The alternative is a second transition that would be the same rule
 spelled twice.
 
+**A claiming run refuses while this session holds a claim on another item.**
+The refusal is rc 2, and it names each item this session holds beside the
+`fileplan release` command that frees it. A refused run writes nothing, and
+`--check` refuses in the same words. This is the loud polarity. A session that
+ended without `release`, or a conversation that was cleared, is found out at
+the next claim, which is the moment the forgotten claim matters. Freeing the
+old claim silently was turned down (John, 2026-09-29). It would act on an item
+the command did not name, and it would hide the mistake the refusal exists to
+show.
+
+**`--keep-claims` holds several on purpose.** Every transition that declares
+`claims` takes the flag. It allows the less safe thing, so the default stays
+the refusal, and a session passes the flag only when it means to hold two.
+Ownership here is the same as everywhere else, so a record with no pid on this
+host counts as this session's. A **stranded** record does not count: one whose
+item is gone, or whose item has moved to a state that claims nothing. [The
+listing](#the-listing) already names each stranded record with the `rm` that
+removes it, and `release` may not resolve its slug at all. Counting it would
+give a refusal whose own fix fails.
+
+**A claiming run given nothing else is supported.** It takes the claim, leaves
+the item's file as it was, and exits 0, and stderr says the file is unchanged
+because only the claim was taken. A session can therefore claim an item before
+a long read and write its result with the same transition afterwards, without
+a sibling picking the item up in between.
+
 The item file is written **before** the record. A crash between the two leaves
 an item in a claimed state with no record, which reads as unclaimed and is
 recoverable. The other order would leave a claim on an item that never moved,
@@ -547,8 +594,8 @@ names, the transitions between them, one key, and no capabilities. The whole
 roster — [the queue](#the-queue), [the claim](#the-claim),
 [the register](#the-register), [sub-phases](#sub-phases),
 [stale-days](#stale-days), the [dissolving](#dissolving) halves,
-[templates](#templates), `[identity]` — sits beneath as commented lines a
-consumer uncomments. A first tree files items and moves them, and does nothing
+[templates](#templates), `[identity]`, `[fileplan]` — is in this document,
+one section each, and the starter's header says so. A first tree files items and moves them, and does nothing
 else. Nothing in the roster is a fact about somebody else's work until they
 say so. Shipping this repo's own workflow trimmed would be the
 planning-shaped default the design refuses.
@@ -606,6 +653,33 @@ second construction is the same failure as a second declaration of the number,
 one artifact further out. The number is bumped by the tool that owns
 `pyproject.toml`, never by hand, which is what keeps one declaration true.
 
+**A `plan.toml` can name the oldest release it needs**, in a `[fileplan]`
+table with one field:
+
+```toml
+[fileplan]
+minimum = "0.7.0"
+```
+
+`minimum` is a version of dotted integers, compared number by number, with
+trailing zeros ignored, so `0.7` and `0.7.0` are the same release. There is
+no maximum and no range. A `[fileplan]` table without `minimum` refuses, since
+an empty table says nothing.
+
+The minimum is checked **before every other load error**. A `plan.toml`
+written for a newer release may use a field the installed tool does not know.
+Without the minimum, the installed tool reports that field as the
+declaration's mistake. With it, the tool refuses once, naming both versions
+and the cure:
+
+```
+ERROR: plan.toml needs fileplan 0.9.0 or newer, and this is fileplan 0.7.0: upgrade fileplan to read it
+```
+
+**The check has one honest limit.** A release older than the first one to
+know `[fileplan]` cannot read the table either. That release says `fileplan
+is not a plan.toml table`, which names the table and not the cure.
+
 ### the skills
 
 `fileplan --skills` prints the directory the tool's own **interpreter** ships
@@ -634,6 +708,14 @@ names a transition this repo declares, which is what makes them worth shipping
 at all. A skill that spelled this workflow's vocabulary would be this repo's,
 not a consumer's.
 
+**A shipped skill cites nothing the install lacks.** The package carries the
+skills and not `docs/`, so a skill points at what travels with the tool:
+`--help`, whose `Reading` and `Running it` blocks name the consumer's own
+documents, and `--json`. The skills spell the command as plain `fileplan`, so
+a consumer's copy needs no edit, and say once that this source tree runs it
+through `uv run`. A test reads the built wheel and follows every link a skill
+makes.
+
 `docs/initialization.md` walks the copy.
 
 ### the listing
@@ -645,6 +727,39 @@ states in declared order. The traversal claims every `*.md` in a state to be
 an item. A file that is not an item refuses the listing by name rather than
 being skipped. Silence would make a broken file look merely absent. A state
 whose directory does not exist yet is empty, not broken.
+
+**States come in declared order, and each state says how its items are
+ordered.** A state's `sort` field names one key, in `--sort`'s spelling:
+`sort = "position"`, or `sort = "-stale-days"` for descending. Items in that
+state come by that key, then by slug. Items in a state with no `sort` come by
+slug. [`plan`](#plan) declares `sort = "position"`, so `plan` lists in the
+order [`queue`](#queue) and [`requeue`](#requeue) set.
+
+The load checks that a state's `sort` names a key an item in that state can
+carry. That covers `title`, every declared key, and the keys this state's own
+capabilities and fields give. `position` counts only on a
+[queued](#the-queue) state, and `stale-days` only on a
+[dated](#stale-days) one. Any other key refuses by name, and the refusal lists
+what the state carries. A key no item in the state could carry would put every
+item under `unsorted` on every read. A mistake in the declaration belongs at
+load, not on every read.
+
+`--sort KEY` orders the items **inside each state** by KEY, then by slug, and
+replaces every state's declared `sort` for that read. The states keep their
+declared order. `--sort -KEY` sorts descending.
+Give `--sort` again to break ties, the first key first. A sort compares the
+way `--has` does, with one change: a comparison may decline to rank two
+unlike values, and a sort must rank every pair. So a value the key declares
+comes first, in declared order. A number comes next, by size, so `9` sorts
+before `10`. Any other value comes last, as text. That includes a value a
+closed key never declared. A list sorts by its entries, in order. An item
+without KEY comes after the rest, whichever way the sort runs, and the
+listing names it under `unsorted`.
+
+A sort never ranks one state's items against another's. A queued state's
+order is a decision made by moving items. A key such as value or cost is only
+an input to that decision, so a rank across states would say something
+nothing can act on.
 
 The traversal produces a **row**: a mapping carrying every declared key, with
 `null` where the item does not carry the key. So the shape a consumer writes
@@ -739,6 +854,11 @@ tree, and narrowed by no filter. These are the reports:
   sub-phase. [Sub-phases](#sub-phases) says which two cases it names. Each
   record carries `item`, `name`, `line`, `path` and a `reason`. The `name` is
   what the name would be, or `null`.
+* `unfound` is a [`carried`](#carried) value naming a bullet that its
+  carrier, the item [`carried-from`](#carried-from) names, no longer has. A
+  split bullet leaves one behind. It is reported only while the carrier is
+  filed, because provenance outlives the carrier. Each record carries `slug`,
+  `path`, `key`, `value` and `carrier`. It gates nothing.
 
 The reports stay separate arrays rather than one merged list of notices. Each
 report carries a different shape, and the envelope key is how a consumer
@@ -764,6 +884,10 @@ present whenever the declaration could fill it and absent otherwise:
 * `unmarkable` is present wherever a command marks.
 * `unread` is present wherever a state counts sub-phases.
 * `undeclared` is present wherever a key declares its values.
+* `unfound` is present wherever a command [files](#filing) an item.
+* `unsorted` is present wherever the read sorts anything: `--sort` was given,
+  or a state declares a `sort`. It names each row the read put last for
+  missing a sort key, and covers only the rows shown.
 * `rows` is the rows, always last.
 
 **What `version` promises.** It goes up only when a field is removed, or
@@ -860,6 +984,13 @@ An item is offered when two things hold:
 Those two are the checks the transition itself runs, composed once rather than
 spelled a second time. So the offer and the transition agree by construction,
 instead of by a test that two lists match.
+
+**A transition that stays in its state is offered again after it runs.**
+Running it again is legal, so hiding the item would break that agreement. A
+workflow that means "once" says so in the declaration, with `refuses = { KEY =
+true }` on the key the transition sets ([transitions](#transitions)). A
+workflow that only wants to read "not yet done" narrows the offer with
+`--lacks KEY`.
 
 A [claim](#the-claim) excludes an item only when the claim is **another
 session's**. The offer is what the transition would not refuse. A transition
@@ -964,6 +1095,9 @@ see what it can take. `show` and `release` are not transitions, so theirs is
 
 `fileplan show ITEM` is [the listing](#the-listing)'s row for **one item**.
 The item is resolved by [the handle](#the-handle) rather than by a filter.
+ITEM may also be a live section's number, such as `28`, and `show 28-1` is
+the same read as `show ITEM 28-1`. `show` is the one verb that names an item
+and writes nothing, so it is the one verb that reads a number.
 `show` is the same traversal again — one walk, both renderings off the same
 row. So `show` prints what `list` would print, narrowed to one item.
 
@@ -1057,6 +1191,9 @@ own name refuses at load. The two pointers would share one line, the key's
 pointer would win, and the transition's own program would be lost. The loader
 names the collision rather than dropping a pointer.
 
+A key refused on presence reads `KEY (any value)` in `Refuses`, and `true`
+under `refuses` in `--json`, the way `plan.toml` spells it.
+
 `Drops` sits with `Requires` and `Refuses`, because `Drops` is the same
 subject read one step later. `Requires` and `Refuses` say what the head must
 hold for the run to go. `Drops` says what the head will not hold afterwards.
@@ -1089,6 +1226,36 @@ declaration declares. [The listing](#the-listing)'s rows do not depend on
 which items are filed, for the same reason. The text form goes on omitting an
 empty block, because a person reading help wants the blocks that say
 something.
+
+**The JSON also says what each command takes**, so a consumer never has to
+scrape `--help`. Each transition's object carries `options`, one entry per
+option `--help` prints, leaving out `--help` itself. An option entry has six
+fields:
+
+* `name`, the spelling, such as `--title`;
+* `takes`, the placeholder `--help` shows, or `null` for a flag;
+* `required` and `multiple`, each `true` or `false`;
+* `values`, the allowed values of a key with a closed set, or `null`;
+* `help`, the option's help text, or `null`.
+
+The entries are read off the same click parameters `--help` renders, so the
+JSON and the help cannot disagree. A test runs `--help` for every command and
+holds each option it prints to the JSON.
+
+`commands` holds the tool's own words: `list`, `next`, `show`, `init`, and
+`release` where some state is claimed. Each command has a `name`, a `help`,
+`options` and `commands`. The tool's own words are not transition objects,
+because a transition object's `from`, `to` and blocks would all be empty for
+them. `commands` is empty everywhere except `next`, which holds one entry per
+`next COMMAND`. Each `next COMMAND` takes its own options: an offer of items
+takes the [listing](#the-listing)'s filters, and an offer of bullets takes
+`--json` alone.
+
+`keys` holds every declared key, with its `name`, `help`, `doc` and `values`.
+`values` is the closed set, or `null` for free text.
+
+Adding these fields did not change `version`. A field added is never a bump,
+as [the listing](#the-listing)'s "What `version` promises" says.
 
 A command beside the flag **refuses**. `fileplan --json list` asks about the
 declaration and about the tree at once. A read spells its own `--json`, after
@@ -1323,10 +1490,11 @@ blocking. An item waiting on something that has been abandoned really is
 blocked, by a decision rather than by unfinished work. The row saying so is
 what makes somebody go and look.
 
-The same reading answers a **rename**. A slug is the item's one handle. So
-retitling an item leaves every inbound edge naming a slug nothing carries, and
-the default read names every one of them. A retitle transition, when there is
-one, rewrites those edges the way a dissolving transition clears them.
+The same reading answers a **rename**. A slug is the item's one handle. So a
+file renamed by hand leaves every inbound edge naming a slug nothing carries,
+and the default read names every one of them. A
+[retitle](#retitle) rewrites those edges the way a dissolving transition
+clears them.
 
 [`position`](#the-queue) is the order work is picked up in. An edge is the
 statement that one item waits on another. A place and an edge are not the same
@@ -1348,6 +1516,14 @@ whole listing over one item. An unresolvable edge does not narrow
 a derived fact, and the offer's checks stay pure over a head. So an unknown
 edge costs an item nothing mechanically. The edge is a line in the default
 read, and a session goes and looks.
+
+**A run handed an edge naming nothing refuses it.** That is a transition's
+check on a value it was given, not a report, and the reports above are
+unchanged. The tree is in hand when a run writes the key, so a slug no item
+carries refuses before anything is written, naming the near misses the way
+[a handle](#the-handle) does. `--check` gives the same refusal. The slug has
+to be exact: nothing is resolved from a prefix or rewritten. An edge that
+dangles later, after a rename or an abandon, is still only reported.
 
 ### stale-days
 
@@ -1527,9 +1703,13 @@ automatically. [`queue`](#queue) is what mints one, because committing to work
 is when an item earns a number. An idea in
 [`someday-maybe`](#someday-maybe) has not earned an ordering.
 
-**A number is for the archive.** An item is named by [its slug](#the-handle)
-and by nothing else. `fileplan work 4` does not resolve and must not. The
-number names an item in the archive, where the item's file no longer exists.
+**A number is for reading and for the archive.** A verb that writes names
+an item by [its slug](#the-handle) and by nothing else. `fileplan show 4`
+reads the live item carrying 4, and `fileplan work 4` does not resolve and
+must not. The number names an item in the archive, where the item's file no
+longer exists. While the item is still filed, a writing verb's refusal names
+it and the command that reaches it ([the handle](#the-handle)), and the
+refusal stays a refusal.
 
 **The register is derived, never stored.** There is no high-water mark. The
 corpus decides what is taken, so a renumber cannot leave a registry behind to
@@ -1761,6 +1941,24 @@ loses the entry and stays a list. A value the clearing empties **loses the
 key**, rather than keeping `after = []`. An empty key carries nothing, and
 would be a fact the head states and nothing means.
 
+**A body that still names the gone item gets a line too.** Clearing edits
+dependency keys, and prose can name the item as well. After a real run, every
+item left in the tree is read, the survivor included. Each body naming a gone
+slug gets one line on stderr:
+
+```
+plan/some-section.md: its prose still names "a-idea" and "b-idea", which merge took away
+```
+
+The match is on the whole slug. So `someday-maybe/a-idea.md` counts, and
+`a-idea-two` does not. Only the body is read, because the head's edges are
+the clearing's job. The notice warns and never rewrites. Rewriting would be
+the tool editing what a person wrote. The exit stays 0. A `--check` prints no
+such line, because the check says what the run would do.
+
+The stderr lines come in the order the run works. The archive entry comes
+first, then the edges, then the prose, then one line per item removed.
+
 **`absorbs = true` points an item's edges at a survivor instead of removing
 them.** `absorbs` is the second declared half of dissolving, and
 [`merge`](#merge) is this workflow's transition of the shape:
@@ -1778,7 +1976,10 @@ resolves **tree-wide**, like every other. So `merge some-idea --into
 a-plan-section` is a legitimate run. An idea continues as a queued section,
 and the tool owns no judgment about where work continues. The survivor is
 neither graded nor edited. Nothing is written to the survivor, so its claim is
-irrelevant and its state is unconstrained. The survivor carries **no record of
+irrelevant and its state is unconstrained. The one exception is
+[`--carry`](#merge), which writes the absorbed bodies into the survivor's
+body. A carry grades the body it composes, and it refuses a survivor another
+session holds. The survivor carries **no record of
 what it absorbed** (John, 2026-09-04). The only residue of a merge is that
 every reference now points at the survivor. Two refusals, both computed
 before any write: a handle naming nothing, and a survivor that *is* the item.
@@ -1857,14 +2058,21 @@ cleared edges'.
 ### the queue
 
 A state may opt into the **`queued` capability**, and [`plan`](#plan) does.
-Every item in such a state carries a `position`, a place in the order the
-state is read in. The key is **not declared** and may not be. The key is the
+Every item in such a state carries a `position`: a place in the state. The key
+is **not declared** and may not be. The key is the
 *tool's* rather than this workflow's. So `[keys.position]` refuses as a
 redeclaration, and so does a transition naming it in `requires`, `sets`,
 `drops` or `refuses`. A position is written on the way into the state and
 dropped on the way out, automatically. A second spelling of that rule could
-disagree with the first. An item in a state with no order carrying a
-`position` refuses by name.
+disagree with the first. An item carrying a `position` in a state that
+is not queued refuses by name.
+
+**A queued state must declare `sort`**, or the load refuses by name and says
+to add `sort = "position"`. The `queued` capability holds places, and the
+state's `sort` is what lists items by them. A queued state that forgot `sort`
+would list its items by slug, and nothing would say the order had gone. So
+the missing line is refused at load, where one line fixes it. Any key the
+state carries may be the sort. `position` is the usual one.
 
 **Places are 100 apart**, so there is room between any two. A new place is
 the midpoint of its two neighbours. So filing something between two items
@@ -1905,9 +2113,9 @@ cannot cite between two sittings.
 
 A place is a **bare integer**, never quoted, because the key is arithmetic.
 `"1000"` sorts ahead of `"200"` as text. For the same reason `--has
-'position>=200'` compares as a number. An item in an ordered state carrying no
-place sorts last and simply shows none. The listing is how you find out what
-to fix.
+'position>=200'` compares as a number. An item in a queued state carrying no
+place comes last, and the listing names it under `unsorted`. The listing is
+how you find out what to fix.
 
 ### sub-phases
 
@@ -2040,6 +2248,7 @@ says which is which. This repo's own declaration is the worked example:
 path             = "plan"
 doc              = "docs/method.md#plan"
 capabilities     = ["queued", "claimed"]
+sort             = "position"
 sub-phases       = "Sub-phases"
 sub-phase-cursor = "sub-phase"
 sub-phase-status = "sub-phase-status"
@@ -2259,6 +2468,13 @@ Three steps are applied in this order to the body. **Drop** the pending bullet
 if it is there. **Append** the new sub-phase, if `--title` was given.
 **Append** the pending bullet unless `--last` was.
 
+**A bare run on a section that is already open changes nothing.** It drops
+the pending bullet and puts the same bullet back, so the file is left byte for
+byte as it was. The run still exits 0 and prints the path, and stderr says the
+item is unchanged and why. Without that line, a run that wrote and a run that
+did nothing would look the same on both streams. Any run that leaves the
+item's file as it was says so the same way.
+
 **The marker being the bullet means a section half cut up reads as half cut
 up.** Forget `--last` and the bullet goes on saying the section is pending,
 which is loud and harmless. A forgotten head key would instead leave a
@@ -2271,7 +2487,9 @@ signal, and a session's cursor reaching it is what surfaces the section in a
 read.
 
 The polarity is also why **minting into a finished section re-opens it**
-rather than refusing. The last step is unconditional and asks nothing about
+rather than refusing. A finished section is one whose heading is there with no
+pending bullet under it. A body with no heading was never decomposed, so its
+first mint re-opens nothing and says nothing. The last step is unconditional and asks nothing about
 what came before. So the section simply is unfinished again, which is true,
 and is what the operator just asked for. The old tool needed a `--reopen` flag
 and three refusals around it, purely to guard a `decomposed = true` head key
@@ -2588,7 +2806,8 @@ load, at every invocation. So the run itself checks it nowhere.
 
 `seeds` is the only field in the declaration that **refuses** a `from`. Every
 other half a transition can declare — `requires`, `refuses`, `drops`,
-`mints`, `marks`, `files`, `archives`, `dissolves`, `absorbs` — **needs** one.
+`mints`, `marks`, `files`, `archives`, `dissolves`, `absorbs`, `carries`,
+`retitles` — **needs** one.
 A transition that creates an item has no item to read. A transition that moves
 an item has an item already, and nothing to seed. Declared beside a `from`,
 `seeds` refuses by name at load, in the inverse of the words that arm already
@@ -2618,17 +2837,59 @@ measured against what it was the start of, and a long slug is not beaten by
 short strangers. Ties go to the slug sharing more hyphen-words, and three at
 most are offered. Nothing below a cutoff is offered at all.
 
-**A number is never a handle.** A number names a section in
-[the register](#the-register), and a number that resolved would be a second
-answer to which item is meant. A handle that is all digits, or that starts
-with digits and a hyphen, gets one more line. It says that
-`fileplan list --has number=N` finds the item carrying a number. It also says
-that a sub-phase is reached as [`show ITEM NAME`](#show).
+**`show` also finds a live item by its number.** `fileplan show 28` prints
+the row of the item in [the register](#the-register) carrying 28. `fileplan
+show 28-1` prints the same record as `fileplan show SLUG 28-1`: that item,
+and its bullet named 28-1. The bullet name goes through the same reader as
+any other, so a name the body has not got refuses as "no such name". Giving
+two different sub-phase names, as in `show 28-1 28-2`, refuses, because the
+tool never guesses which was meant.
+
+**A slug outranks a number.** `show 28` tries the number only when no slug
+starts with `28`. This is the rule above, one step further: a full slug
+names itself ahead of a longer slug it prefixes, and a slug names itself
+ahead of a number. The number is tried only where the slug rules found
+nothing.
+
+**A number is never a handle for a verb that writes.** Only `show` reads a
+number. A number is minted when an item enters the state and dropped when it
+leaves, so an item that goes out and comes back carries a new number. A verb
+that acted on a number could act on an item other than the one the person
+had in mind. The row `show` prints carries the slug, so every verb after it
+has its handle. A handle that is all digits, or that starts with digits and
+a hyphen, gets one more line when a writing verb refuses it. Where a filed
+item carries that number, the line names the item and the command that
+reaches it:
+
+```
+ERROR: no item starts with "24-1"
+  24-1 is a sub-phase of `exits`: `fileplan show exits 24-1`
+```
+
+Where no filed item carries it, the number is an archived section's, if it
+is anyone's. `show` refuses it too, and so does every other verb. The line
+then says that [`fileplan show`](#show) finds a live section by its number,
+and that a verb that writes takes a slug.
 
 Resolution is tree-wide. So a transition aimed at an item in another state
 says **where the item actually is**, rather than that no such item exists.
 
 ## Transitions
+
+Each transition below is declared in `plan.toml`, and two of its fields say
+what an item's head must hold for the run to go. `requires` lists keys the
+head must carry. `refuses` is a table, and each entry takes one of two forms.
+A list of values refuses an item carrying any of them. `true` refuses an item
+carrying the key at all, whatever its value:
+
+```toml
+refuses = { decision = true, size = ["XL"] }
+```
+
+A key present but empty carries nothing, so it passes either form. `false`
+refuses at load, because it would say nothing: write `true`, or a list. Both
+forms are checked by the same function the [offer](#the-next-read) uses, so
+`next` and the run agree.
 
 ### idea
 
@@ -2686,6 +2947,67 @@ Naming no place is **not** a request. `fileplan requeue a-worked-example` on
 its own leaves the item exactly where it is, because an item already in the
 state [keeps its place](#the-queue) unless asked otherwise.
 
+### retitle
+
+Give an item a new title. The slug is made from the title, so a new slug
+moves the file, and every reference to the old slug is pointed at the new
+one. The new title is the second positional:
+
+```
+fileplan retitle a-worked-example "A better name"
+```
+
+`retitle` stays in [`plan`](#plan), and
+[`retitle-idea`](#retitle-idea) is the same thing for an idea. A transition
+renames by declaring
+`retitles = true`. It is a half rather than a plain move, because the tool
+has to know that the run renames. The half needs a `from`. It refuses beside
+`dissolves`, which leaves no file to rename, and beside `marks`, which takes
+the same positional. `to` may differ from `from`.
+
+The title is a positional rather than `--title`. A transition that
+[mints](#bulleted) or [files](#filing) already takes `--title`, where it
+names something new.
+
+**What gets repointed** is every head value the tool reads as a slug:
+
+* each state's [`dependencies`](#dependencies) key, which is `after` here;
+* the key each filing transition names for where an item came from, which is
+  [`carried-from`](#carried-from) here;
+* each state's [`opened-for`](#opened-for) key.
+
+`opened-for` is included because a carrier still naming the old slug would
+drop out of [the dangle check](#the-dangle-check) without a word. Each edited
+file is named on stderr. The same run names each item whose prose still
+mentions the old slug, the renamed item included. The tool never rewrites
+prose.
+
+**The claim follows the slug.** A claim another session holds refuses, as it
+does for any transition. A claim this session holds is moved to the new slug.
+
+**Order of writes.** Every refusal is decided before anything is written.
+Then the new file is written, the old one removed, the claim moved and the
+references rewritten. A crash partway leaves two files, or `unknown
+dependency:` lines, and the default read names both.
+
+**A title that keeps the slug** rewrites the title in place. A change of case
+or punctuation is one. Nothing moves and nothing is repointed. A new slug held
+by any other file refuses, and so does a title with no letters or digits.
+
+[When a handle changes](procedures.md#when-a-handle-changes) says what a
+session does after the run.
+
+### retitle-idea
+
+Give an idea a new title. It is [`retitle`](#retitle) in
+[`someday-maybe`](#someday-maybe), and everything said there holds here. What
+a session does afterwards is the same too:
+[when a handle changes](procedures.md#when-a-handle-changes).
+
+```
+fileplan retitle-idea a-worked-example "A better name"
+```
+
 ### work
 
 Take up a section, and say which sub-phase you are on. The same state on both
@@ -2706,8 +3028,10 @@ cursor](#the-cursor) are one transition. `--sub-phase` is graded against the
 also refuses onto a bullet already [marked](#marking), which is where saying a
 sub-phase is *finished* happens instead.
 
-[`release`](#release) is the session boundary, and nothing auto-releases. Two
-sessions running the pick read — `list --state plan --lacks claimed-by` — get
+[`release`](#release) is the session boundary, and nothing auto-releases. A
+session that ends without it is caught at its next claim, which [refuses and
+names the held item](#the-claimed-state), rather than at a sibling's listing.
+Two sessions running the pick read — `list --state plan --lacks claimed-by` — get
 disjoint items.
 
 ### decompose
@@ -2882,7 +3206,9 @@ bullet ([the cursor](#the-cursor)).
 It takes **no claim**, like [`decline`](#decline). The ownership check still
 runs: a section somebody else is holding refuses before anything is deleted.
 Unlike `decline` it **clears every inbound edge**, so nothing is left naming
-an item that has gone ([dependencies](#dependencies)).
+an item that has gone ([dependencies](#dependencies)). It also names every
+item whose prose still mentions the section's slug, and rewrites none of that
+prose ([dissolving](#dissolving)).
 
 Any state may declare a transition of this shape. `archive-plan` is out of
 [`plan`](#plan) here because that is where this workflow's committed work
@@ -2905,6 +3231,22 @@ edge naming it at the survivor, rather than removing it. `--into` is
 **required**, and it resolves tree-wide. The work may continue as an item in
 any state.
 
+**Several ideas can merge in one run.** Name each idea before `--into`:
+
+```
+fileplan merge a-idea b-idea --into a-section
+```
+
+The run takes the lock once. Every idea is checked before anything is
+written. If one idea refuses, no idea is merged. The refusal names every
+failing idea, one per line. `--check` prints one line per idea, saying what
+the run would do to that idea. A real run prints each removed path on
+stdout, one per line.
+
+Only a transition declaring `absorbs` takes several items. A transition that
+also declares `archives` refuses several items by name. One `--record` is one
+archive entry, so one run can record only one item.
+
 **It archives nothing**. `someday-maybe` mints no [number](#the-register), so
 there is no entry to name and nothing to write. That is exactly what makes
 deleting the original safe here. A deletion in an unnumbered state punches no
@@ -2918,16 +3260,52 @@ residue of a merge is that every reference now points at the survivor. A
 record on the survivor would be a second place the same fact lives, and the
 edges already say it.
 
+**`--carry` keeps the absorbed text.** Sometimes the absorbed ideas *are* the
+specification, as when several small fixes become one section. Then the text
+is the work, and losing it means composing the survivor's body by hand before
+the merge. Sections 26 and 27 were both made that way. So `merge` declares
+`carries = true`, which gives it a `--carry` flag:
+
+```
+fileplan merge a-idea b-idea --into a-section --carry
+```
+
+Each absorbed body is appended to the end of the survivor's body, in the
+order the ideas were named. Each goes under a `### <its title>` heading,
+with blank lines trimmed from either end. The survivor's head is not touched.
+
+**This is not a second copy.** The absorbed file is deleted in the same run,
+so only one copy of the text remains. The fact has moved house rather than
+been duplicated. Without `--carry` the survivor is byte-identical, which is
+the 2026-09-04 ruling unchanged (John, 2026-09-29).
+
+A carry has two refusals of its own, and both come before any write. The
+first is a composed body that its state's [sub-phase](#sub-phases) check
+refuses. Carrying a second `Sub-phases` heading into a section would
+otherwise break the next listing. The second is a survivor another session
+holds. Editing a referent's head is mechanical, but a carry writes prose into
+a body that session may be rewriting. Drop `--carry`, or have the claim
+released, to get past it.
+
+`carries` is a rider on `absorbs`, because without a survivor there is
+nowhere to carry a body. Declared alone, it refuses at load:
+
+```
+transitions.merge.carries is true, and merge does not absorb the item into a
+survivor, so there is nowhere to carry its body. Add the absorbs, or drop the
+carries
+```
+
 It takes **no claim**, like [`decline`](#decline) and
 [`archive-plan`](#archive-plan). The ownership check still runs on the idea
 being absorbed. The survivor's claim is not consulted, because nothing is
-written to it.
+written to it, unless the run carries.
 
 Any state may declare a transition of this shape. `merge` is out of
 [`someday-maybe`](#someday-maybe) here for two reasons. That is where this
 workflow's uncommitted ideas live, and it is the state that is safe to delete
 from. The tool knows the transition only as "leaves its state, takes the file
-away and points the edges at a survivor".
+away, points the edges at a survivor, and may carry the body there".
 
 ### investigate
 

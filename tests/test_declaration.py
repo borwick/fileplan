@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 import subprocess
 import tomllib
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
@@ -66,6 +68,7 @@ def well_formed() -> dict:
                     "path": "orchard",
                     "doc": "method.md#orchard",
                     "capabilities": ["queued"],
+                    "sort": "position",
                 },
             },
             "keys": {
@@ -111,7 +114,7 @@ def test_unknown_top_level_table_refuses_by_name() -> None:
     document["policy"] = "docs/policy.md"
     assert (
         "policy is not a plan.toml table "
-        "(known tables: states, keys, transitions, templates, identity)"
+        "(known tables: states, keys, transitions, templates, identity, fileplan)"
     ) in shape_errors(document)
 
 
@@ -453,6 +456,42 @@ def test_refuses_against_a_free_text_key_is_allowed() -> None:
     assert shape_errors(document) == []
 
 
+def test_refuses_on_presence_loads_beside_a_value_list(tmp_path: Path) -> None:
+    """`key = true` refuses any value at all, and sits in the same table as a
+    value list. The two are kept apart on the transition, so nothing reading
+    `refuses` meets a boolean where it expected values."""
+    for name in FIXTURE_FILES:
+        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    plan = (tmp_path / "plan.toml").read_text().replace(
+        'refuses  = { cultivar = ["hybrid"] }',
+        'refuses  = { cultivar = ["hybrid"], rootstock = true }',
+    )
+    (tmp_path / "plan.toml").write_text(plan)
+    transplant = load(tmp_path / "plan.toml").transitions["transplant"]
+    assert transplant.refuses == {"cultivar": ("hybrid",)}
+    assert transplant.refuses_any == ("rootstock",)
+
+
+def test_refuses_false_refuses_by_name() -> None:
+    """`false` would read as "refuse nothing", which is saying nothing, so it
+    refuses and says the two spellings there are."""
+    document = well_formed()
+    document["transitions"]["transplant"]["refuses"] = {"rootstock": False}
+    assert (
+        "transitions.transplant.refuses.rootstock is false, which refuses "
+        "nothing. Write true, or a list of values" in shape_errors(document)
+    )
+
+
+def test_refuses_on_presence_of_an_undeclared_key_refuses() -> None:
+    document = well_formed()
+    document["transitions"]["transplant"]["refuses"] = {"provenance": True}
+    assert (
+        'transitions.transplant.refuses names undeclared key "provenance"'
+        in shape_errors(document)
+    )
+
+
 def test_declaring_a_capabilitys_key_refuses_by_name() -> None:
     """`position` is not the workflow's vocabulary — it is what the `queued`
     capability gives an item in a state that opts in, written on the way in
@@ -642,6 +681,57 @@ def test_a_malformed_identity_is_one_complaint_not_two() -> None:
     errors = shape_errors(document)
     assert not [error for error in errors if "capabilities" in error]
     assert any("identity.pid is empty" in error for error in errors)
+
+
+def fixture_needing(tmp_path: Path, minimum: str, extra: str = "") -> Path:
+    """The fixture, declaring the oldest tool it reads under, and whatever
+    `extra` a newer release might have taught it."""
+    for name in FIXTURE_FILES:
+        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    source = tmp_path / "plan.toml"
+    source.write_text(f'[fileplan]\nminimum = "{minimum}"\n\n{source.read_text()}{extra}')
+    return source
+
+
+def test_a_plan_toml_for_a_newer_tool_says_upgrade_before_anything_else(
+    tmp_path: Path,
+) -> None:
+    """26-1: the tool's age, said as the tool's age. The unknown table beside
+    it is what a newer release's field looks like to this one, and it would
+    blame the declaration; the minimum is checked first, so it never does."""
+    installed = version("fileplan")
+    source = fixture_needing(tmp_path, "999.0", extra="\n[orangery]\nglass = true\n")
+    with pytest.raises(Refusal) as refused:
+        load(source)
+    assert refused.value.messages == [
+        f"{source} needs fileplan 999.0 or newer, and this is fileplan "
+        f"{installed}: upgrade fileplan to read it"
+    ]
+
+
+@pytest.mark.parametrize("spelled", ["installed", "trailing zero"])
+def test_a_minimum_this_tool_meets_loads(tmp_path: Path, spelled: str) -> None:
+    """Equal is enough, and `0.6` is `0.6.0`: dotted integers, trailing zeros
+    stripped."""
+    installed = re.match(r"\d+(\.\d+)*", version("fileplan")).group()
+    minimum = installed if spelled == "installed" else installed + ".0"
+    load(fixture_needing(tmp_path, minimum))
+
+
+@pytest.mark.parametrize(
+    ("table", "complaint"),
+    [
+        ('fileplan = "0.6.0"', "fileplan must be a table"),
+        ("[fileplan]", "fileplan has no minimum"),
+        ('[fileplan]\nminimum = "v1"', "fileplan.minimum must be a version of dotted integers"),
+        ("[fileplan]\nminimum = 1", "fileplan.minimum must be a version of dotted integers"),
+        ('[fileplan]\nminimum = "0.1"\nmaximum = "9"', "fileplan.maximum is not a tool field"),
+    ],
+)
+def test_a_malformed_tool_table_refuses_by_name(table: str, complaint: str) -> None:
+    """An empty table is vacuous, the way `[identity]` without a pid is."""
+    document = well_formed() | tomllib.loads(table)
+    assert any(error.startswith(complaint) for error in shape_errors(document))
 
 
 def test_a_transition_carries_what_it_claims() -> None:
@@ -2057,6 +2147,33 @@ def test_absorbs_on_a_transition_that_creates_refuses() -> None:
     )
 
 
+def test_carries_without_absorbs_refuses_by_name() -> None:
+    """`absorbs`' own rider has one: a carry appends to the survivor, and
+    only `absorbs` names one."""
+    document = dissolving(well_formed())
+    document["transitions"]["grub-out"]["carries"] = True
+    assert (
+        "transitions.grub-out.carries is true, and grub-out does not absorb "
+        "the item into a survivor, so there is nowhere to carry its body. Add "
+        "the absorbs, or drop the carries" in shape_errors(document)
+    )
+
+
+def test_carries_beside_absorbs_is_well_formed() -> None:
+    document = absorbing(well_formed())
+    document["transitions"]["grub-out"]["carries"] = True
+    assert shape_errors(document) == []
+
+
+def test_a_carries_that_is_not_a_boolean_refuses() -> None:
+    document = absorbing(well_formed())
+    document["transitions"]["grub-out"]["carries"] = "true"
+    assert (
+        "transitions.grub-out.carries must be true or false"
+        in shape_errors(document)
+    )
+
+
 def test_dissolves_on_a_transition_that_creates_refuses() -> None:
     """The same vacuous-together arm read from the other end: a transition with
     no `from` has no item to take away."""
@@ -2906,6 +3023,9 @@ def test_transitions_iterate_in_toml_document_order() -> None:
         "fell",
         "compost",
         "inarch",
+        "relabel",
+        "relabel-batch",
+        "relabel-pot",
     ]
     assert list(declaration.transitions) != sorted(declaration.transitions)
 
@@ -3016,6 +3136,8 @@ def test_the_repos_own_plan_toml_loads_clean() -> None:
         "idea",
         "queue",
         "requeue",
+        "retitle",
+        "retitle-idea",
         "decompose",
         "work",
         "finish",
@@ -3164,3 +3286,122 @@ def test_an_archiving_source_that_is_not_a_table_refuses_rather_than_raising() -
         "dissolves": True,
     }
     assert "states.compost must be a table" in shape_errors(document)
+
+
+# --------------------------------------------------------------------------
+# `retitles`: a rider on a move. See docs/method.md#retitle
+# --------------------------------------------------------------------------
+
+
+def test_retitles_refuses_without_a_from() -> None:
+    """A verb that creates has no item to rename, the rule every half that
+    reads an item already follows."""
+    document = fixture_document()
+    document["transitions"]["sprout"]["retitles"] = True
+    assert (
+        "transitions.sprout.retitles needs a from state. A transition that "
+        "creates an item has no item to read"
+    ) in shape_errors(document)
+
+
+def test_retitles_refuses_beside_dissolves() -> None:
+    """A dissolved item leaves no file to move to a new slug."""
+    document = fixture_document()
+    document["transitions"]["compost"]["retitles"] = True
+    assert any(
+        error.startswith("transitions.compost.retitles is set, and compost dissolves")
+        for error in shape_errors(document)
+    )
+
+
+def test_retitles_refuses_beside_marks() -> None:
+    """Both take the argument after the item, so one run could not say which
+    it was given."""
+    document = fixture_document()
+    document["transitions"]["pot-on"]["retitles"] = True
+    assert (
+        "transitions.pot-on.retitles is true, and pot-on marks a bullet. Both "
+        "take the argument after the item, so one run could not say which it "
+        "means. Declare two transitions"
+    ) in shape_errors(document)
+
+
+def test_retitles_may_move_the_item_to_another_state() -> None:
+    """`to` may differ from `from`: the destination is a directory plus a
+    name either way, and refusing it would be a rule with no reason."""
+    document = fixture_document()
+    document["transitions"]["harvest"]["retitles"] = True
+    assert shape_errors(document) == []
+
+
+# --------------------------------------------------------------------------
+# A state's declared sort
+# --------------------------------------------------------------------------
+
+
+def test_a_queued_state_without_a_sort_refuses_and_names_the_line() -> None:
+    """A forgotten `sort` would list places by slug with nothing said, so the
+    load refuses and says what to add."""
+    document = well_formed()
+    del document["states"]["orchard"]["sort"]
+    assert (
+        'states.orchard.capabilities names "queued", and this state declares '
+        "no sort. Places order nothing until a sort reads them. Add "
+        'sort = "position" to states.orchard'
+    ) in shape_errors(document)
+
+
+def test_a_sort_by_position_on_a_state_that_is_not_queued_refuses() -> None:
+    document = well_formed()
+    document["states"]["greenhouse"]["sort"] = "position"
+    (error,) = shape_errors(document)
+    assert error.startswith(
+        'states.greenhouse.sort names "position", which no item in this state '
+        "carries, so every item would list as unsorted"
+    )
+
+
+def test_a_sort_naming_an_unknown_key_lists_what_the_state_carries() -> None:
+    document = well_formed()
+    document["states"]["orchard"]["sort"] = "-rootstok"
+    assert (
+        'states.orchard.sort names "rootstok", which no item in this state '
+        "carries, so every item would list as unsorted (this state carries: "
+        "title, cultivar, rootstock, position)"
+    ) in shape_errors(document)
+
+
+def test_a_sort_that_is_not_a_string_refuses() -> None:
+    document = well_formed()
+    document["states"]["orchard"]["sort"] = ["position", "title"]
+    assert "states.orchard.sort must be a string" in shape_errors(document)
+
+
+@pytest.mark.parametrize("given", ["-title", "rootstock", "-position"])
+def test_a_sort_naming_a_key_the_state_carries_loads(given: str) -> None:
+    document = well_formed()
+    document["states"]["orchard"]["sort"] = given
+    assert shape_errors(document) == []
+
+
+def test_a_sort_naming_a_derived_key_the_state_gives_loads() -> None:
+    document = well_formed()
+    document["states"]["greenhouse"].update(
+        {"capabilities": ["dated"], "sort": "-stale-days"}
+    )
+    assert shape_errors(document) == []
+
+
+def test_the_fixture_orchard_carries_its_declared_sort() -> None:
+    declaration = load(FIXTURES / "plan.toml")
+    assert declaration.states["orchard"].sort == "position"
+    assert declaration.states["greenhouse"].sort is None
+
+
+def test_a_sort_naming_a_derived_key_the_state_does_not_give_refuses() -> None:
+    """`claim-status` is carried where a state claims, and `greenhouse` does
+    not, though the key exists elsewhere in the tool."""
+    document = well_formed()
+    document["states"]["greenhouse"]["sort"] = "claim-status"
+    (error,) = shape_errors(document)
+    assert error.startswith('states.greenhouse.sort names "claim-status"')

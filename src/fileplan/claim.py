@@ -323,9 +323,28 @@ def holders(declaration: Declaration) -> dict[str, dict[str, str]]:
     something the tool does not understand about who holds an item. See
     docs/method.md#the-claimed-state
     """
-    directory = Path(declaration.root) / LOCAL_DIR / CLAIMS_DIR
     who = identity(declaration)
-    found: dict[str, dict[str, str]] = {}
+    return {
+        slug: fields(held, alive(held, who))
+        for slug, held in _records(declaration).items()
+    }
+
+
+def mine(declaration: Declaration, who: Identity) -> list[str]:
+    """The slugs of every record `who` owns, sorted, or raise `Refusal`.
+
+    Ownership is `owns`, so a record with no pid on this host counts. Whether
+    each slug is an item in a claimed state is the caller's question, as it is
+    for `holders`. See docs/method.md#the-claimed-state
+    """
+    return [slug for slug, held in _records(declaration).items() if owns(held, who)]
+
+
+def _records(declaration: Declaration) -> dict[str, Mapping[str, Any]]:
+    """Every record under `local/claims/`, by slug and graded, or raise
+    `Refusal` naming every defect at once."""
+    directory = Path(declaration.root) / LOCAL_DIR / CLAIMS_DIR
+    found: dict[str, Mapping[str, Any]] = {}
     defects: list[str] = []
     paths = sorted(directory.glob(f"*{SUFFIX}"), key=lambda one: one.stem)
     root = Path(declaration.root)
@@ -333,7 +352,7 @@ def holders(declaration: Declaration) -> dict[str, dict[str, str]]:
         if problems := errors(held):
             defects += [_not_usable(path, root), *problems]
             continue
-        found[path.stem] = fields(held, alive(held, who))
+        found[path.stem] = held
     if defects:
         raise Refusal(defects)
     return found

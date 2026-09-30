@@ -9,13 +9,15 @@ path = "someday-maybe"
 doc  = "docs/method.md#someday-maybe"
 
 # Sections being worked. Ordered, claimed by one session at a time,
-# numbered, cut into sub-phases, and dated from git.
-# See docs/method.md#sub-phases, docs/method.md#bulleted and
-# docs/method.md#stale-days.
+# numbered, cut into sub-phases, and dated from git. `sort` lists them by
+# the places `queue` and `requeue` give them.
+# See docs/method.md#sub-phases, docs/method.md#bulleted,
+# docs/method.md#stale-days and docs/method.md#the-queue.
 [states.plan]
 path              = "plan"
 doc               = "docs/method.md#plan"
 capabilities      = ["queued", "claimed", "numbered", "bulleted", "dated"]
+sort              = "position"
 archive           = "docs/plan-archive.md"
 sub-phases        = "Sub-phases"
 sub-phase-pending = "**pending — Decompose the rest of this section.**"
@@ -108,6 +110,24 @@ help = "Move an item to another place in the plan's order."
 from = "plan"
 to   = "plan"
 
+# A new title makes a new slug, so the file moves and every reference to the
+# old slug follows it. Declared twice, once in each state an item is renamed
+# in, and only the first carries the policy: one anchor takes one pointer.
+[transitions.retitle]
+doc      = "docs/method.md#retitle"
+policy   = "docs/procedures.md#when-a-handle-changes"
+help     = "Give a section a new title, and move it to the slug that makes."
+from     = "plan"
+to       = "plan"
+retitles = true
+
+[transitions.retitle-idea]
+doc      = "docs/method.md#retitle-idea"
+help     = "Give an idea a new title, and move it to the slug that makes."
+from     = "someday-maybe"
+to       = "someday-maybe"
+retitles = true
+
 # `policy =` says what a session does around the run. Most transitions have
 # none.
 # See docs/method.md#the-interpreter.
@@ -178,6 +198,8 @@ help      = "Absorb an idea into another item: the work continues as that item."
 from      = "someday-maybe"
 dissolves = true
 absorbs   = true
+# --carry: when the absorbed ideas are the specification, keep their text.
+carries   = true
 
 [transitions.investigate]
 doc  = "docs/method.md#investigate"
