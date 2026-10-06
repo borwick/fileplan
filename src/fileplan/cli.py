@@ -435,6 +435,9 @@ def _command(declaration: Declaration, transition: Transition) -> click.Command:
     filing = transition.files is not None
     if filing:
         params += _filing_options(transition)
+        # The filed item's keys, after its title and body: each is written onto
+        # the item this run files, never the one it moves.
+        params += [_option(declaration, key) for key in transition.files_sets]
     recording = transition.archives and transition.dissolves
     if recording:
         params.append(_record_option())
@@ -519,6 +522,21 @@ def _handed_back(value: Any) -> Any:
     return list(value) or None
 
 
+def _setting(transition: Transition, flag: str) -> str | None:
+    """The field that makes `flag` an option of `transition`, spelled as
+    `plan.toml` writes it, or `None` when no key of that name is set.
+
+    Both lists a run takes options from: the carrier's `sets`, and the keys a
+    verb that files writes onto the filed item. A verb that files refuses
+    `sets` at load, so at most one of the two is ever non-empty.
+    """
+    if flag in transition.sets:
+        return f"transitions.{transition.name}.sets"
+    if flag in transition.files_sets:
+        return f"transitions.{transition.name}.files.sets"
+    return None
+
+
 def _check_option(transition: Transition) -> click.Option:
     """Say what this verb would do to this item, and stop before the first write.
 
@@ -526,9 +544,9 @@ def _check_option(transition: Transition) -> click.Option:
     same name refuses by name.
     See docs/method.md#the-check
     """
-    if CHECK in transition.sets:
+    if (field := _setting(transition, CHECK)) is not None:
         raise Refusal(
-            f'transitions.{transition.name}.sets names "{CHECK}", and every '
+            f'{field} names "{CHECK}", and every '
             f"transition already takes --{CHECK} for what it would do "
             "without doing it. One option cannot mean two things"
         )
@@ -579,6 +597,12 @@ def contract(declaration: Declaration, transition: Transition) -> dict[str, Any]
         # them.
         "sets": list(transition.sets),
         "declares": [name for name in HALVES if getattr(transition, name)],
+        # The table as declared, or `null`: where the filed item goes, which
+        # keys record where it came from, and under `sets` the keys this verb
+        # takes as options and writes onto the filed item rather than the
+        # carrier. The epilog's `Files` block says the same in a line.
+        # See docs/method.md#filing
+        "files": None if transition.files is None else dict(transition.files),
         "reading": _reading(declaration, transition),
         "policy": transition.policy,
     }
@@ -588,7 +612,8 @@ def _epilog(declaration: Declaration, transition: Transition) -> str:
     """The contract `--help` carries after the options.
 
     Where the item goes, what the verb requires, refuses and drops, which
-    halves it declares, the sections that hold the meaning — the transition's
+    halves it declares, where a verb that files puts the filed item and which
+    keys it writes there, the sections that hold the meaning — the transition's
     own `doc` plus the `doc` of every key it sets — and, where one is
     declared, the procedure a session follows around the run. Two blocks
     rather than one, so a caller need not read a label to tell a meaning from
@@ -617,6 +642,10 @@ def _epilog(declaration: Declaration, transition: Transition) -> str:
         blocks.append(("Drops", row["drops"]))
     if row["declares"]:
         blocks.append(("Declares", row["declares"]))
+    # Which head each key lands on: `sets` is the carrier's, and the keys
+    # named here are the filed item's. See docs/method.md#filing
+    if row["files"] is not None:
+        blocks.append(("Files", [_filed(row["files"])]))
     blocks.append(("Reading", _named(row["reading"])))
     # Its own block rather than a labelled line inside `Reading`. A verb with no
     # `policy` carries no block. See docs/method.md#the-interpreter
@@ -645,15 +674,28 @@ def _going(row: Mapping[str, Any]) -> str:
     return f"out of {source} and into {to}"
 
 
+def _filed(files: Mapping[str, Any]) -> str:
+    """Where a verb that files puts the filed item, and which keys it writes
+    there that the caller supplies."""
+    writing = files.get("sets", [])
+    return f"into {files['state']}" + (
+        f", writing {', '.join(writing)}" if writing else ""
+    )
+
+
 def _reading(declaration: Declaration, transition: Transition) -> dict[str, str]:
-    """The transition's `doc`, then the `doc` of every key it `sets`.
+    """The transition's `doc`, then the `doc` of every key the caller supplies.
 
     The transition's is the program; a key's says what the value the caller is
-    about to supply means.
+    about to supply means, whichever head it lands on: the keys it `sets`, then
+    those its `files` table does.
     """
     return {
         transition.name: transition.doc,
-        **{key: declaration.keys[key].doc for key in transition.sets},
+        **{
+            key: declaration.keys[key].doc
+            for key in (*transition.sets, *transition.files_sets)
+        },
     }
 
 
@@ -686,9 +728,9 @@ def _placement_options(transition: Transition) -> list[click.Parameter]:
     key of the same name refuses by name.
     """
     for flag, *_ in PLACEMENT:
-        if flag in transition.sets:
+        if (field := _setting(transition, flag)) is not None:
             raise Refusal(
-                f'transitions.{transition.name}.sets names "{flag}", and a '
+                f'{field} names "{flag}", and a '
                 f"transition into a {queued.NAME} state already takes "
                 f"--{flag} for where the item goes in the order. One option "
                 "cannot mean two things"
@@ -707,9 +749,9 @@ def _minting_options(transition: Transition) -> list[click.Parameter]:
     transition with no `from` refuses back in `plan.toml`.
     """
     for flag, *_ in MINTING:
-        if flag in transition.sets:
+        if (field := _setting(transition, flag)) is not None:
             raise Refusal(
-                f'transitions.{transition.name}.sets names "{flag}", and a '
+                f'{field} names "{flag}", and a '
                 f"transition that mints a sub-phase already takes --{flag} "
                 "for what it writes into the body. One option cannot mean "
                 "two things"
@@ -735,9 +777,9 @@ def _filing_options(transition: Transition) -> list[click.Parameter]:
     See docs/method.md#filing
     """
     for flag, *_ in FILING:
-        if flag in transition.sets:
+        if (field := _setting(transition, flag)) is not None:
             raise Refusal(
-                f'transitions.{transition.name}.sets names "{flag}", and a '
+                f'{field} names "{flag}", and a '
                 f"transition that files an item already takes --{flag} for "
                 "what it writes into that item. One option cannot mean two "
                 "things"
@@ -774,9 +816,9 @@ def _note_option(transition: Transition) -> click.Option:
     options above do not. Taken as a value, and `-` is not stdin here: a note
     is one line by construction.
     """
-    if NOTE in transition.sets:
+    if (field := _setting(transition, NOTE)) is not None:
         raise Refusal(
-            f'transitions.{transition.name}.sets names "{NOTE}", and a '
+            f'{field} names "{NOTE}", and a '
             f"transition that marks a bullet already takes --{NOTE} for why "
             "it was disposed of that way. One option cannot mean two things"
         )
@@ -797,9 +839,9 @@ def _keep_claims_option(transition: Transition) -> click.Option:
     A flag, and it needs the `sets` collision check. Without it the run
     refuses and names each held item. See docs/method.md#the-claimed-state
     """
-    if KEEP_CLAIMS in transition.sets:
+    if (field := _setting(transition, KEEP_CLAIMS)) is not None:
         raise Refusal(
-            f'transitions.{transition.name}.sets names "{KEEP_CLAIMS}", and a '
+            f'{field} names "{KEEP_CLAIMS}", and a '
             f"transition that claims an item already takes --{KEEP_CLAIMS} to "
             "hold a second claim on purpose. One option cannot mean two things"
         )
@@ -859,9 +901,9 @@ def _from_option(declaration: Declaration, transition: Transition) -> click.Opti
     than the tool's.
     See docs/method.md#seeds
     """
-    if SEEDING in transition.sets:
+    if (field := _setting(transition, SEEDING)) is not None:
         raise Refusal(
-            f'transitions.{transition.name}.sets names "{SEEDING}", and a '
+            f'{field} names "{SEEDING}", and a '
             f"transition that seeds already takes --{SEEDING} for the "
             "template it bodies the new item from. One option cannot mean "
             "two things"
@@ -1055,9 +1097,9 @@ without KEY comes last, and the listing names it.
 #: a declaration that claims nothing is not taught a word it does not have.
 CLAIM_HELP = """
 A state that claims what it holds gives every row a holder. `--lacks
-claimed-by` finds what nobody has picked up, and `--has claim-status=dead`
-finds what needs releasing. A claim whose item is gone is reported beside the
-counts.
+claimed-by` finds what nobody has picked up, `--has claim-status=dead` finds
+what needs releasing, and `--has claim-holder=this-session` finds what this
+session holds. A claim whose item is gone is reported beside the counts.
 """
 
 

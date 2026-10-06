@@ -145,6 +145,13 @@ BULLETED = "bulleted"
 #: there is no cross-check here. See docs/method.md#filing
 FILING_ROLES = ("state", "item", "name")
 
+#: Every field a `files` table may hold: the three roles, which it must, and
+#: `sets`, which it may. `sets` is not a fourth role, because a filing with no
+#: key of its own is complete. It names the declared keys the run takes as
+#: options and writes onto the filed item's head, never the carrier's.
+#: See docs/method.md#filing
+FILING_FIELDS = (*FILING_ROLES, "sets")
+
 #: The capability whose state is not stored at all: how long ago anybody was
 #: near an item is read out of git when the listing runs. It has no transition
 #: half, because there is nothing for a verb to write.
@@ -162,11 +169,12 @@ CAPABILITIES = ("queued", CLAIMED, NUMBERED, BULLETED, DATED)
 #: `refuses`. Every refusal below reads this mapping rather than naming a key.
 CAPABILITY_KEYS = {"queued": "position", NUMBERED: "number"}
 
-#: The keys the `CLAIMED` capability gives a row: who holds the item, and what
-#: the liveness probe said of that holder. Read off `local/claims/` rather than
-#: out of any head, so a key of either name refuses unconditionally.
+#: The keys the `CLAIMED` capability gives a row: who holds the item, what the
+#: liveness probe said of that holder, and whether the holder is the session
+#: reading the row. Read off `local/claims/` rather than out of any head, so a
+#: key of any of the three names refuses unconditionally.
 #: See docs/method.md#the-listing
-CLAIM_KEYS = ("claimed-by", "claim-status")
+CLAIM_KEYS = ("claimed-by", "claim-status", "claim-holder")
 
 #: The key the `DATED` capability gives a row: whole days since the item file's
 #: last commit. Derived from git, so a key of that name refuses
@@ -398,11 +406,12 @@ class Transition:
     #: Where this verb files a second item, and which of its keys record where it
     #: came from, or `None` when it files none. A table rather than three flat
     #: fields, because the three are one capability and each role wants a name:
-    #: `FILING_ROLES` is the whole roster. All three facts are the verb's, not a
-    #: state's, because only the writer needs to know. It is a rider on `marks`,
-    #: the way `absorbs` is on `dissolves`. Default `None`.
+    #: `FILING_ROLES` is the whole roster. The table may also hold `sets`, the
+    #: keys written onto the filed item, which `files_sets` reads. All of it is
+    #: the verb's, not a state's, because only the writer needs to know. It is a
+    #: rider on `marks`, the way `absorbs` is on `dissolves`. Default `None`.
     #: See docs/method.md#filing
-    files: Mapping[str, str] | None = None
+    files: Mapping[str, Any] | None = None
     #: Whether running this verb files the item's archive entry: the number and
     #: title it carried, written into the document its source state's `archive`
     #: names. A different half from the deletion, so a verb that wants both says
@@ -446,6 +455,18 @@ class Transition:
     def leaves(self) -> bool:
         """Whether this verb ends the state it starts in."""
         return _leaves(self.source, self.to)
+
+    @property
+    def files_sets(self) -> tuple[str, ...]:
+        """The keys this verb writes onto the item it files, in declared order.
+
+        Empty where the verb files nothing, or files an item with no key of
+        its own. `sets` is the carrier's, and a verb that files refuses one.
+        See docs/method.md#filing
+        """
+        if self.files is None:
+            return ()
+        return tuple(self.files.get("sets", ()))
 
     @property
     def writes(self) -> bool:
@@ -831,12 +852,15 @@ def _filing_errors(corpus: _Corpus) -> list[str]:
 
     The one half whose whole content is a table, so the first rule is the
     table itself and the rest stay quiet where it fails. Seven rules, each
-    refused by name at load: `files` that is not a table; an unknown role and
-    a missing one; `files` on a verb that marks nothing; `files.state` naming
+    refused by name at load: `files` that is not a table; an unknown field and
+    a missing role; `files` on a verb that marks nothing; `files.state` naming
     an undeclared state; `files.state` naming one that declares `queued`,
     `NUMBERED` or `CLAIMED`, because a filed item is filed rather than placed;
     `files.item` or `files.name` naming a key that cannot be written; and the
-    two naming the same key.
+    two naming the same key. Then `files.sets`, the one optional field: a list
+    of strings, each a key that can be written and neither of the two the
+    tool writes itself. And `sets` beside `files`, which would say nothing
+    about which head its keys land on.
     See docs/method.md#filing
     """
     # Every capability that writes a head key on arrival, read off the roster
@@ -849,6 +873,16 @@ def _filing_errors(corpus: _Corpus) -> list[str]:
             continue
         where = f"transitions.{name}.files"
         filing = entry["files"]
+        # The dissolve rule's shape in `_vacuity_errors`: a field the verb's
+        # own halves make wrong. Before the table's own rules, which do not
+        # depend on it.
+        if "sets" in entry:
+            errors.append(
+                f"transitions.{name}.sets is set, and {name} files an item. "
+                "Say which head each key lands on: a key for the filed item "
+                f"goes in {where}.sets, and {name} writes none onto the item "
+                "it moves"
+            )
         if not isinstance(filing, dict):
             errors.append(
                 f"{where} must be a table naming "
@@ -858,7 +892,7 @@ def _filing_errors(corpus: _Corpus) -> list[str]:
             )
             continue
 
-        errors += _unknown_fields(where, filing, frozenset(FILING_ROLES), "filing")
+        errors += _unknown_fields(where, filing, frozenset(FILING_FIELDS), "filing")
         errors += [
             f"{where} has no {role}, and a filing names all of "
             f"{', '.join(FILING_ROLES)} — where the item goes, and the two "
@@ -912,6 +946,23 @@ def _filing_errors(corpus: _Corpus) -> list[str]:
                 "One key holding both the carrier and the bullet is a value "
                 "nothing can join on. Name a separate key for each"
             )
+
+        if "sets" not in filing:
+            continue
+        if not _is_string_list(filing["sets"]):
+            errors.append(f"{where}.sets must be a list of strings")
+            continue
+        for named in filing["sets"]:
+            if reference := _key_reference_error(where, "sets", named, corpus.keys):
+                errors.append(reference)
+            errors += [
+                f'{where}.sets names "{named}", which {where}.{role} names '
+                "too. The tool writes that key onto the filed item itself, "
+                "and a second writer could disagree with it. Drop "
+                f'"{named}" from {where}.sets'
+                for role in ("item", "name")
+                if said.get(role) == named
+            ]
     return errors
 
 
@@ -1065,14 +1116,20 @@ def _reading_errors(transitions: Mapping[str, Any]) -> list[str]:
     for name, entry in transitions.items():
         if not isinstance(entry, dict):
             continue
-        sets = entry.get("sets", [])
-        if _is_string_list(sets) and name in sets:
-            errors.append(
-                f'transitions.{name} sets "{name}", a key of its own name. '
-                "The transition's pointer and the key's pointer share one line "
-                "in Reading, so one would be lost. Rename the key, or rename "
-                "the transition"
-            )
+        filing = entry.get("files")
+        # Both lists, because `Reading` names the doc of every key the caller
+        # supplies, whichever head it lands on.
+        for field, sets in (
+            ("sets", entry.get("sets", [])),
+            ("files.sets", filing.get("sets", []) if isinstance(filing, dict) else []),
+        ):
+            if _is_string_list(sets) and name in sets:
+                errors.append(
+                    f'transitions.{name}.{field} names "{name}", a key of its '
+                    "own name. The transition's pointer and the key's pointer "
+                    "share one line in Reading, so one would be lost. Rename "
+                    "the key, or rename the transition"
+                )
     return errors
 
 

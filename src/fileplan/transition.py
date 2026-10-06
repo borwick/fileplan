@@ -81,11 +81,13 @@ def value_errors(
     """Every way what a run was given is the wrong shape for the key.
 
     A list-valued key given one value, and a single-valued key given a list,
-    each refuse by name before either arm.
+    each refuse by name before either arm. Every key the run takes as an
+    option, whichever head it lands on: the carrier's `sets`, and the keys a
+    verb that files writes onto the filed item.
     See docs/method.md#list-valued
     """
     errors: list[str] = []
-    for key in transition.sets:
+    for key in (*transition.sets, *transition.files_sets):
         if key not in given:
             continue
         declared = keys.get(key)
@@ -390,18 +392,21 @@ def _create(running: _Running) -> Path | str:
         raise Refusal(_taken(stem, destination, running.declaration.root)) from None
 
     head = {"title": running.name}
-    head.update({key: running.given[key] for key in running.transition.sets if key in running.given})
+    head.update(_landing(running, running.transition.sets))
     head.update(entering)
     _place(running, destination, head, _prose(body))
     _apply(claiming, running.declaration.root)
     return destination
 
 
-def _cursor_errors(running: _Running, original: item.Item, body: str) -> list[str]:
+def _cursor_errors(
+    running: _Running, original: item.Item, body: str, marking: Mapping[str, Any]
+) -> list[str]:
     """Whether the cursor this run would leave behind fits the body's count.
 
     Graded against the destination state, on the value the run would write and
-    the body it would write, not on what is already filed.
+    the body it would write, not on what is already filed. A mark's cursor
+    rests on the bullet just marked, which is the ordinary state after a mark.
     See docs/method.md#the-cursor
     """
     state = running.declaration.states[running.transition.to]
@@ -414,6 +419,7 @@ def _cursor_errors(running: _Running, original: item.Item, body: str) -> list[st
     writes = state.cursor in running.transition.sets and state.cursor in running.given
     if writes:
         head[state.cursor] = running.given[state.cursor]
+    head.update(marking)
     return subphase.cursor_errors(
         head,
         body,
@@ -454,6 +460,7 @@ def _move(running: _Running) -> Path | str:
     body, notice, writing = _bulleting(
         running, original, entering=entering, disposing=disposing
     )
+    marking = _marking_cursor(running, disposing)
     # Before the shed below drops every capability key: an entry is filed under
     # the number the item carried in the state it is leaving.
     archiving = _archiving(running, original)
@@ -461,10 +468,14 @@ def _move(running: _Running) -> Path | str:
     renaming = _renaming(running, original, claiming)
 
     errors = offer_errors(original.head, running.transition)
+    # Only the keys that land on this item, against the state it lands in. A
+    # filed item's keys are graded against its own state, in `_filing`.
     errors += read.edge_errors(
-        running.declaration, running.declaration.states[running.transition.to], running.given
+        running.declaration,
+        running.declaration.states[running.transition.to],
+        _landing(running, running.transition.sets),
     )
-    errors += _cursor_errors(running, original, body)
+    errors += _cursor_errors(running, original, body, marking)
     if errors:
         # Nothing written yet, and nothing will be.
         raise Refusal(
@@ -479,8 +490,9 @@ def _move(running: _Running) -> Path | str:
         for key, value in original.head.items()
         if key not in running.transition.drops and key not in CAPABILITY_KEYS.values()
     }
-    head.update({key: running.given[key] for key in running.transition.sets if key in running.given})
+    head.update(_landing(running, running.transition.sets))
     head.update(entering)
+    head.update(marking)
     if renaming is not None:
         head["title"] = renaming.title
 
@@ -493,10 +505,25 @@ def _move(running: _Running) -> Path | str:
         raise Refusal(_taken(source.stem, destination, running.declaration.root))
 
     # Read before the write, so a run that leaves the file as it was can say so.
-    before = None if moving or running.check else source.read_bytes()
+    before = None if moving else source.read_bytes()
     _place(running, destination, head, body)
+    # After the grading, so a refusal keeps its order. One comparison, against
+    # the bytes `item.write` puts down, so the check and the run cannot differ.
+    unchanged = before == item.render(item.table(head), body).encode("utf-8")
     if running.check:
         # The seam, inside `_place`: the head is the last thing a run refuses over.
+        if unchanged:
+            # Nothing in the file to name: the claim is the one effect outside it.
+            return (
+                _would(
+                    f"{running.transition.name} would leave "
+                    f"{named(source, running.declaration.root)} unchanged, "
+                    f"which stays in {running.transition.to}",
+                    running.declaration.root,
+                    claiming=claiming,
+                )
+                + f": {_unchanged(running, claiming)}"
+            )
         return _would(
             f"{running.transition.name} would move {named(source, running.declaration.root)} to "
             f"{named(destination, running.declaration.root)}"
@@ -504,7 +531,11 @@ def _move(running: _Running) -> Path | str:
             else f"{running.transition.name} would rewrite "
             f"{named(source, running.declaration.root)}, which stays in {running.transition.to}",
             running.declaration.root,
-            entering=entering,
+            # A moving run writes its place afresh; a staying one names only
+            # what it changes, never a value the head already holds.
+            entering=entering
+            if moving
+            else {key: value for key, value in entering.items() if original.head.get(key) != value},
             dropping=dropped,
             claiming=claiming,
             archiving=archiving,
@@ -526,7 +557,7 @@ def _move(running: _Running) -> Path | str:
     if notice is not None:
         # After the write: a notice says what a run did.
         running.say(notice)
-    if before == destination.read_bytes():
+    if unchanged:
         running.say(
             f"{named(destination, running.declaration.root)} is unchanged: "
             f"{_unchanged(running, claiming)}"
@@ -535,15 +566,17 @@ def _move(running: _Running) -> Path | str:
 
 
 def _unchanged(running: _Running, claiming: _Claiming) -> str:
-    """Why a run that wrote the item's file left every byte as it was.
+    """Why a run leaves the item's file byte for byte as it was.
 
     A claim taken with nothing else given is a real effect and exits 0, as
     does a bare mint on a section already open. The notice is what tells
-    either apart from a run that wrote.
-    See docs/method.md#bulleted and docs/method.md#the-claimed-state
+    either apart from a run that wrote. Tense-neutral, because the check says
+    it too, in the same words.
+    See docs/method.md#bulleted, docs/method.md#the-check and
+    docs/method.md#the-claimed-state
     """
     if claiming.take is not None:
-        return "the claim was taken, and nothing else was given"
+        return "the claim is taken, and nothing else is given"
     state = running.declaration.states[running.transition.to]
     if running.transition.mints and not any(running.asked.get(key) for key in _MINTING):
         return f'"{state.sub_phases}" is already open, so a bare run writes nothing'
@@ -746,6 +779,22 @@ def _disposing(running: _Running, original: item.Item) -> subphase.Bullet | None
             "or onto a continuation line under the bullet"
         )
     return found
+
+
+def _marking_cursor(
+    running: _Running, disposing: subphase.Bullet | None
+) -> dict[str, str]:
+    """The cursor a mark writes: the bullet it marks, where the state keeps a
+    cursor, and nothing otherwise.
+
+    The mark is the run every sub-phase ends with, so the cursor is current by
+    construction rather than by a session remembering the claiming verb.
+    See docs/method.md#the-cursor
+    """
+    state = running.declaration.states[running.transition.to]
+    if disposing is None or not state.cursor:
+        return {}
+    return {state.cursor: disposing.name}
 
 
 def _bulleting(
@@ -954,7 +1003,10 @@ def _filing(
     the first write: the title, `--title` or the bullet's own text; the body,
     `--body`, refused empty in `_bodiless`' words; the slug, through the
     creating verb's own collision helpers; the head, the title plus the two
-    declared keys the `files` table names.
+    declared keys the `files` table names, then each key of its `sets` the
+    run was given. The head is graded here, against the filing state, so a
+    refusal leaves both files as they were. `_place` grades it again, as it
+    does every write.
     See docs/method.md#filing
     """
     if running.transition.files is None:
@@ -981,13 +1033,20 @@ def _filing(
     path = running.declaration.root / state.path / f"{stem}{item.SUFFIX}"
     # Not made: `make=False`, because a check leaves no directory behind.
     moved = _directory(running, make=False) / original.path.name
+    given = _landing(running, running.transition.files_sets)
+    head = {
+        "title": title,
+        running.transition.files["item"]: original.slug,
+        running.transition.files["name"]: disposing.name,
+        **given,
+    }
+    errors = item.head_errors(head, running.declaration, state)
+    errors += read.edge_errors(running.declaration, state, given)
+    if errors:
+        raise Refusal([f"{named(path, running.declaration.root)} cannot be written", *errors])
     return _Filing(
         path=path,
-        head={
-            "title": title,
-            running.transition.files["item"]: original.slug,
-            running.transition.files["name"]: disposing.name,
-        },
+        head=head,
         body=_prose(str(body)),
         notice=(
             f"{named(path, running.declaration.root)}: filed from {disposing.name} in "
@@ -996,6 +1055,16 @@ def _filing(
         ),
         state=state,
     )
+
+
+def _landing(running: _Running, keys: Sequence[str]) -> dict[str, Any]:
+    """What the run was given for `keys`, in their declared order.
+
+    One head's share of the run's options: a verb that files writes its
+    `sets` onto the item it moves and its `files.sets` onto the item it files,
+    and each is graded against its own state.
+    """
+    return {key: running.given[key] for key in keys if key in running.given}
 
 
 def _file_it(running: _Running, filing: _Filing | None) -> None:

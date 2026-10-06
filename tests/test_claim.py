@@ -341,20 +341,48 @@ def test_the_refusals_sentence_is_built_on_the_row_s_value() -> None:
     assert claim.describe(record, DEAD).startswith(f"{claim._holder(record)} (")
 
 
-def test_the_two_fields_are_the_holder_and_the_probes_own_word() -> None:
+def test_the_three_fields_are_the_holder_the_probes_word_and_whose_it_is() -> None:
     """A row carries values, not sentences: `claim-status` holds one of the
-    probe's four answers so it filters like any declared key with `values`."""
-    assert claim.fields(claim.record(HERE, taken=TAKEN), DEAD) == {
+    probe's four answers and `claim-holder` one of two, so each filters like
+    any declared key with `values`."""
+    assert claim.fields(claim.record(HERE, taken=TAKEN), DEAD, HERE) == {
         "claimed-by": "this-host pid 4213",
         "claim-status": DEAD,
+        "claim-holder": claim.THIS_SESSION,
     }
+
+
+@pytest.mark.parametrize(
+    "holder",
+    [
+        Identity(host="this-host", pid=42131),
+        Identity(host="this-host", pid=421),
+        Identity(host="another-host", pid=4213),
+    ],
+    ids=["a-pid-it-prefixes", "a-pid-that-prefixes-it", "another-host"],
+)
+def test_a_claim_this_identity_does_not_own_is_another_sessions(
+    holder: Identity,
+) -> None:
+    """`owns` decides, the rule the claiming run refuses by: the pid is a whole
+    number, so a shared prefix is not a match, and a pid means nothing on
+    another host."""
+    record = claim.record(holder, taken=TAKEN)
+    assert claim.fields(record, ALIVE, HERE)["claim-holder"] == claim.ANOTHER_SESSION
+
+
+def test_a_record_with_no_pid_on_this_host_is_this_sessions() -> None:
+    """As it is for the claiming run's refusal: a person at a shell owns the
+    claim they took at that shell."""
+    record = claim.record(Identity(host="this-host"), taken=TAKEN)
+    assert claim.fields(record, UNKNOWN, HERE)["claim-holder"] == claim.THIS_SESSION
 
 
 def test_the_field_names_have_one_home_in_the_declaration() -> None:
     """Imported rather than spelled again — the module that refuses a
     redeclaration is the module that says what the names are."""
-    assert claim.CLAIM_KEYS == (claim.BY, claim.STATUS)
-    assert list(claim.fields(claim.record(HERE, taken=TAKEN), ALIVE)) == [
+    assert claim.CLAIM_KEYS == (claim.BY, claim.STATUS, claim.HOLDER)
+    assert list(claim.fields(claim.record(HERE, taken=TAKEN), ALIVE, HERE)) == [
         *claim.CLAIM_KEYS
     ]
 
@@ -422,10 +450,12 @@ def test_every_record_is_graded_and_probed_once(tree: Declaration) -> None:
         "a-seedling": {
             "claimed-by": f"{identity.host} pid {gone}",
             "claim-status": DEAD,
+            "claim-holder": claim.ANOTHER_SESSION,
         },
         "b-seedling": {
             "claimed-by": f"another-host pid {identity.pid}",
             "claim-status": ELSEWHERE,
+            "claim-holder": claim.ANOTHER_SESSION,
         },
     }
 

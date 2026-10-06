@@ -536,7 +536,7 @@ def test_declaring_a_key_the_claim_reads_off_the_tree_refuses_by_name(
     name: str,
 ) -> None:
     """The names 2-4 reserves. A claim is not a key in a head — it is a record
-    under `local/claims/` — so a declared key of either name would be a second
+    under `local/claims/` — so a declared key of any of those names would be a second
     answer to a question the record already answers. Reserved **without**
     `well_formed()` claiming anything, like `position`: a plan.toml that grows
     a claimed state later must not break a key that was legal before it."""
@@ -548,7 +548,8 @@ def test_declaring_a_key_the_claim_reads_off_the_tree_refuses_by_name(
     document["keys"][name] = {"doc": "method.md#cultivar"}
     assert [error for error in shape_errors(document) if f"keys.{name} " in error] == [
         f'keys.{name} redeclares "{name}", which the claimed capability reads '
-        "off the tree (read: claimed-by, claim-status). Who holds an item "
+        "off the tree (read: claimed-by, claim-status, claim-holder). Who "
+        "holds an item "
         "lives in local/claims/ rather than in a head. Drop keys."
         f"{name}"
     ]
@@ -1536,9 +1537,19 @@ def test_a_transition_carries_the_table_it_files_by() -> None:
         "state": "greenhouse",
         "item": "batch",
         "name": "cutting",
+        "sets": ["cultivar"],
     }
     assert declaration.transitions["pot-on"].files is None
     assert declaration.transitions["mist"].files is None
+
+
+def test_a_filing_verb_reads_the_keys_it_writes_onto_the_filed_item() -> None:
+    """`files_sets` is the table's `sets`, so no caller reaches into it, and
+    the carrier's own `sets` stays empty: the key lands where it is written."""
+    declaration = load(FIXTURES / "plan.toml")
+    assert declaration.transitions["line-out"].files_sets == ("cultivar",)
+    assert declaration.transitions["line-out"].sets == ()
+    assert declaration.transitions["pot-on"].files_sets == ()
 
 
 def test_a_files_that_is_not_a_table_refuses_and_the_rest_stay_quiet() -> None:
@@ -1659,6 +1670,96 @@ def test_one_key_holding_both_halves_of_the_provenance_refuses() -> None:
         'name "batch". One key holding both the carrier and the bullet is a '
         "value nothing can join on. Name a separate key for each"
         in shape_errors(document)
+    )
+
+
+def test_a_filing_with_no_keys_of_its_own_loads_clean() -> None:
+    """`sets` is the one optional field, not a fourth role: a `files` table
+    naming only the three roles is the shape this repo's own `plan.toml`
+    has."""
+    document = filing(well_formed())
+    assert "sets" not in document["transitions"]["pot-on"]["files"]
+    assert shape_errors(document) == []
+
+
+def test_a_filing_that_sets_a_declared_key_loads_clean() -> None:
+    document = filing(well_formed())
+    document["transitions"]["pot-on"]["files"]["sets"] = ["cultivar"]
+    assert shape_errors(document) == []
+
+
+def test_sets_beside_files_refuses_and_names_files_sets() -> None:
+    """**Which head does the key land on?** A transition-level `sets` on a
+    verb that files would say nothing about it, and the run used to write the
+    key onto the carrier without a word. The dissolve rule is the precedent:
+    a field the verb's own halves make wrong refuses at load, by name."""
+    document = filing(well_formed())
+    document["transitions"]["pot-on"]["sets"] = ["cultivar"]
+    assert (
+        "transitions.pot-on.sets is set, and pot-on files an item. Say which "
+        "head each key lands on: a key for the filed item goes in "
+        "transitions.pot-on.files.sets, and pot-on writes none onto the item "
+        "it moves" in shape_errors(document)
+    )
+
+
+@pytest.mark.parametrize("value", ["cultivar", ["cultivar", 3]])
+def test_a_files_sets_that_is_not_a_list_of_strings_refuses(value: object) -> None:
+    document = filing(well_formed())
+    document["transitions"]["pot-on"]["files"]["sets"] = value
+    assert (
+        "transitions.pot-on.files.sets must be a list of strings"
+        in shape_errors(document)
+    )
+
+
+def test_a_files_sets_naming_an_undeclared_key_refuses() -> None:
+    """Through `_key_reference_error`, as the two roles are."""
+    document = filing(well_formed())
+    document["transitions"]["pot-on"]["files"]["sets"] = ["cultvar"]
+    assert (
+        'transitions.pot-on.files.sets names undeclared key "cultvar"'
+        in shape_errors(document)
+    )
+
+
+def test_a_files_sets_naming_an_intrinsic_key_refuses_as_intrinsic() -> None:
+    """The filed item's title comes from `--title` or the bullet."""
+    document = filing(well_formed())
+    document["transitions"]["pot-on"]["files"]["sets"] = ["title"]
+    assert (
+        'transitions.pot-on.files.sets names "title", which is intrinsic to '
+        "every item rather than a declared key" in shape_errors(document)
+    )
+
+
+@pytest.mark.parametrize("role", ["item", "name"])
+def test_a_files_sets_naming_a_provenance_key_refuses(role: str) -> None:
+    """The tool writes both provenance keys itself, so naming one here would
+    be a second writer of the same value."""
+    document = filing(well_formed())
+    files = document["transitions"]["pot-on"]["files"]
+    files["sets"] = [files[role]]
+    assert (
+        f'transitions.pot-on.files.sets names "{files[role]}", which '
+        f"transitions.pot-on.files.{role} names too. The tool writes that key "
+        "onto the filed item itself, and a second writer could disagree with "
+        f'it. Drop "{files[role]}" from transitions.pot-on.files.sets'
+        in shape_errors(document)
+    )
+
+
+def test_a_files_sets_naming_its_own_transition_refuses() -> None:
+    """`Reading` names the doc of every key the caller supplies, whichever
+    head it lands on, so the own-name collision is the same one."""
+    document = filing(well_formed())
+    document["keys"]["pot-on"] = {"doc": "method.md#pot-on"}
+    document["transitions"]["pot-on"]["files"]["sets"] = ["pot-on"]
+    assert (
+        'transitions.pot-on.files.sets names "pot-on", a key of its own name. '
+        "The transition's pointer and the key's pointer share one line in "
+        "Reading, so one would be lost. Rename the key, or rename the "
+        "transition" in shape_errors(document)
     )
 
 
@@ -2303,9 +2404,10 @@ def test_a_transition_setting_a_key_of_its_own_name_refuses_by_name() -> None:
     assert [
         error for error in shape_errors(document) if error.startswith("transitions.")
     ] == [
-        'transitions.transplant sets "transplant", a key of its own name. The '
-        "transition's pointer and the key's pointer share one line in Reading, "
-        "so one would be lost. Rename the key, or rename the transition"
+        'transitions.transplant.sets names "transplant", a key of its own '
+        "name. The transition's pointer and the key's pointer share one line "
+        "in Reading, so one would be lost. Rename the key, or rename the "
+        "transition"
     ]
 
 

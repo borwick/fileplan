@@ -401,7 +401,8 @@ the old conversation took is still this session's, and the new conversation
 has no memory of it. A sibling cannot free it either, because
 [`release`](#release) refuses while the holder's pid is alive. What catches
 the forgotten claim is the next claim this session takes, which [refuses and
-names it](#the-claimed-state).
+names it](#the-claimed-state). To ask before that, `fileplan list --has
+claim-holder=this-session` [lists what this session holds](#the-claimed-state).
 
 The liveness probe is `os.kill(pid, 0)`, asked only about a record written on
 **this** host. On any other host the tool reports the claim as held elsewhere
@@ -536,8 +537,11 @@ which blocks work and needs a person. Both writes are under
 behind.
 
 **To see who holds what**, run [the listing](#the-listing). Every row carries
-`claimed-by` and `claim-status` where a state claims. `--has
-claim-status=dead` is the claims waiting for somebody to free them.
+`claimed-by`, `claim-status` and `claim-holder` where a state claims. `--has
+claim-status=dead` is the claims waiting for somebody to free them. `--has
+claim-holder=this-session` is what this session holds, which is the read a
+session resuming work starts from. Matching on `claimed-by` cannot ask that
+exactly: `--has claimed-by~4213` also matches a sibling's pid 42131.
 
 ### release
 
@@ -776,23 +780,31 @@ says which declaration was read. The other is any path outside that folder,
 which has no relative form.
 
 A row also carries what sits **beside** the item. Where a state opts into the
-[`claimed` capability](#the-claimed-state), every row carries `claimed-by` and
-`claim-status`. `claimed-by` is the holder, spelled `hostname pid 4213`.
-`claim-status` is [the liveness probe](#the-claim)'s own word: `alive`,
-`dead`, `elsewhere` or `unknown`. Both fields are read off `local/claims/`
-rather than out of any head. So `[keys.claimed-by]` refuses by name, the way
-`slug`, `state` and `path` do. A transition naming either field refuses too.
-Both fields are read rather than written, so there is nothing to set. Both are
-`null` on an item nothing claims. Both are present on every row whenever the
-declaration claims at all, so the shape does not depend on which items are
-filed. Both filter like any declared key. `--lacks claimed-by` is the
-unclaimed work, and `--has claim-status=dead` is what needs releasing.
+[`claimed` capability](#the-claimed-state), every row carries `claimed-by`,
+`claim-status` and `claim-holder`. `claimed-by` is the holder, spelled
+`hostname pid 4213`. `claim-status` is [the liveness probe](#the-claim)'s own
+word: `alive`, `dead`, `elsewhere` or `unknown`. `claim-holder` says whether
+the holder is the session reading the row: `this-session` or
+`another-session`. Ownership is the rule [a claiming run
+refuses by](#the-claimed-state), so the pid is compared as a whole number and
+a record from another host is never this session's. A record with no pid on
+this host is this session's, as it is for the refusal.
 
-Beside the claim's two fields, where a state opts into the [`dated`
+The claim fields are read off `local/claims/` rather than out of any head. So
+`[keys.claimed-by]` refuses by name, the way `slug`, `state` and `path` do. A
+transition naming a claim field refuses too, because the claim fields are read
+rather than written and there is nothing to set. The claim fields are `null`
+on an item nothing claims. They are present on every row whenever the
+declaration claims at all, so the shape does not depend on which items are
+filed. They filter like any declared key. `--lacks claimed-by` is the
+unclaimed work, `--has claim-status=dead` is what needs releasing, and `--has
+claim-holder=this-session` is what this session holds.
+
+Beside the claim fields, where a state opts into the [`dated`
 capability](#stale-days), every row carries **`stale-days`**. `stale-days` is
 the whole days since the item file's last commit. The tool reads `stale-days`
 out of git rather than storing it anywhere, and writes `null` wherever git has
-no answer. `[keys.stale-days]` refuses by name for the reason the claim's two
+no answer. `[keys.stale-days]` refuses by name for the reason the claim
 fields do, and so does a transition naming it. `stale-days` is derived rather
 than written, so there is nothing to set.
 
@@ -1110,7 +1122,7 @@ narrowing.
 
 `show` prints the **row**, never the body. `cat` the `path` the row names to
 read the prose. What the row adds is everything the file does not hold —
-`claimed-by` and `claim-status`, `blocked-by` and `blocks`, `stale-days`, and
+`claimed-by`, `claim-status` and `claim-holder`, `blocked-by` and `blocks`, `stale-days`, and
 the fields counted off the body. Putting the body in the row would put the body in
 *every* `list --json` as well. The token budget rules that out. Putting the
 body in only one rendering would break the very thing that makes both
@@ -1178,8 +1190,9 @@ every invocation since the loader existed. A pointer at a document the repo
 does not ship refuses. The transition's own `doc` is the **program**: the
 section that says what running this transition means, and what a session reads
 before doing the work. Each key the transition `sets` names the section that
-says what the key's value means. The key's `help` was always on the option,
-and the `help` says what to pass rather than what the key is.
+says what the key's value means, and so does each key a filing transition
+writes onto the filed item. The key's `help` was always on the option, and
+the `help` says what to pass rather than what the key is.
 
 The tool surfaces the pointers rather than leaving a reader to find them. A
 skill that opened `plan.toml` to look up a pointer would be **a second parser
@@ -1201,6 +1214,14 @@ hold for the run to go. `Drops` says what the head will not hold afterwards.
 mean. A dropped key has no value to mean, and the key's own section is one
 `fileplan` read away. A transition that drops nothing carries no `Drops`
 block, the shape `Declares` already has.
+
+A transition that [files](#filing) an item carries a **`Files` block**, after
+`Declares`. The block says where the filed item goes and which keys the run
+writes onto it: `into someday-maybe, writing defect`. Every other option a run
+takes for a key lands on the item the run moves. So the `Files` block is how
+`--help` says which item each key lands on. In `--json` the block is `files`:
+the declared table with its `sets`, or `null` for a transition that files
+nothing.
 
 **`--help` describes the declaration.** [`list`](#the-listing), [`next
 COMMAND`](#the-next-read) and [`show`](#show) walk the **tree** and are the
@@ -1304,6 +1325,14 @@ did not say. Saying so first is the whole of what the flag is for. A
 transition whose `drops` names a key **this item does not carry** removes
 nothing, so the check says nothing about that key. Absence is an answer here,
 not a gap.
+
+**A run that would leave the item's file as it was is checked as one.** The
+check says `would leave PATH unchanged`, then the reason the run itself prints
+on stderr. Both come from one comparison: the bytes on disk against the bytes
+the run would write. A check that said "would rewrite" for a run that writes
+nothing would be claiming something the run does not do. A run that stays in
+its state names only the head values it changes. A place and a number the
+item already holds go unsaid, which is why the example above names neither.
 
 **Every** generated transition carries `--check`, a creating transition
 included. A creating transition's filename reservation is a write that happens
@@ -2230,8 +2259,8 @@ Which of them is current, and how far it has got, is
 ### the cursor
 
 The count says how many sub-phases a section has. **The cursor says which one
-a session picked up last**, and it lives in the section's *head*, never in the
-bullets. The count is derived from the document and cannot drift. The cursor
+a session picked up or [finished](#marking) last**, and it lives in the
+section's *head*, never in the bullets. The count is derived from the document and cannot drift. The cursor
 is declared state a transition writes.
 
 Whether that sub-phase is *over* is read off its bullet, below. Whether one is
@@ -2355,16 +2384,21 @@ defect.
 The refusal protects nothing there. No open bullet is left for a cursor to
 point at. And the cursor is still a true record of where the last session was.
 The arm asks the same list the [close check](#the-close-check) refuses on. So
-a cursor may be written exactly when the section could close. What the arm is
-for is [`archive-plan`](#archive-plan), which requires the cursor key. A
-session that marked its last sub-phase before taking the item up was locked
-out of the close.
+a cursor may be written exactly when the section could close.
 
-A transition that *marks* is not caught by that refusal, and cannot be.
-Marking leaves the cursor where it was, so the run writes no cursor and is not
-asked. A cursor resting on a marked bullet is the ordinary state right after
-the mark went on. Gating on whether the run writes the cursor is what tells
-the two apart. Membership is graded either way. A cursor naming a bullet the
+**A transition that *marks* moves the cursor onto the bullet it marks**,
+wherever the state keeps a cursor. [`archive-plan`](#archive-plan) requires
+the cursor key. Three sections in a row marked every sub-phase without a
+session ever running [`work`](#work), and each was locked out of the close
+until somebody ran it by hand. A process step is a flag you have to know to
+pass. The mark is the run every sub-phase ends with, so writing the cursor
+there keeps it current by construction (2026-10-06). The cursor then says
+which sub-phase a session last picked up **or** last finished.
+
+The refusal above does not catch a mark, and cannot. A cursor resting on a
+marked bullet is the ordinary state right after the mark went on, so a mark's
+cursor is not asked whether its bullet is open. Gating on whether the run
+*sets* the cursor is what tells the two apart. Membership is graded either way. A cursor naming a bullet the
 body has not got is wrong however it got there. The listing still never dies
 over one item. A cursor a body no longer carries falls through to the first
 unmarked bullet rather than raising.
@@ -2473,7 +2507,8 @@ the pending bullet and puts the same bullet back, so the file is left byte for
 byte as it was. The run still exits 0 and prints the path, and stderr says the
 item is unchanged and why. Without that line, a run that wrote and a run that
 did nothing would look the same on both streams. Any run that leaves the
-item's file as it was says so the same way.
+item's file as it was says so the same way, and so does its check, in the
+same words.
 
 **The marker being the bullet means a section half cut up reads as half cut
 up.** Forget `--last` and the bullet goes on saying the section is pending,
@@ -2720,6 +2755,49 @@ two callers.
 returns the destination of the item it was *given*, uniformly. So
 `fileplan file-it ITEM NAME` piped somewhere carries that and nothing else.
 [`--check`](#the-check) names the file it would write and reserves nothing.
+
+**A key for the filed item goes inside the `files` table.** Take a workflow
+that declares a `defect` key and wants each filed item to carry one. The
+workflow names the key under `files.sets`:
+
+```toml
+[transitions.file-it.files]
+state = "someday-maybe"
+item  = "carried-from"
+name  = "carried"
+sets  = ["defect"]
+```
+
+Each key in `files.sets` becomes an option on the run, so `file-it` takes
+`--defect`. The run writes the value onto the filed item's head, after the two
+provenance keys, and never onto the carrier. A bad value refuses before
+either file is written. [The contract](#the-contract) shows the same thing in
+a `Files` block: `into someday-maybe, writing defect`.
+
+**`sets` beside `files` refuses at load, by name.** A key in a transition's
+own `sets` is written onto the item the run moves, and for a filing
+transition that item is the carrier. A workflow writing `sets = ["defect"]`
+there almost always meant the filed item. Before the refusal, the run put the
+key on the carrier and said nothing. So the refusal names `files.sets` as the
+place to write the key. A transition that [dissolves](#dissolving) refuses
+`sets` for the same reason: the transition's own halves make the field wrong.
+`files.sets` also refuses the two provenance keys, because the tool writes
+both of them itself.
+
+**To tag an item that is already filed, declare a transition from its state
+to itself.** No filing is involved. The transition `sets` the key, and the run
+writes the key onto the item where it stands:
+
+```toml
+[transitions.tag-defect]
+from = "someday-maybe"
+to   = "someday-maybe"
+sets = ["defect"]
+```
+
+The transition also needs the `doc` and `help` every transition carries.
+`fileplan tag-defect cache-misses --defect NAME` then rewrites the item in
+place.
 
 ### templates
 
@@ -3085,7 +3163,8 @@ written.
 
 It also takes the status key off the head. A sub-phase that is finished is not
 at any of the three stages that key names
-([sub-phase-status](#sub-phase-status)). The cursor is left where it is.
+([sub-phase-status](#sub-phase-status)). And it moves [the
+cursor](#the-cursor) onto the bullet it marks.
 
 ### skip
 

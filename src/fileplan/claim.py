@@ -68,10 +68,19 @@ UNKNOWN = "unknown"
 #: name. Ordered alive-first, the order a person reads them in.
 STATUSES = (ALIVE, DEAD, ELSEWHERE, UNKNOWN)
 
-#: The two fields a claim gives a row, unpacked so nothing below spells one
+#: Whether the session reading a row is the one holding its claim, decided by
+#: `owns`: the same rule the claiming run refuses by, so a pid is compared as a
+#: whole number and a record from another host is never this session's.
+THIS_SESSION = "this-session"
+ANOTHER_SESSION = "another-session"
+
+#: The two as a closed set, so `--has claim-holder=mine` refuses by name.
+HOLDERS = (THIS_SESSION, ANOTHER_SESSION)
+
+#: The three fields a claim gives a row, unpacked so nothing below spells one
 #: as a literal. Their one home is `fileplan.declaration.CLAIM_KEYS`, where a
-#: redeclaration of either is refused.
-BY, STATUS = CLAIM_KEYS
+#: redeclaration of any of them is refused.
+BY, STATUS, HOLDER = CLAIM_KEYS
 
 
 @dataclass(frozen=True)
@@ -210,14 +219,20 @@ def describe(record: Mapping[str, Any], status: str) -> str:
     return f"{_holder(record)} ({SAID.get(status, status)}), taken {_when(record)}"
 
 
-def fields(record: Mapping[str, Any], status: str) -> dict[str, str]:
-    """The two values a claim gives a row: its holder, and the probe's word.
+def fields(record: Mapping[str, Any], status: str, who: Identity) -> dict[str, str]:
+    """The three values a claim gives a row: its holder, the probe's word, and
+    whether `who` is that holder, by `owns`.
 
-    Pure, and deliberately not a sentence: `claim-status` holds one of
-    `STATUSES`, so it filters like any declared key with `values` and
-    `--has claim-status=dead` is "what needs releasing".
+    Pure, and deliberately not a sentence: `claim-status` holds one of `STATUSES` and
+    `claim-holder` one of `HOLDERS`, so each filters like any declared key with
+    `values`. `--has claim-status=dead` is "what needs releasing", and
+    `--has claim-holder=this-session` is "what this session holds".
     """
-    return {BY: _holder(record), STATUS: status}
+    return {
+        BY: _holder(record),
+        STATUS: status,
+        HOLDER: THIS_SESSION if owns(record, who) else ANOTHER_SESSION,
+    }
 
 
 def _when(record: Mapping[str, Any]) -> str:
@@ -325,7 +340,7 @@ def holders(declaration: Declaration) -> dict[str, dict[str, str]]:
     """
     who = identity(declaration)
     return {
-        slug: fields(held, alive(held, who))
+        slug: fields(held, alive(held, who), who)
         for slug, held in _records(declaration).items()
     }
 

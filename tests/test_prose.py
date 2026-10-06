@@ -14,8 +14,7 @@ ease floor there would penalise the subject rather than the writing. The read
 is per section, so no dense section hides behind easy neighbours.
 
 Until 13-8 every ease number quoted in this repo came from an uncommitted
-heuristic. That is the shape `test_size.py` next door complains about in its
-own first paragraph: a pair that could not be reproduced. So the reader ships,
+heuristic, a number that could not be reproduced. So the reader ships,
 and from here it is the number of record. Numbers written down before it
 existed do not match it and were left as written, being dated records.
 
@@ -24,8 +23,8 @@ sentence. The suite grades that the reader works; a person reads the table:
 
     uv run python tests/test_prose.py docs/method.md
 
-The pair with `test_size.py` is the point. That module measures the code, this
-one measures the prose, and `test_docs.py` grades what the documents say.
+This module measures the prose, and `test_docs.py` grades what the documents
+say.
 """
 
 from __future__ import annotations
@@ -42,7 +41,7 @@ from test_docs import FENCED
 #: over a handful of words is arithmetic without a meaning: `## Verbs` is one
 #: word and scores 121, `## Transitions` scores −48. A nonsense number that
 #: looks ordinary is what the make-problems-visible rule refuses, so the reader
-#: declines to produce one. The shape is `CEILING`'s, one module over.
+#: declines to produce one.
 MINIMUM_WORDS = 40
 
 #: A word, hyphens and apostrophes joining rather than splitting: `sub-phase`

@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tokenize
 from pathlib import Path
+from typing import Callable
 
 import click
 import pytest
@@ -1223,6 +1224,17 @@ def rebuilt(row: dict) -> str:
     ):
         if lines:
             blocks.append((title, lines))
+    if row["files"] is not None:
+        writing = row["files"].get("sets", [])
+        blocks.append(
+            (
+                "Files",
+                [
+                    f"into {row['files']['state']}"
+                    + (f", writing {', '.join(writing)}" if writing else "")
+                ],
+            )
+        )
     blocks.append(
         (
             "Reading",
@@ -3189,11 +3201,13 @@ def test_the_claims_filters_register_only_where_a_state_claims(
     assert main(["list", "--help"]) == 0
     out = capsys.readouterr().out
     assert claim.BY in out and claim.STATUS in out
+    assert f"{claim.HOLDER}={claim.THIS_SESSION}" in out
 
     unclaimed(tree)
     assert main(["list", "--help"]) == 0
     out = capsys.readouterr().out
     assert claim.BY not in out and claim.STATUS not in out
+    assert claim.HOLDER not in out
 
 
 def test_the_listing_names_the_holder_under_the_item(
@@ -3459,6 +3473,81 @@ def test_a_claim_status_the_probe_never_answers_refuses_by_name(
     assert printed.out == ""
     assert "zzz" in printed.err
     assert ", ".join(claim.STATUSES) in printed.err
+
+
+def test_this_sessions_claims_are_exactly_its_own_and_a_pid_prefix_is_not(
+    tree: Path, session: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """**Section 29's fourth done line.** A session resuming work asks for
+    what it holds, and gets exactly that: a sibling on the same host whose pid
+    begins with this session's digits is another session, which is the case
+    `--has claimed-by~PID` gets wrong."""
+    theirs = benched(tree, "Another seedling")
+    prefixed = int(f"{MINE}9")
+    sibling(tree, theirs, pid=prefixed)
+    mine = benched(tree, "A seedling")
+    capsys.readouterr()
+
+    assert main(["list", "--has", f"{claim.HOLDER}={claim.THIS_SESSION}", "--json"]) == 0
+    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    assert row["slug"] == mine
+    assert row["claimed-by"] == f"{session} pid {MINE}"
+
+    assert (
+        main(["list", "--has", f"{claim.HOLDER}={claim.ANOTHER_SESSION}", "--json"])
+        == 0
+    )
+    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    assert row["slug"] == theirs
+    assert row["claimed-by"] == f"{session} pid {prefixed}"
+
+
+def test_the_unclaimed_work_lacks_a_claim_holder(
+    tree: Path, session: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The key is `null` where nothing claims, like the other two claim fields,
+    so `--lacks` reads as "nobody holds it"."""
+    free = benched(tree, "Another seedling")
+    assert main(["bed-out", free]) == 0
+    benched(tree, "A seedling")
+    capsys.readouterr()
+
+    assert main(["list", "--lacks", claim.HOLDER, "--json"]) == 0
+    rows = json.loads(capsys.readouterr().out)["rows"]
+    assert free in [row["slug"] for row in rows]
+    assert all(row[claim.HOLDER] is None for row in rows)
+
+
+def test_an_offer_narrows_to_this_sessions_claims(
+    tree: Path, session: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`next` takes the listing's filters, so the key reaches an offer with no
+    option of its own. A sibling's claim is never offered anyway, so what the
+    filter removes is the unclaimed work on the bench."""
+    assert main(["sprout", "Free", "--body", "Prose.", "--cultivar", "heirloom"]) == 0
+    assert main(["bench", "free"]) == 0
+    mine = benched(tree, "A seedling")
+    capsys.readouterr()
+
+    assert main(["next", "bed-out", "--json"]) == 0
+    assert {row["slug"] for row in json.loads(capsys.readouterr().out)["rows"]} == {
+        mine,
+        "free",
+    }
+    argv = ["next", "bed-out", "--has", f"{claim.HOLDER}={claim.THIS_SESSION}"]
+    assert main([*argv, "--json"]) == 0
+    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    assert row["slug"] == mine
+
+
+def test_a_claim_holder_outside_the_two_refuses_by_name(
+    tree: Path, session: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The ownership rule's closed set, refused like the probe's."""
+    assert main(["list", "--has", f"{claim.HOLDER}=mine"]) == 2
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert ", ".join(claim.HOLDERS) in printed.err
 
 
 def test_a_malformed_claim_record_refuses_the_listing_with_no_json(
@@ -4012,8 +4101,8 @@ def test_a_claiming_run_given_nothing_else_takes_the_claim_and_says_so(
 
     assert main(["tend", "a-seedling"]) == 0
     assert capsys.readouterr().err == (
-        "potting-bench/a-seedling.md is unchanged: the claim was taken, "
-        "and nothing else was given\n"
+        "potting-bench/a-seedling.md is unchanged: the claim is taken, "
+        "and nothing else is given\n"
     )
     assert path.read_bytes() == was
     assert claim.path(tree, "a-seedling").exists()
@@ -4021,6 +4110,93 @@ def test_a_claiming_run_given_nothing_else_takes_the_claim_and_says_so(
     # Run again by the holder: no claim to take this time, and nothing given.
     assert main(["tend", "a-seedling"]) == 0
     assert "nothing given changes it" in capsys.readouterr().err
+
+
+def _an_open_section(tree: Path) -> tuple[str, Path, list[str]]:
+    orchard(tree, "First tree")
+    assert main(["espalier", "first-tree"]) == 0
+    return "orchard/first-tree.md", tree / "orchard" / "first-tree.md", ["espalier", "first-tree"]
+
+
+def _an_open_batch(tree: Path) -> tuple[str, Path, list[str]]:
+    assert main(["strike", "A batch", "--body", "Prose."]) == 0
+    assert main(["mist", "a-batch", "--title", "Bottom heat"]) == 0
+    return "propagator/a-batch.md", tree / "propagator" / "a-batch.md", ["mist", "a-batch"]
+
+
+def _a_seedling_to_claim(tree: Path) -> tuple[str, Path, list[str]]:
+    assert main(["sprout", "A seedling", "--body", "Prose."]) == 0
+    assert main(["bench", "a-seedling"]) == 0
+    return (
+        "potting-bench/a-seedling.md",
+        tree / "potting-bench" / "a-seedling.md",
+        ["tend", "a-seedling"],
+    )
+
+
+def _a_seedling_already_held(tree: Path) -> tuple[str, Path, list[str]]:
+    named, path, run = _a_seedling_to_claim(tree)
+    assert main(run) == 0
+    return named, path, run
+
+
+@pytest.mark.parametrize(
+    "arrange",
+    [_an_open_section, _an_open_batch, _a_seedling_to_claim, _a_seedling_already_held],
+    ids=["open-section", "open-carrier", "claim-taken", "nothing-given"],
+)
+def test_the_check_says_unchanged_for_the_reason_the_run_gives(
+    tree: Path,
+    session: str,
+    capsys: pytest.CaptureFixture[str],
+    arrange: Callable[[Path], tuple[str, Path, list[str]]],
+) -> None:
+    """Settled point 1 of section 29: a check that says "would rewrite" for a
+    run that leaves every byte as it was is the defect, not the bare run. The
+    check and the run make one comparison, so they give one reason."""
+    named, path, run = arrange(tree)
+    capsys.readouterr()
+    was = path.read_bytes()
+
+    assert main([*run, "--check"]) == 0
+    checked = capsys.readouterr().out
+    assert path.read_bytes() == was
+    assert f"would leave {named} unchanged" in checked
+
+    assert main(run) == 0
+    reason = capsys.readouterr().err.split(f"{named} is unchanged: ", 1)[1]
+    assert path.read_bytes() == was
+    assert checked.endswith(f": {reason}")
+
+
+def test_a_check_that_would_write_still_says_rewrite(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The converse: a run that changes the file is checked as a rewrite, and
+    the run itself says nothing about being unchanged."""
+    _an_open_section(tree)
+    capsys.readouterr()
+
+    assert main(["espalier", "first-tree", "--title", "A branch", "--check"]) == 0
+    assert "would rewrite orchard/first-tree.md" in capsys.readouterr().out
+    assert main(["espalier", "first-tree", "--title", "A branch"]) == 0
+    assert "unchanged" not in capsys.readouterr().err
+
+
+def test_a_staying_check_names_no_place_or_number_the_item_already_holds(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The orchard is queued and numbered, and a tree in it keeps both when it
+    stays. Writing a value the head already carries is not a change, so the
+    check does not claim it, which is how `#the-check`'s own example reads."""
+    orchard(tree, "First tree")
+    capsys.readouterr()
+
+    assert main(["espalier", "first-tree", "--title", "A branch", "--check"]) == 0
+    checked = capsys.readouterr().out
+    assert "would rewrite orchard/first-tree.md" in checked
+    assert "write position" not in checked
+    assert "write number" not in checked
 
 
 def test_a_verb_refusing_its_own_key_on_presence_runs_once(
@@ -4763,21 +4939,83 @@ def test_which_findings_are_still_open_is_the_offer(
     assert [row["name"] for row in rows] == ["c2"]
 
 
-def test_a_filings_help_takes_two_positionals_two_options_and_both_halves(
+def test_a_filings_help_takes_two_positionals_its_options_and_both_halves(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The whole generated surface in one read: the disposition's positionals,
-    the filing's two options, and both halves in `Declares` — which is what
-    lets a composed session reach for this verb by the half it declares rather
-    than by its name."""
+    the filing's two options and the key it writes, both halves in `Declares`
+    — which is what lets a composed session reach for this verb by the half it
+    declares rather than by its name — and `Files`, which says which head the
+    key lands on."""
     assert main(["line-out", "--help"]) == 0
     out = capsys.readouterr().out
     assert "Usage: fileplan line-out [OPTIONS] ITEM NAME" in out
     assert "--title TEXT" in out and "--body TEXT" in out
-    assert out.partition("Declares")[2].split("Reading")[0].split() == [
+    assert "--cultivar [heirloom|hybrid]" in out
+    assert out.partition("Declares")[2].split("Files")[0].split() == [
         "files",
         "marks",
     ]
+    assert out.partition("Files")[2].split("Reading")[0].strip() == (
+        "into greenhouse, writing cultivar"
+    )
+    # The caller supplies the value, so its meaning is named too.
+    assert "cultivar  method.md#cultivar" in out.partition("Reading")[2]
+
+
+def test_a_filings_contract_carries_its_table_and_every_other_verb_null(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`files` in the JSON is the declared table, `sets` included, so a
+    consumer reading the contract learns which head `--cultivar` writes to
+    without parsing the epilog. `null` where a verb files nothing."""
+    rows = {row["name"]: row for row in declaration_json(capsys)["rows"]}
+    assert rows["line-out"]["files"] == {
+        "state": "greenhouse",
+        "item": "batch",
+        "name": "cutting",
+        "sets": ["cultivar"],
+    }
+    assert rows["line-out"]["sets"] == []
+    assert rows["pot-on"]["files"] is None
+
+
+def test_a_filing_key_outside_its_values_refuses_and_writes_neither_file(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A closed key is a `click.Choice`, so the run never starts: the carrier
+    is byte-identical and no seedling exists."""
+    cuttings("The first")
+    carrier = tree / "propagator" / "a-batch.md"
+    before = carrier.read_bytes()
+    capsys.readouterr()
+    assert main(
+        ["line-out", "a-batch", "c1", "--cultivar", "wild", "--body", "Prose."]
+    ) == 2
+    assert "'wild' is not one of 'heirloom', 'hybrid'" in capsys.readouterr().err
+    assert carrier.read_bytes() == before
+    assert not (tree / "greenhouse" / "the-first.md").exists()
+
+
+@pytest.mark.parametrize("flag", ["note", "check"])
+def test_a_filing_key_colliding_with_an_option_refuses_naming_files_sets(
+    tree: Path, capsys: pytest.CaptureFixture[str], flag: str
+) -> None:
+    """The keys in `files.sets` become options as `sets` keys do, so each
+    collision check walks both lists and names the field that was written."""
+    plan = (tree / "plan.toml").read_text().replace(
+        'sets  = ["cultivar"]', f'sets  = ["cultivar", "{flag}"]'
+    )
+    (tree / "plan.toml").write_text(
+        plan + f'\n[keys.{flag}]\ndoc = "method.md#{flag}"\n'
+    )
+    (tree / "method.md").write_text(
+        (tree / "method.md").read_text() + f"\n## {flag}\n"
+    )
+    assert main(["--help"]) == 2
+    err = capsys.readouterr().err
+    assert f'transitions.line-out.files.sets names "{flag}"' in err
+    assert "One option cannot mean two things" in err
 
 
 def test_a_filing_with_no_body_refuses_in_the_executors_words(

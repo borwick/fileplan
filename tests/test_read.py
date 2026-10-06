@@ -786,9 +786,13 @@ def test_declared_state_order_still_comes_first(tree: Declaration) -> None:
 # pure over the mapping it is handed; `listing` is the edge that reads
 # `local/claims/` and decides which records belong to an item at all.
 
-#: What one holder's two fields look like, as `claim.fields` builds them.
+#: What one holder's three fields look like, as `claim.fields` builds them.
 HOLDER = "this-host pid 4213"
-HELD = {"claimed-by": HOLDER, "claim-status": claim.ALIVE}
+HELD = {
+    "claimed-by": HOLDER,
+    "claim-status": claim.ALIVE,
+    "claim-holder": claim.THIS_SESSION,
+}
 
 
 def held(

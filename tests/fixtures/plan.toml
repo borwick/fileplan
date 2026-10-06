@@ -260,10 +260,13 @@ from  = "propagator"
 to    = "propagator"
 marks = "lined"
 
+# `sets` inside the table, so `cultivar` lands on the seedling and never on
+# the propagator it was lined out of.
 [transitions.line-out.files]
 state = "greenhouse"
 item  = "batch"
 name  = "cutting"
+sets  = ["cultivar"]
 
 # The orchard's dispositions, where a mark and a cursor meet over one body.
 # `ripen` drops the status key and `thin` deliberately does not, which is

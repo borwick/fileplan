@@ -808,12 +808,15 @@ def filtering(declaration: Declaration, given: str) -> Test:
 def _closed(declaration: Declaration, key: str) -> tuple[str, ...] | None:
     """The set a key's value is refused against, or `None` where it has none.
 
-    A declared key's `values`, and one derived key's: `claim-status` holds the
-    probe's own words, which the tool owns rather than the tree. Every other
-    key holds whatever the corpus put there.
+    A declared key's `values`, and two derived keys': `claim-status` holds the
+    probe's own words and `claim-holder` the ownership rule's, which the tool
+    owns rather than the tree. Every other key holds whatever the corpus put
+    there.
     """
     if key == claim.STATUS:
         return claim.STATUSES
+    if key == claim.HOLDER:
+        return claim.HOLDERS
     declared = declaration.keys.get(key)
     return declared.values if declared is not None else None
 

@@ -2128,29 +2128,31 @@ def test_a_marking_verb_writes_onto_a_bullet_in_a_state_that_has_a_cursor(
     tree: Declaration,
 ) -> None:
     """The whole of 12-1's premise in one run. The word is `orchard`'s own —
-    the state carries a register, a claim and a cursor, and none of the three
-    is anything the marking arm asks about."""
+    the state carries a register, a claim and a cursor. The body changes on
+    the one bullet, and the head gains the cursor on that bullet."""
     path = pruned(tree)
-    before = path.read_text().splitlines()
+    assert "graft" not in read(path, tree).head
+    before = read(path, tree).body.splitlines()
     execute(tree, tree.transitions["ripen"], name="a-seedling", asked={"name": "2-1"})
-    after = path.read_text().splitlines()
+    marked = read(path, tree)
+    after = marked.body.splitlines()
     assert len(before) == len(after)
     differing = [n for n, (one, two) in enumerate(zip(before, after)) if one != two]
     assert [after[n] for n in differing] == ["- **2-1 — The first** **ripened**"]
+    assert marked["graft"] == "2-1"
 
 
-def test_marking_a_sub_phase_leaves_the_cursor_where_it_was(
+def test_marking_a_sub_phase_moves_the_cursor_onto_it(
     tree: Declaration,
 ) -> None:
-    """A mark is a fact about the **bullet**, so nothing about where the cursor
-    points changes: the run writes the word and leaves `graft` alone.
+    """The mark is the run every sub-phase ends with, so it keeps the cursor
+    current: a session that never ran the claiming verb still leaves the
+    cursor on the last sub-phase it finished, and a close that requires the
+    cursor is not locked out.
 
-    The status is a different question and it does go, because `ripen`
-    declares a `drops` over it — the arm
+    The status goes, because `ripen` declares a `drops` over it — the arm
     `test_a_marking_verb_that_drops_a_key_takes_it_off_the_head` is about.
-    Asserted here too so the two halves of one head are pinned in one place:
-    a run that quietly took the cursor with the status would pass every test
-    that looked at only one of them."""
+    Asserted here too so the two halves of one head are pinned in one place."""
     pruned(tree)
     path = execute(
         tree,
@@ -2158,11 +2160,11 @@ def test_marking_a_sub_phase_leaves_the_cursor_where_it_was(
         name="a-seedling",
         values={"graft": "2-1", "graft-status": "in progress"},
     )
-    execute(tree, tree.transitions["ripen"], name="a-seedling", asked={"name": "2-1"})
+    execute(tree, tree.transitions["ripen"], name="a-seedling", asked={"name": "2-2"})
     item = read(path, tree)
-    assert item["graft"] == "2-1"
+    assert item["graft"] == "2-2"
     assert "graft-status" not in item.head
-    assert "- **2-1 — The first** **ripened**" in item.body
+    assert "- **2-2 — The second** **ripened**" in item.body
 
 
 def test_the_pending_marker_refuses_as_a_name_the_body_does_not_carry(
@@ -2436,6 +2438,74 @@ def test_the_filed_item_carries_the_provenance_the_table_names(
     lined(tree)
     head = read(tree.root / "greenhouse" / "the-first.md", tree).head
     assert head == {"title": "The first", "batch": "a-batch", "cutting": "c1"}
+
+
+def test_a_filing_key_lands_on_the_filed_item_and_never_on_the_carrier(
+    tree: Declaration,
+) -> None:
+    """**The key goes where it is written.** `cultivar` sits in `line-out`'s
+    `files` table, so the seedling carries it, after the provenance, and the
+    propagator it was lined out of does not."""
+    batch(tree, "The first", "The second")
+    moved = execute(
+        tree,
+        tree.transitions["line-out"],
+        name="a-batch",
+        values={"cultivar": "heirloom"},
+        asked={"name": "c1", "body": "Prose for the seedling."},
+    )
+    filed = read(tree.root / "greenhouse" / "the-first.md", tree).head
+    assert list(filed.items()) == [
+        ("title", "The first"),
+        ("batch", "a-batch"),
+        ("cutting", "c1"),
+        ("cultivar", "heirloom"),
+    ]
+    assert "cultivar" not in read(moved, tree).head
+
+
+def test_a_badly_shaped_filing_key_refuses_and_writes_neither_file(
+    tree: Declaration,
+) -> None:
+    """Graded before the first write, so the carrier is byte-identical and no
+    seedling exists: `value_errors` walks the filed item's keys as it walks
+    the carrier's."""
+    batch(tree, "The first")
+    carrier = tree.root / "propagator" / "a-batch.md"
+    before = carrier.read_bytes()
+    with pytest.raises(Refusal) as refusal:
+        execute(
+            tree,
+            tree.transitions["line-out"],
+            name="a-batch",
+            values={"cultivar": ["heirloom", "hybrid"]},
+            asked={"name": "c1", "body": "Prose."},
+        )
+    assert str(refusal.value) == (
+        'line-out sets "cultivar", which holds one value, and this run gave '
+        "it a list"
+    )
+    assert carrier.read_bytes() == before
+    assert not (tree.root / "greenhouse" / "the-first.md").exists()
+
+
+def test_a_filing_check_with_a_key_names_the_filing_and_writes_nothing(
+    tree: Declaration,
+) -> None:
+    batch(tree, "The first")
+    carrier = tree.root / "propagator" / "a-batch.md"
+    before = carrier.read_bytes()
+    said = execute(
+        tree,
+        tree.transitions["line-out"],
+        name="a-batch",
+        values={"cultivar": "hybrid"},
+        asked={"name": "c1", "body": "Prose."},
+        check=True,
+    )
+    assert isinstance(said, str) and "greenhouse/the-first.md" in said
+    assert carrier.read_bytes() == before
+    assert not (tree.root / "greenhouse" / "the-first.md").exists()
 
 
 def test_the_same_run_marks_the_bullet_it_filed_from(tree: Declaration) -> None:
