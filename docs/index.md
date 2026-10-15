@@ -18,7 +18,8 @@ the first five minutes. These are the rest.
 - [method.md](method.md) — the reference. One section per word a plan file can
   hold, and the one home for each. Every `doc =` points here.
 - [procedures.md](procedures.md) — what a session *does* around a run, which
-  the reference leaves out on purpose. Every `policy =` points here.
+  the reference leaves out on purpose. A transition's section of the method
+  links here where it has a procedure.
 
 ## the interpreter an agent reads
 
@@ -37,7 +38,8 @@ the first five minutes. These are the rest.
   you know what the file is, not so you go and read it, and a rule still worth
   citing lives above.
 - [templates/simplify-code.md](templates/simplify-code.md) — the pass that
-  keeps the code easy to change. An item can be bodied from it.
+  keeps the code easy to change. File it as an item with
+  `fileplan idea "Simplify the code" --body - < docs/templates/simplify-code.md`.
 
 ## provenance
 

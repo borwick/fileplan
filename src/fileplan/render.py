@@ -31,12 +31,6 @@ SCHEMA_VERSION = 1
 #: lines. Everything else is a field of the record, in the row's own order.
 HEADING = ("slug", "state")
 
-#: And the two a bullet record heads with. One renderer, two headings, for
-#: the reason there is one renderer at all: a second row kind rendered by a
-#: second function is two things that can drift, and the control comparing the
-#: two renderings would have nothing to say about the new kind.
-BULLET_HEADING = ("name", "item")
-
 _INDENT = "  "
 _GAP = "  "
 

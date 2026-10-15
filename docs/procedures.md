@@ -3,13 +3,12 @@
 What a session **does** around a run: the questions to ask before it, what a
 value commits you to, what the run costs that nothing else warns you about.
 `docs/method.md` says what each transition and key *means*. This document says
-what to do. A transition reaches its section through
-[`policy =`](method.md#the-interpreter).
+what to do. A transition reaches its section through a link from its own
+section of the method ([the interpreter](method.md#the-interpreter)).
 
 Sections are named after the **procedure**, not after the transition that
-points at one. A consumer's workflow has different transitions and the same
-procedures. The
-pointer is what joins the two, so nothing here is titled with a word out of
+links to one. A consumer's workflow has different transitions and the same
+procedures. The link is what joins the two, so nothing here is titled with a word out of
 this repo's own `plan.toml`.
 
 ## decomposing a section
@@ -185,8 +184,8 @@ What the run costs, so the next close-out does not rediscover it:
 - **every named sub-phase has to carry a mark first**, the close-out's own
   included, and the run names the ones that do not. Where the cursor sits
   gates nothing ([the close check](method.md#the-close-check)). So `fileplan
-  next` for the transition whose `policy =` points here is the read that says
-  whether a section is closeable. A forgotten sub-phase blocks the close
+  list --has commands=VERB`, for the transition whose section links here, is
+  the read that says whether a section is closeable. A forgotten sub-phase blocks the close
   rather than passing it;
 - the claim is freed by the run itself, so nothing is released afterwards;
 - `git add` the deleted path to stage the removal; there is no `git rm`,

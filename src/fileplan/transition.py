@@ -1,10 +1,10 @@
 """The generic executor: one code path for every declared transition.
 
 `execute` holds the run lock for the whole of its body. `execute` then
-branches three ways on what the declaration says. A transition with no `from`
-creates an item. A transition declaring `dissolves` takes the file away.
-Everything else moves the file between directories, and one declaring
-`retitles` moves it to a new name as well. No transition's name
+branches three ways on the transition's kind. A create writes an item. A
+close or a merge takes the file away. Every other kind moves the file between
+directories or rewrites it where it is, and a rename moves it to a new name
+as well. No transition's name
 appears here, or anywhere under `src/`.
 
 The capability arms resolve before anything is written. So every refusal
@@ -27,7 +27,12 @@ from typing import Any, Callable, Mapping, Sequence
 
 from fileplan import claim, depends, item, numbered, queued, read, subphase
 from fileplan.declaration import (
+    ADD_BULLET,
     CAPABILITY_KEYS,
+    DISSOLVING,
+    MARK_BULLET,
+    MERGE,
+    RENAME,
     Declaration,
     Key,
     Refusal,
@@ -51,7 +56,7 @@ def offer_errors(head: Mapping[str, Any], transition: Transition) -> list[str]:
     `refuses` asks `read.carries` so a list is the several values it holds.
     A key refused on presence refuses any value at all.
     Pure: no filesystem, no cwd.
-    See docs/method.md#the-next-read
+    See docs/method.md#commands
     """
     errors = [
         f'{transition.name} requires "{key}", which this item does not carry'
@@ -114,11 +119,10 @@ def dangle_errors(
 ) -> list[str]:
     """Every way `owner` is not something `transition` may take away yet.
 
-    Fires on a verb that both `archives` and `dissolves`, over every other
-    item read through its own state's `opened-for` key. Pure.
-    See docs/method.md#the-dangle-check
+    Fires on a close that `archives`, over every other item read through its
+    own state's `opened-for` key. Pure. See docs/method.md#the-dangle-check
     """
-    if not (transition.archives and transition.dissolves):
+    if not transition.records:
         return []
 
     errors: list[str] = []
@@ -150,12 +154,11 @@ def dangle_errors(
 def unmarked_errors(owner: item.Item, transition: Transition) -> list[str]:
     """Every sub-phase of `owner` that `transition` would file a record over.
 
-    Fires on a verb that both `archives` and `dissolves`, and the pending
-    marker counts here where `dangle_errors` drops it. Pure.
-    See docs/method.md#the-close-check
+    Fires on a close that `archives`, and the pending marker counts here where
+    `dangle_errors` drops it. Pure. See docs/method.md#the-close-check
     """
     heading = owner.state.sub_phases
-    if not (transition.archives and transition.dissolves) or not heading:
+    if not transition.records or not heading:
         return []
     marks = owner.state.marks
     carried = subphase.bullets(owner.body, heading, pending=None, marks=marks)
@@ -168,8 +171,100 @@ def unmarked_errors(owner: item.Item, transition: Transition) -> list[str]:
     ]
 
 
+def commands(
+    declaration: Declaration, one: item.Item, walked: Sequence[item.Item]
+) -> list[str]:
+    """The transitions that could take `one` right now, in declared order.
+
+    What a listing row's `commands` field holds, and the one home of the
+    question "would this transition take this item". Each test is a function
+    the run refuses through, so the row and the run cannot disagree: the
+    state, the `requires` and `refuses`, a claim another session holds, a
+    carrier still naming the item, an unmarked sub-phase under a close that
+    archives, a bullet the reader passes over, a name form the item cannot
+    fill, a number an archiving run has nothing to file under, and, for a
+    mark-bullet, a bullet left to mark. What a run is given is not asked:
+    a key the transition `sets` counts as carried, and the refusal over a
+    second claim this session holds is `--keep-claims`' to lift. `walked`
+    is the whole tree, read once by the caller. See docs/method.md#commands
+    """
+    return [
+        transition.name
+        for transition in declaration.transitions.values()
+        if transition.source == one.state.name
+        and not offer_errors(one.head, transition)
+        and not _held_elsewhere(declaration, transition, one.slug)
+        and not dangle_errors(one, transition, walked, declaration.root)
+        and not unmarked_errors(one, transition)
+        and not unread_errors(declaration, transition, one, one.head)
+        and not form_errors(declaration, transition, one, _settable(transition, one))
+        and not number_errors(declaration, transition, one)
+        and (transition.kind != MARK_BULLET or _markable(one))
+    ]
+
+
+def _settable(transition: Transition, one: item.Item) -> dict[str, Any]:
+    """`one`'s head, with every key `transition` sets counted as carried: a
+    run may be given any of them, and a row may not leave out a command the
+    run would take."""
+    return {**one.head, **{key: True for key in transition.sets}}
+
+
+def _held_elsewhere(
+    declaration: Declaration, transition: Transition, slug: str
+) -> bool:
+    """Whether a session that is not this one holds `slug`'s claim.
+
+    The executor's own question, asked under `_claiming`'s own gate: a verb
+    that neither enters nor leaves a claimed state never reads a record, so
+    neither does the row. Not "is it claimed at all", which would hide the
+    item this session already holds. See docs/method.md#the-claimed-state
+    """
+    if not any(_claimed_ends(declaration, transition)):
+        return False
+    held = _record(declaration, slug)
+    return held is not None and not claim.owns(held, claim.identity(declaration))
+
+
+def _claimed_ends(
+    declaration: Declaration, transition: Transition
+) -> tuple[bool, bool]:
+    """Whether `transition` enters a claimed state, and whether it leaves one.
+    A transition doing neither reads no claim record at all. A close or a
+    merge enters nothing, so it can only free a claim."""
+    source = declaration.states[transition.source] if transition.source else None
+    destination = declaration.states[transition.to] if transition.to else None
+    return (
+        destination is not None and destination.has(claim.NAME),
+        source is not None and source.has(claim.NAME),
+    )
+
+
+def _record(declaration: Declaration, slug: str) -> Mapping[str, Any] | None:
+    """`slug`'s claim record, or `None`: a missing record means unclaimed,
+    here as everywhere."""
+    path = claim.path(declaration.root, slug)
+    return claim.read(path, declaration.root) if path.exists() else None
+
+
+def _markable(one: item.Item) -> bool:
+    """Whether `one` carries a bullet a mark could still go on: unmarked, and
+    with nothing after its bold run in the way. See docs/method.md#marking"""
+    if not one.state.sub_phases:
+        return False
+    return any(
+        bullet.mark is None and not bullet.unmarkable
+        for bullet in subphase.bullets(
+            one.body,
+            one.state.sub_phases,
+            pending=one.state.pending,
+            marks=one.state.marks,
+        )
+    )
+
+
 def _missing(head: Mapping[str, Any], key: str) -> bool:
-    return key not in head or head[key] in ("", [])
+    return read.empty(head.get(key))
 
 
 # --------------------------------------------------------------------------
@@ -214,7 +309,7 @@ def execute(
     """Run `transition`, returning the file it wrote, or raise `Refusal`.
 
     `name` is the title of a verb that creates, the item handle of one that
-    moves. A verb that absorbs also takes a sequence of handles, and then
+    moves. A merge also takes a sequence of handles, and then
     hands back a tuple of paths, or its check's sentences one per line: the
     shape follows what was passed, never how many. `values` holds the verb's
     `sets` keys, `asked` what the destination state's capabilities were asked
@@ -229,10 +324,9 @@ def execute(
         raise Refusal(wrong)
     several = not isinstance(name, str)
     handles = (name,) if isinstance(name, str) else tuple(name)
-    if several and not transition.absorbs:
+    if several and transition.kind != MERGE:
         raise Refusal(
-            f"{transition.name} takes one item, and only a transition that "
-            "absorbs takes several"
+            f"{transition.name} takes one item, and only a merge takes several"
         )
     running = _Running(
         declaration=declaration,
@@ -247,7 +341,7 @@ def execute(
     with run_lock(declaration.root):
         if transition.source is None:
             return _create(running)
-        if transition.dissolves:
+        if transition.kind in DISSOLVING:
             wrote = _dissolve(running, handles)
             return wrote if several or isinstance(wrote, str) else wrote[0]
         return _move(running)
@@ -328,30 +422,6 @@ def _listed(said: list[str]) -> str:
 
 def _create(running: _Running) -> Path | str:
     body = running.body
-    # The seeding refusals first, all above the reservation below.
-    template = running.asked.get(_TEMPLATE)
-    if template is not None:
-        if body is not None and body.strip():
-            raise Refusal(
-                f"{running.transition.name} was given both --from and --body, and an "
-                "item has one body. Two content sources for one run is a "
-                "question rather than a default: pass the template, or pass "
-                "the prose"
-            )
-        seeding = running.declaration.templates.get(str(template))
-        if seeding is None:
-            declared = ", ".join(running.declaration.templates)
-            raise Refusal(
-                f'no template is called "{template}". '
-                + (
-                    f"The templates declared are {declared}"
-                    if declared
-                    else "No templates are declared at all, which is a "
-                    "workflow that has not written one yet"
-                )
-            )
-        # Existence and emptiness are `declaration.pointer_errors`' half.
-        body = (running.declaration.root / seeding.doc).read_text()
     if body is None or not body.strip():
         raise Refusal(_bodiless(running.transition))
 
@@ -377,12 +447,6 @@ def _create(running: _Running) -> Path | str:
             running.declaration.root,
             entering=entering,
             claiming=claiming,
-            # From what this arm resolved, like every other clause.
-            writing=(
-                None
-                if template is None
-                else f'take its body from the "{template}" template'
-            ),
         )
     try:
         # The filename is the reservation: two sessions cannot both win.
@@ -578,7 +642,7 @@ def _unchanged(running: _Running, claiming: _Claiming) -> str:
     if claiming.take is not None:
         return "the claim is taken, and nothing else is given"
     state = running.declaration.states[running.transition.to]
-    if running.transition.mints and not any(running.asked.get(key) for key in _MINTING):
+    if running.transition.kind == ADD_BULLET and not any(running.asked.get(key) for key in MINTING):
         return f'"{state.sub_phases}" is already open, so a bare run writes nothing'
     return "nothing given changes it"
 
@@ -612,8 +676,8 @@ def _entering(running: _Running, *, moving: str | None = None) -> dict[str, Any]
     given: dict[str, Any] = {}
     if ordered:
         request = {
-            flag: _anchor(running.declaration, state, value) if flag in _ANCHORS else value
-            for flag in _PLACEMENT
+            flag: _anchor(running.declaration, state, value) if flag in ANCHORS else value
+            for flag in PLACEMENT
             if (value := running.asked.get(flag)) is not None
         }
         given[queued.KEY] = queued.place(
@@ -645,7 +709,7 @@ def _mint(
         raise Refusal(lost)
 
     taken = dict(held)
-    taken.update({f"{where} § {one}.": one for one in numbered.numbers(text)})
+    taken.update(numbered.archived(text, where))
     return numbered.next_number(
         numbered.taken(taken),
         current=current if isinstance(current, int) else None,
@@ -653,55 +717,51 @@ def _mint(
     )
 
 
+#: The keys `execute` reads out of `asked`, each the CLI's for the option it
+#: fills: the CLI imports these rather than spelling them again.
+
 #: The placement requests that name another item rather than a place.
-_ANCHORS = ("above", "below")
+ANCHORS = ("above", "below")
 
 #: Every flag the ordered capability answers to. Each arm picks its own out
 #: of `asked`, because two capabilities now put options on one verb.
-_PLACEMENT = (*_ANCHORS, "at")
+PLACEMENT = (*ANCHORS, "at")
 
 #: The same, for the capability that writes a body: a title to mint, and
 #: whether this is the last one.
-_MINTING = ("title", "last")
+MINTING = ("title", "last")
 
-#: The one the `marks` half takes: which bullet this run acts on, a positional
+#: The one a mark-bullet takes: which bullet this run acts on, a positional
 #: on the command line. See docs/method.md#marking
-_MARKING = "name"
+MARKING = "name"
 
 #: The one any disposition may take beside it: why. Optional, unlike every
 #: other half's option. See docs/method.md#marking
-_NOTE = "note"
+NOTE = "note"
 
 #: The one a verb that both archives and dissolves takes: the prose that goes
 #: under the entry's heading. See docs/method.md#dissolving
-_RECORD = "record"
+RECORD = "record"
 
 #: The one a verb that absorbs takes: the item the work continues as, required
 #: there and resolved tree-wide. See docs/method.md#dissolving
-_INTO = "into"
-
-#: The flag a verb that `carries` takes: append each absorbed item's body to
-#: the survivor. See docs/method.md#merge
-_CARRY = "carry"
+INTO = "into"
 
 #: The one a verb that retitles takes: the item's new title, a positional on
 #: the command line. See docs/method.md#retitle
-_RETITLE = "new_title"
+RETITLE = "new_title"
 
-#: The one a verb that seeds takes: the declared template the new item's body
-#: is copied from, entire. The CLI spells it `--from`. See docs/method.md#seeds
-_TEMPLATE = "template"
 
 #: The one a verb that `claims` takes: hold this claim beside others this
 #: session already holds, rather than refusing over them. A flag, and the
 #: less safe of the two, so the default stays the loud one.
 #: See docs/method.md#the-claimed-state
-_KEEP_CLAIMS = "keep_claims"
+KEEP_CLAIMS = "keep_claims"
 
 #: The two a verb that files takes: what to call the item it creates, and the
 #: prose that goes in it. `title` is optional, `body` is not.
 #: See docs/method.md#filing
-_FILING = ("title", "body")
+FILING = ("title", "body")
 
 
 def _unread_errors(
@@ -715,21 +775,78 @@ def _unread_errors(
     listing reports the same bullets through `read.unread`.
     See docs/method.md#sub-phases
     """
-    if running.transition.marks is None and not running.transition.mints:
-        return
-    state = running.declaration.states[running.transition.to]
-    if passed := read.unread(state, original.body, entering):
-        where = named(original.path, running.declaration.root)
-        raise Refusal(
-            [
-                f"{where} carries a bullet the reader passes over, so this run "
-                "would write beside a sub-phase nothing counts",
-                *(
-                    f"{where}:{original.opening + one.line}: {one.reason}"
-                    for one in passed
-                ),
-            ]
-        )
+    if wrong := unread_errors(
+        running.declaration, running.transition, original, entering
+    ):
+        raise Refusal(wrong)
+
+
+def unread_errors(
+    declaration: Declaration,
+    transition: Transition,
+    original: item.Item,
+    entering: Mapping[str, Any],
+) -> list[str]:
+    """Why a mint or a mark into `original` would write beside a bullet the
+    reader passes over, or nothing. Pure; the run raises it and a row's
+    `commands` asks it. See docs/method.md#sub-phases
+    """
+    if transition.marks is None and transition.kind != ADD_BULLET:
+        return []
+    state = declaration.states[transition.to]
+    if not (passed := read.unread(state, original.body, entering)):
+        return []
+    where = named(original.path, declaration.root)
+    return [
+        f"{where} carries a bullet the reader passes over, so this run "
+        "would write beside a sub-phase nothing counts",
+        *(f"{where}:{original.opening + one.line}: {one.reason}" for one in passed),
+    ]
+
+
+def form_errors(
+    declaration: Declaration,
+    transition: Transition,
+    original: item.Item,
+    entering: Mapping[str, Any],
+) -> list[str]:
+    """Why an add-bullet has nothing to name a bullet from: a field its
+    state's name form needs that `entering` does not carry. Pure; the run
+    raises it and a row's `commands` asks it, leaving out the fields the
+    transition `sets`, which a run may be given. See docs/method.md#bulleted
+    """
+    if transition.kind != ADD_BULLET:
+        return []
+    state = declaration.states[transition.to]
+    assert state.sub_phase_name is not None
+    if not (absent := subphase.absent(state.sub_phase_name, entering)):
+        return []
+    return [
+        f"{named(original.path, declaration.root)} carries no {', '.join(absent)}, "
+        f'and {state.name} names its bullets "{state.sub_phase_name}" — '
+        "so this run has nothing to name one from"
+    ]
+
+
+def number_errors(
+    declaration: Declaration, transition: Transition, original: item.Item
+) -> list[str]:
+    """Why an archiving run has no number to file `original` under. Pure; the
+    run raises it and a row's `commands` asks it. See docs/method.md#the-register
+    """
+    if not transition.archives:
+        return []
+    number = original.get(numbered.KEY)
+    if isinstance(number, int) and not isinstance(number, bool):
+        return []
+    assert transition.source is not None
+    where = declaration.states[transition.source].archive
+    return [
+        f"{named(original.path, declaration.root)} carries no {numbered.KEY}, "
+        f"and {transition.name} files it in {where} as `## <number>. "
+        "<title>`. An entry with no number is the record the register cannot "
+        f"read — fix the item's {numbered.KEY} before filing it"
+    ]
 
 
 def _disposing(running: _Running, original: item.Item) -> subphase.Bullet | None:
@@ -750,7 +867,7 @@ def _disposing(running: _Running, original: item.Item) -> subphase.Bullet | None
     state = running.declaration.states[running.transition.to]
     # A `marks` into a state that is not `bulleted` refuses back in plan.toml.
     assert state.sub_phases is not None
-    wanted = running.asked.get(_MARKING)
+    wanted = running.asked.get(MARKING)
     carried = subphase.bullets(
         original.body, state.sub_phases, pending=state.pending, marks=state.marks
     )
@@ -820,7 +937,7 @@ def _bulleting(
         assert disposing is not None  # `_disposing` resolves it, or refuses.
         state = running.declaration.states[running.transition.to]
         assert state.sub_phases is not None
-        note = running.asked.get(_NOTE)
+        note = running.asked.get(NOTE)
         if note is not None and (wrong := subphase.note_errors(note)):
             raise Refusal(
                 [f"{named(original.path, running.declaration.root)} cannot take that note", *wrong]
@@ -839,7 +956,7 @@ def _bulleting(
             + (" with a note" if note else ""),
         )
 
-    if not running.transition.mints:
+    if running.transition.kind != ADD_BULLET:
         return original.body, None, None
 
     state = running.declaration.states[running.transition.to]
@@ -850,15 +967,11 @@ def _bulleting(
         and state.sub_phase_name is not None
     )
     # What the form names, the item has to carry.
-    if absent := subphase.absent(state.sub_phase_name, entering):
-        raise Refusal(
-            f"{named(original.path, running.declaration.root)} carries no {', '.join(absent)}, and "
-            f"{state.name} names its bullets \"{state.sub_phase_name}\" — "
-            "so this run has nothing to name one from"
-        )
+    if wrong := form_errors(running.declaration, running.transition, original, entering):
+        raise Refusal(wrong)
 
-    title = running.asked.get(_MINTING[0])
-    last = bool(running.asked.get(_MINTING[1]))
+    title = running.asked.get(MINTING[0])
+    last = bool(running.asked.get(MINTING[1]))
     if title is not None and (wrong := subphase.title_errors(title)):
         raise Refusal(
             [f"{named(original.path, running.declaration.root)} cannot take that sub-phase", *wrong]
@@ -934,18 +1047,12 @@ def _archiving(
     if lost := numbered.heading_errors(numbered.unreadable(text), where):
         raise Refusal(lost)
 
+    if wrong := number_errors(running.declaration, running.transition, original):
+        raise Refusal(wrong)
     number = original.get(numbered.KEY)
-    if not isinstance(number, int) or isinstance(number, bool):
-        raise Refusal(
-            f"{named(original.path, running.declaration.root)} carries no {numbered.KEY}, and "
-            f"{running.transition.name} "
-            f"files it in {where} as `## <number>. <title>`. An entry with no "
-            "number is the record the register cannot read — fix the item's "
-            f"{numbered.KEY} before filing it"
-        )
 
     title = original.get("title")
-    heading = f"## {number}. {title}"
+    heading = numbered.heading(number, str(title))
     return _Archiving(
         path=path,
         text=numbered.entry(text, number, str(title), record),
@@ -1013,14 +1120,14 @@ def _filing(
         return None
     assert disposing is not None  # `files` rides on `marks`, refused at load.
 
-    title = running.asked.get(_FILING[0]) or disposing.title
+    title = running.asked.get(FILING[0]) or disposing.title
     if title is None or not title.strip():
         raise Refusal(
             f"{named(original.path, running.declaration.root)}'s {disposing.name} says only its name, so "
             f"{running.transition.name} has nothing to call the item it files. Give "
             "the bullet a title, or name one with --title TEXT"
         )
-    body = running.asked.get(_FILING[1])
+    body = running.asked.get(FILING[1])
     if body is None or not str(body).strip():
         raise Refusal(_bodiless(running.transition))
 
@@ -1108,9 +1215,9 @@ def _survivor(running: _Running) -> item.Item | None:
     edited. Resolved once per run, so a bad `--into` refuses at once rather
     than once per item. See docs/method.md#dissolving
     """
-    if not running.transition.absorbs:
+    if running.transition.kind != MERGE:
         return None
-    return read.resolve(running.declaration, str(running.asked.get(_INTO) or ""))
+    return read.resolve(running.declaration, str(running.asked.get(INTO) or ""))
 
 
 def _itself(running: _Running, original: item.Item, survivor: item.Item | None) -> None:
@@ -1203,8 +1310,8 @@ def _clear(edits: Sequence[item.Item]) -> None:
 def _dissolve(running: _Running, handles: Sequence[str]) -> tuple[Path, ...] | str:
     """Run a verb that takes each item's file away, and clear the edges to it.
 
-    A verb that dissolves refuses `to`, `sets`, `drops`, `mints` and `claims`
-    back in `plan.toml`, so what is left is the record that outlives the item
+    A close or a merge takes no `to`, `sets`, `drops` or `claims` in
+    `plan.toml`, so what is left is the record that outlives the item
     and the edges other items hold to it, taken out or pointed at the survivor
     `--into` names. The order is delete, file, clear, free, and every refusal
     is computed before any of it. Several handles are all or nothing: each is
@@ -1214,11 +1321,6 @@ def _dissolve(running: _Running, handles: Sequence[str]) -> tuple[Path, ...] | s
     """
     root = running.declaration.root
     verb = running.transition.name
-    if len(handles) > 1 and running.transition.archives:
-        raise Refusal(
-            f"{verb} takes one item, because one --record is one archive "
-            f"entry, and this run named {len(handles)}"
-        )
     survivor = _survivor(running)
     whole = read.items(running.declaration)
     failed: dict[int, list[str]] = {}
@@ -1229,7 +1331,7 @@ def _dissolve(running: _Running, handles: Sequence[str]) -> tuple[Path, ...] | s
             original, claiming = _reading(one)
             if any(original.path == seen.path for seen, *_ in taken.values()):
                 raise Refusal(f'"{handle}" is named twice')
-            archiving = _archiving(one, original, record=str(running.asked.get(_RECORD) or ""))
+            archiving = _archiving(one, original, record=str(running.asked.get(RECORD) or ""))
             _itself(one, original, survivor)
             taken[index] = (original, claiming, archiving)
         except Refusal as refusal:
@@ -1261,7 +1363,7 @@ def _dissolve(running: _Running, handles: Sequence[str]) -> tuple[Path, ...] | s
                 raise Refusal(refusal)
             failed[index] = refusal
     carried = None
-    if survivor is not None and running.transition.carries and running.asked.get(_CARRY):
+    if survivor is not None:
         if not failed:
             carried = _carrying(running, tree[survivor.path], [one for one, *_ in taken.values()])
             tree[survivor.path] = carried
@@ -1333,10 +1435,10 @@ def _carrying(
     """
     root = running.declaration.root
     state = survivor.state
-    if state.has(claim.NAME):
-        path = claim.path(root, survivor.slug)
-        if path.exists():
-            _foreign(running, survivor.slug, claim.read(path, root))
+    if state.has(claim.NAME) and (
+        held := _record(running.declaration, survivor.slug)
+    ) is not None:
+        _foreign(running, survivor.slug, held)
     body = survivor.body.rstrip("\n")
     for one in gone:
         carried = one.body.strip("\n")
@@ -1397,10 +1499,10 @@ def _renaming(
     already refused in `_claiming`, so a record still at the old slug is this
     session's, or is the one this run takes. See docs/method.md#retitle
     """
-    if not running.transition.retitles:
+    if running.transition.kind != RENAME:
         return None
     root = running.declaration.root
-    title = str(running.asked.get(_RETITLE) or "")
+    title = str(running.asked.get(RETITLE) or "")
     stem = item.slug(title)
     if stem == original.slug:
         return _Renaming(title=title, slug=stem)
@@ -1491,16 +1593,12 @@ def _claiming(running: _Running, *, slug: str) -> _Claiming:
     another item refuses, unless the run was asked to keep them.
     See docs/method.md#the-claimed-state
     """
-    source = running.declaration.states[running.transition.source] if running.transition.source else None
-    destination = running.declaration.states[running.transition.to] if running.transition.to else None
-    # A verb that dissolves enters nothing, so it can only free a claim.
-    entering = destination is not None and destination.has(claim.NAME)
-    leaving = source is not None and source.has(claim.NAME)
+    entering, leaving = _claimed_ends(running.declaration, running.transition)
     if not entering and not leaving:
         return _Claiming()
 
     path = claim.path(running.declaration.root, slug)
-    held = claim.read(path, running.declaration.root) if path.exists() else None
+    held = _record(running.declaration, slug)
     who = claim.identity(running.declaration)
 
     if held is not None:
@@ -1523,7 +1621,7 @@ def _claiming(running: _Running, *, slug: str) -> _Claiming:
             "holding it is not a claim. Export one of: "
             f"{', '.join(running.declaration.pid_names)}"
         )
-    if not running.asked.get(_KEEP_CLAIMS) and (others := _held(running, who, slug)):
+    if not running.asked.get(KEEP_CLAIMS) and (others := _held(running, who, slug)):
         raise Refusal(
             f"{running.transition.name} would claim {slug}, and this session "
             f"already holds a claim on {' and '.join(others)}. A pid is one agent "
@@ -1695,9 +1793,8 @@ def _bodiless(transition: Transition) -> str:
     files one.
     """
     return (
-        f"{transition.name} needs a body. An item is a title and a "
-        "description; one with no prose is intent that somebody pays to "
-        "re-derive later. Pass --body TEXT, or --body - to read stdin"
+        f"{transition.name} needs a body: pass --body TEXT, or --body - to "
+        "read it from stdin"
     )
 
 

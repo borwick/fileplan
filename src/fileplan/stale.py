@@ -1,7 +1,6 @@
 """Staleness: how long ago anybody was near an item, read out of git.
 
-A state opts into the `dated` capability, and every row there carries
-`stale-days`. The field is the whole days between the item file's last commit
+Every row carries `stale-days`. The field is the whole days between the item file's last commit
 and today. Nothing is stored to make it.
 
 Any commit touching the file resets the count, so `stale-days` says "days
@@ -25,13 +24,10 @@ from dulwich.object_store import tree_lookup_path
 from dulwich.objects import Commit
 from dulwich.repo import Repo
 
-from fileplan.declaration import DATED, STALE_KEYS
+from fileplan.declaration import STALE_KEYS
 
 # The import runs one way: this module imports `fileplan.declaration`, so
 # `fileplan.declaration` may not import this module.
-
-#: The capability a state opts into. Imported rather than re-spelled.
-NAME = DATED
 
 #: The row field it gives: whole days since the item file's last commit.
 DAYS = STALE_KEYS[0]
@@ -74,7 +70,7 @@ def ages(
     reached by more than one path: a synced or symlinked tree, or a `/tmp`
     that is itself a symlink.
 
-    The cost, named: one walker per dated item. A single walk inspecting every
+    The cost, named: one walker per item. A single walk inspecting every
     path at once is the optimisation if a consumer ever has thousands of
     items; it is recorded here rather than built, because n is tens.
     """

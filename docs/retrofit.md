@@ -9,7 +9,10 @@ Every command below was run on 2026-09-12 and its output pasted from that run.
 The three refusals that name a file were run again on 2026-09-13, when
 fileplan began naming a file from the folder holding `plan.toml`. The four
 `fileplan list` refusals were run again on 2026-09-28, when each clause of a
-refusal got a line of its own.
+refusal got a line of its own. The overview, the last listing and the
+`decide` blocks were run again on 2026-10-06, through `uv run` against a copy
+of the fixture rebuilt from this document and committed that day, which is
+why each item shows `stale-days 0`.
 The tree it ran against is a **fixture**: a small repo built to provoke each
 thing a retrofit meets, rather than a copy of anybody's real notes. The tree is
 made up. The behaviour is not.
@@ -61,16 +64,17 @@ it, `fileplan init` does not refuse. It **succeeds**, and that is worse:
 $ fileplan init .
 inbox
 plan
-docs
-docs/archive.md
-docs/method.md
-docs/procedures.md
+local
+archive.md
 plan.toml
+local/.gitignore
 
 $ ls
 adr
+archive.md
 docs
 inbox
+local
 plan
 plan.toml
 someday-maybe
@@ -83,17 +87,10 @@ are empty, and the new `plan.toml` says nothing about `adr/` or
 `someday-maybe/`.
 
 `fileplan init` refuses only where it would land on a file that is already
-there. Once you have written the document your pointers name, you get this
-instead:
-
-```
-$ fileplan init .
-ERROR: docs/method.md already exists, and `fileplan init` writes nothing over a file that is already there
-```
-
-That refusal is the friendly outcome, and it is not the one you meet first.
-Run `fileplan init` somewhere empty if you want a working example to crib from,
-and copy the lines you want out of it. The example declares one small loop, and
+there, and it writes only `plan.toml`, `archive.md` and `local/.gitignore`. In
+a tree you are retrofitting it will almost never refuse. Run `fileplan init`
+somewhere empty if you want a working example to crib from, and copy the
+lines you want out of it. The example declares one small loop, and
 [the method](method.md) describes everything past it. Do not run
 `fileplan init` in the tree you are retrofitting.
 
@@ -118,6 +115,7 @@ doc  = "docs/method.md#decided"
 help = "The date the decision was taken."
 
 [transitions.decide]
+kind = "move"
 doc  = "docs/method.md#decide"
 help = "Promote a someday-maybe note to a decision record."
 from = "someday-maybe"
@@ -126,8 +124,10 @@ sets = ["decided"]
 ```
 
 Every `doc =` points at the section of your own prose that says what that word
-means, and **fileplan checks every pointer on every run**. The declaration will
-not load until the document exists and has the headings:
+means. A `doc` is optional, and a declaration with none loads at once. Each one
+you do give is a promise, and **fileplan checks every pointer on every run**.
+The declaration will not load until the document exists and has the
+headings:
 
 ```
 $ fileplan list
@@ -194,8 +194,10 @@ States
 Transitions
   decide         Promote a someday-maybe note to a decision record.
 
+Declares
+  decide         move
+
 Run `fileplan list` to see what is filed.
-Run `fileplan next COMMAND` to see what COMMAND could take right now.
 Run `fileplan show ITEM` to see one item's row.
 Run `fileplan COMMAND --help` to see what COMMAND takes.
 ```
@@ -310,28 +312,38 @@ $ sed -i '' '/^layout = /d' someday-maybe/move-off-the-shared-drive.md
 ```
 $ fileplan list
 Q3 2024 retro              someday-maybe
-  title  Q3 2024 retro
-  path   someday-maybe/Q3 2024 retro.md
+  stale-days  0
+  commands    decide
+  title       Q3 2024 retro
+  path        someday-maybe/Q3 2024 retro.md
 
 learn-a-typed-language     someday-maybe
-  title  Learn a typed language
-  path   someday-maybe/learn-a-typed-language.md
+  stale-days  0
+  commands    decide
+  title       Learn a typed language
+  path        someday-maybe/learn-a-typed-language.md
 
 move-off-the-shared-drive  someday-maybe
-  title  Move off the shared drive
-  path   someday-maybe/move-off-the-shared-drive.md
+  stale-days  0
+  commands    decide
+  title       Move off the shared drive
+  path        someday-maybe/move-off-the-shared-drive.md
 
 rewrite-the-importer       someday-maybe
-  title  Rewrite the importer
-  path   someday-maybe/rewrite-the-importer.md
+  stale-days  0
+  commands    decide
+  title       Rewrite the importer
+  path        someday-maybe/rewrite-the-importer.md
 
 0001-store-notes-as-files  adr
-  title  Store notes as files
-  path   adr/0001-store-notes-as-files.md
+  stale-days  0
+  title       Store notes as files
+  path        adr/0001-store-notes-as-files.md
 
 0002-one-binary-not-two    adr
-  title  One binary, not two
-  path   adr/0002-one-binary-not-two.md
+  stale-days  0
+  title       One binary, not two
+  path        adr/0002-one-binary-not-two.md
 
 showing 6 of 6 items
 ```
@@ -359,6 +371,9 @@ Options:
 
   Where the item goes
     out of someday-maybe and into adr
+
+  Declares
+    move
 
   Reading
     decide   docs/method.md#decide
@@ -434,8 +449,7 @@ Four things, named here rather than left for you to find out.
 Two states and one command is a start, not a ceiling. Everything else fileplan
 can do is a field or a flag you add to a table you already have. An order, a
 claim one session at a time takes, and minted numbers are each a line in
-`plan.toml`. So are bullets cut into an item's body, a staleness column read
-out of git, templates and dependencies. The example `plan.toml` that
+`plan.toml`. So are bullets cut into an item's body, and dependencies. The example `plan.toml` that
 `fileplan init` writes shows an ordered, numbered state and a command that
 closes an item out. That is the pair most retrofits want next.
 [The method](method.md) describes the rest. Add what your work actually has,

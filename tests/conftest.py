@@ -14,20 +14,16 @@ os.environ.setdefault("FILEPLAN_PLAN_TOML", str(FIXTURE))
 
 
 #: Every file a tmp-tree copy of the fixture declaration needs beside it: the
-#: declaration, the document its `doc =` pointers resolve against, the one its
-#: `policy =` pointer does, the archive the `numbered` register reads, and the
-#: two documents its templates name. Named here rather than repeated in each
-#: module's `tree` fixture — 4-5 added a name, 6-2 another and 9-1 two more,
+#: declaration, the document its `doc =` pointers resolve against, and the
+#: archive the `numbered` register reads. Named here rather than repeated in
+#: each module's `tree` fixture — 4-5 added a name, 6-2 another and 9-1 two more,
 #: and six copies of a two-name tuple is how the seventh copy ends up missing
 #: one. Every one of them is graded at **every** invocation, so a copy short
 #: of one refuses rather than quietly running.
 FIXTURE_FILES = (
     "plan.toml",
     "method.md",
-    "training.md",
     "orchard-archive.md",
-    "hardwood-cuttings.md",
-    "softwood-cuttings.md",
 )
 
 
@@ -41,4 +37,4 @@ FIXTURE_FILES = (
 #: instead of spelling the flatten three times.
 from fileplan.declaration import DERIVED_KEYS  # noqa: E402
 
-DERIVABLE_KEYS = tuple(name for _, names in DERIVED_KEYS for name in names)
+DERIVABLE_KEYS = tuple(name for group in DERIVED_KEYS for name in group.names)

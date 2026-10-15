@@ -71,9 +71,9 @@ def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_init_on_an_empty_directory_writes_a_tree_the_loader_accepts(
     tmp_path: Path,
 ) -> None:
-    """The real loader, not a re-implementation of it: every `doc =` and
-    `policy =` pointer is chased, so a starter naming a heading the shipped
-    documents do not have refuses here."""
+    """The real loader, not a re-implementation of it: the archive the
+    numbered state names is chased, so a starter naming a document `init`
+    does not write refuses here."""
     assert main(["init", str(tmp_path)]) == 0
 
     declaration = load(tmp_path / PLAN_TOML_NAME)
@@ -110,7 +110,7 @@ def test_the_four_command_loop_runs_end_to_end_against_a_fresh_install(
     # The item file goes with the run, so the entry under its number is the
     # only thing left saying the number is taken.
     assert not queued.exists()
-    assert "## 1. A first thing" in (installed / "docs" / "archive.md").read_text()
+    assert "## 1. A first thing" in (installed / "archive.md").read_text()
 
 
 def test_the_shipped_example_is_copied_byte_for_byte(tmp_path: Path) -> None:
@@ -118,14 +118,32 @@ def test_the_shipped_example_is_copied_byte_for_byte(tmp_path: Path) -> None:
     what stops a later session growing a placeholder into it."""
     assert main(["init", str(tmp_path)]) == 0
 
-    for name in (
-        "plan.toml",
-        "docs/method.md",
-        "docs/procedures.md",
-        "docs/archive.md",
-    ):
+    for name in ("plan.toml", "archive.md"):
         shipped = resources.files("fileplan").joinpath(f"{scaffold.STARTER}/{name}")
         assert (tmp_path / name).read_bytes() == shipped.read_bytes()
+
+
+def test_init_writes_only_what_the_first_run_needs(tmp_path: Path) -> None:
+    """32-3's done line. The declaration, its archive document, the state
+    directories it names, and `local/.gitignore` holding `*`, and nothing
+    else: no document stubs, because nothing in the starter points at one."""
+    assert main(["init", str(tmp_path)]) == 0
+    files = sorted(
+        str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*") if path.is_file()
+    )
+    assert files == ["archive.md", "local/.gitignore", "plan.toml"]
+    assert sorted(
+        str(path.relative_to(tmp_path)) for path in tmp_path.iterdir() if path.is_dir()
+    ) == [INBOX, "local", PLAN]
+    assert (tmp_path / "local" / ".gitignore").read_text() == "*\n"
+
+
+def test_the_starter_fits_one_screen() -> None:
+    """32-3: a newcomer reads the whole starter without scrolling. Forty
+    lines is the screen, comments and blank lines included; what the
+    comments used to explain is the initialization document's."""
+    starter = REPO / "src/fileplan/starter" / PLAN_TOML_NAME
+    assert len(starter.read_text().splitlines()) <= 40
 
 
 def test_the_starter_declares_no_capability_commented_out_in_place(
@@ -167,12 +185,12 @@ def test_a_mutation_of_the_shipped_example_is_caught_by_the_loader(
     bytes with one key broken, refuses."""
     assert main(["init", str(tmp_path)]) == 0
     plan = tmp_path / PLAN_TOML_NAME
-    plan.write_text(plan.read_text().replace("path = ", "paths = ", 1))
+    plan.write_text(plan.read_text().replace("kind = ", "kinds = ", 1))
 
     with pytest.raises(Refusal) as refusal:
         load(plan)
 
-    assert "path" in str(refusal.value)
+    assert "kind" in str(refusal.value)
 
 
 def test_the_example_resolves_from_the_package_rather_than_the_repo(
@@ -233,15 +251,14 @@ def test_init_refuses_where_a_file_it_would_write_already_exists(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Not an install — there is no `plan.toml` — but a tree that already
-    holds one of the documents. Refused before the first write, so the
+    holds a file `init` would write. Refused before the first write, so the
     `plan.toml` that would have gone beside it is not there either."""
-    (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "method.md").write_text("Mine.\n")
+    (tmp_path / "archive.md").write_text("Mine.\n")
 
     assert main(["init", str(tmp_path)]) == 2
 
     assert "already exists" in capsys.readouterr().err
-    assert (tmp_path / "docs" / "method.md").read_text() == "Mine.\n"
+    assert (tmp_path / "archive.md").read_text() == "Mine.\n"
     assert not (tmp_path / PLAN_TOML_NAME).exists()
 
 
@@ -277,9 +294,6 @@ def test_a_transition_named_init_refuses_by_name(
     assert main(["init", str(tmp_path)]) == 0
     plan = tmp_path / PLAN_TOML_NAME
     plan.write_text(plan.read_text().replace(f"[transitions.{CAPTURE}]", "[transitions.init]"))
-    (tmp_path / "docs" / "method.md").write_text(
-        (tmp_path / "docs" / "method.md").read_text() + "\n### init\n"
-    )
 
     with pytest.raises(Refusal) as refusal:
         from fileplan.cli import _build_group

@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import dataclasses
 import os
-import re
 import socket
 from pathlib import Path
 from typing import Any
@@ -221,6 +220,7 @@ def test_an_empty_list_still_reads_as_missing(harvest: Transition) -> None:
         name="harvest",
         doc="method.md#harvest",
         help="Bring a tree in.",
+        kind="move",
         source="orchard",
         to="cold-frame",
         requires=("pest",),
@@ -320,210 +320,6 @@ def test_a_title_that_reduces_to_nothing_refuses(tree: Declaration) -> None:
 
 
 # --------------------------------------------------------------------------
-# `seeds`: the creating arm's third content source
-# --------------------------------------------------------------------------
-#
-# `strike` is the fixture's **one** seeding verb, and `hardwood`/`softwood`
-# are its two templates: a template is selected by name at the run, so a
-# declaration with one has nothing to select between. `sprout` beside it
-# creates without the half, which is what makes "on this verb and no other"
-# provable rather than asserted.
-
-
-def document(tree: Declaration, name: str) -> str:
-    """The prose a declared template names, as the tree holds it."""
-    return (tree.root / tree.templates[name].doc).read_text()
-
-
-def struck(tree: Declaration) -> Path:
-    """The batch `strike --from hardwood` files, with nothing else asked."""
-    return execute(
-        tree,
-        tree.transitions["strike"],
-        name="A batch",
-        asked={"template": "hardwood"},
-    )
-
-
-def test_a_seeded_item_carries_the_named_document_byte_for_byte(
-    tree: Declaration,
-) -> None:
-    """Verbatim: no substitution, no placeholders, nothing recording where it
-    came from. The one difference from the file on disk is `_prose`'s
-    separator, which is what a body looks like in *any* item file."""
-    path = struck(tree)
-    assert read(path, tree).body == "\n" + document(tree, "hardwood").strip("\n") + "\n"
-
-
-def test_a_seeded_item_is_an_ordinary_item_of_the_creating_verb(
-    tree: Declaration,
-) -> None:
-    """The body is the only thing the template supplies. The head is the
-    verb's own — the title it was given and the keys it `sets` — so every
-    other verb and every read already works on what comes out."""
-    path = execute(
-        tree,
-        tree.transitions["strike"],
-        name="A batch",
-        values={"for-tree": "a-seedling", "for-step": "2-1"},
-        asked={"template": "softwood"},
-    )
-    assert path == tree.root / "propagator" / "a-batch.md"
-    assert read(path, tree).head == {
-        "title": "A batch",
-        "for-tree": "a-seedling",
-        "for-step": "2-1",
-    }
-    assert read(path, tree).body.strip("\n") == document(tree, "softwood").strip("\n")
-
-
-def test_a_template_and_a_body_in_one_run_refuse_naming_both(
-    tree: Declaration,
-) -> None:
-    """Two content sources for one run is a **question**, not a default: an
-    item has one body, and quietly letting either win would file prose the
-    operator did not mean to file."""
-    with pytest.raises(Refusal, match="both --from and --body"):
-        execute(
-            tree,
-            tree.transitions["strike"],
-            name="A batch",
-            body="Prose.",
-            asked={"template": "hardwood"},
-        )
-    assert list((tree.root / "propagator").iterdir()) == []
-
-
-def test_an_undeclared_template_refuses_by_name_saying_what_is_declared(
-    tree: Declaration,
-) -> None:
-    """By name, and with the names that would have worked: a refusal the
-    operator can fix from what it said, which is `_disposing`'s shape over the
-    other thing a run names and the declaration may not hold."""
-    with pytest.raises(Refusal) as refusal:
-        execute(
-            tree,
-            tree.transitions["strike"],
-            name="A batch",
-            asked={"template": "hardwod"},
-        )
-    said = str(refusal.value)
-    assert 'no template is called "hardwod"' in said
-    assert "hardwood, softwood" in said
-    assert list((tree.root / "propagator").iterdir()) == []
-
-
-def test_a_seeding_verb_with_no_templates_declared_says_so(tmp_path: Path) -> None:
-    """The shape 9-1 deliberately left legal — a verb that seeds and a
-    declaration holding nothing to seed from — and the one refusal that cannot
-    name an alternative. It says the declaration is unfinished rather than
-    listing nothing, which is `Declares`' absence-is-a-signal rule applied to
-    a sentence."""
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
-    text = (tmp_path / "plan.toml").read_text()
-    (tmp_path / "plan.toml").write_text(
-        "".join(
-            chunk
-            for chunk in re.split(r"(?m)^(?=\[)", text)
-            if not chunk.startswith("[templates.")
-        )
-    )
-    declaration = load(tmp_path / "plan.toml")
-    assert declaration.templates == {}
-    (tmp_path / declaration.states["propagator"].path).mkdir(parents=True)
-
-    with pytest.raises(Refusal, match="No templates are declared"):
-        execute(
-            declaration,
-            declaration.transitions["strike"],
-            name="A batch",
-            asked={"template": "hardwood"},
-        )
-
-
-def test_a_seeding_verb_given_neither_refuses_in_the_bodiless_words(
-    tree: Declaration,
-) -> None:
-    """The existing refusal, unchanged and reached by the path it always was:
-    `seeds` says a verb *may* be bodied from a template, so a run that names
-    none is a run with no body at all."""
-    with pytest.raises(Refusal, match="needs a body"):
-        execute(tree, tree.transitions["strike"], name="A batch")
-    assert list((tree.root / "propagator").iterdir()) == []
-
-
-def test_a_seeded_run_whose_slug_is_taken_refuses_through_the_same_helper(
-    tree: Declaration,
-) -> None:
-    """The collision is the creating verb's own, not a second spelling that
-    could soften: a template says what the body is and nothing about which
-    slugs are free."""
-    struck(tree)
-    with pytest.raises(Refusal, match="already held by"):
-        struck(tree)
-
-
-def test_a_check_on_a_seeded_run_names_the_template_and_reserves_nothing(
-    tree: Declaration,
-) -> None:
-    """Built from what the arm **resolved**, so two runs that write different
-    files do not print one sentence. The reservation is a write partway
-    through this arm, so a seeded check must leave no file either."""
-    before = snapshot(tree)
-    said = execute(
-        tree,
-        tree.transitions["strike"],
-        name="A batch",
-        asked={"template": "hardwood"},
-        check=True,
-    )
-    assert isinstance(said, str)
-    assert "a-batch.md" in said
-    assert 'take its body from the "hardwood" template' in said
-    assert snapshot(tree) == before
-
-
-def test_a_check_on_an_unseeded_run_says_nothing_about_a_template(
-    tree: Declaration,
-) -> None:
-    """Absence is meaningful, the shape every other clause of the sentence
-    has: the run would take its body from `--body`, and there is no template
-    to name."""
-    said = execute(
-        tree,
-        tree.transitions["strike"],
-        name="A batch",
-        body="Prose.",
-        check=True,
-    )
-    assert "template" not in str(said)
-
-
-def test_a_refused_seeding_check_gives_the_runs_own_refusal(
-    tree: Declaration,
-) -> None:
-    """Byte for byte, because it is the same code raising it — the property
-    the flag buys, over the arm's newest refusals."""
-    with pytest.raises(Refusal) as checked:
-        execute(
-            tree,
-            tree.transitions["strike"],
-            name="A batch",
-            asked={"template": "nowhere"},
-            check=True,
-        )
-    with pytest.raises(Refusal) as ran:
-        execute(
-            tree,
-            tree.transitions["strike"],
-            name="A batch",
-            asked={"template": "nowhere"},
-        )
-    assert str(checked.value) == str(ran.value)
-
-
-# --------------------------------------------------------------------------
 # Moving: a transition with a `from`
 # --------------------------------------------------------------------------
 
@@ -611,6 +407,7 @@ def test_a_state_to_itself_transition_is_an_in_place_write(tree: Declaration) ->
         doc="method.md#transplant",
         help="Prune a seedling where it stands.",
         to="greenhouse",
+        kind="edit",
         source="greenhouse",
         drops=("tag",),
     )
@@ -778,6 +575,7 @@ def test_a_creating_transition_into_a_queued_state_gets_a_place(
         doc="method.md#sprout",
         help="Sow straight into the orchard.",
         to="orchard",
+        kind="create",
     )
     path = execute(tree, direct, name="B seedling", body="Prose.")
     assert read(path, tree)["position"] == 200
@@ -795,6 +593,7 @@ def test_a_state_to_itself_move_replaces_without_a_duplicate(
         doc="method.md#transplant",
         help="Move a tree in the orchard's order.",
         to="orchard",
+        kind="reorder",
         source="orchard",
     )
     execute(tree, again, name="b-seedling", asked={"above": "a-seedling"})
@@ -891,6 +690,7 @@ def test_a_refused_placement_on_a_creating_transition_leaves_no_file(
         doc="method.md#sprout",
         help="Sow straight into the orchard.",
         to="orchard",
+        kind="create",
     )
     with pytest.raises(Refusal, match="already held by"):
         execute(tree, direct, name="B seedling", body="Prose.", asked={"at": 100})
@@ -1702,6 +1502,7 @@ def test_the_claim_precondition_comes_before_the_items_shortcomings(
         doc="method.md#tend",
         help="Bed out only what has a rootstock.",
         to="orchard",
+        kind="move",
         source="potting-bench",
         requires=("rootstock",),
     )
@@ -1873,8 +1674,8 @@ def test_the_cursor_is_graded_against_the_body_this_run_would_write(
         help=espalier.help,
         to=espalier.to,
         source=espalier.source,
+        kind="add-bullet",
         sets=("graft",),
-        mints=True,
     )
     path = execute(
         tree,
@@ -2564,7 +2365,7 @@ def test_a_filing_with_no_prose_refuses_in_the_creating_verbs_words(
             name="a-batch",
             asked={"name": "c1", "body": body},
         )
-    assert str(refusal.value).startswith("line-out needs a body. An item is a title")
+    assert str(refusal.value).startswith("line-out needs a body: pass --body TEXT")
 
 
 def test_a_bullet_with_no_title_refuses_saying_it_has_nothing_to_name_by(
@@ -3020,8 +2821,8 @@ def test_a_dissolving_verbs_own_requires_is_graded_before_anything_goes(
     plan = tree.source
     plan.write_text(
         plan.read_text().replace(
-            'from      = "orchard"\narchives  = true\ndissolves = true\n',
-            'from      = "orchard"\narchives  = true\ndissolves = true\n'
+            'from      = "orchard"\narchives  = true\n',
+            'from      = "orchard"\narchives  = true\n'
             'requires  = ["rootstock"]\n',
         )
     )
@@ -3482,20 +3283,22 @@ def test_a_merge_with_no_referents_is_not_a_special_case(
     assert said[0].endswith("a-seedling.md is gone: inarch took it away")
 
 
-def test_the_survivors_file_is_byte_identical_after_a_merge(
+def test_a_merge_with_no_flag_appends_the_absorbed_body(
     tree: Declaration,
 ) -> None:
-    """**The done line.** Nothing records what was absorbed (John, 2026-09-04):
-    the survivor is neither graded nor edited, and the only residue of a merge
-    is that every reference now points at it."""
+    """**31-2's done line.** A merge always carries: the survivor keeps its
+    head and its own prose, and the absorbed body follows under its title.
+    Nothing else records what was absorbed."""
     seedling(tree, "a-seedling", READY)
     survivor = seedling(tree, "b-seedling", READY)
     orchard(tree, "c-seedling")
     waits(tree, "c-seedling", ["a-seedling"])
-    before = survivor.read_bytes()
+    before = survivor.read_text()
 
     inarched(tree)
-    assert survivor.read_bytes() == before
+    after = survivor.read_text()
+    assert after.startswith(before.rstrip("\n"))
+    assert after.endswith("### A seedling\n\n# A seedling\n\nThe body starts here.\n")
 
 
 def test_a_merge_deletes_the_item_and_writes_no_archive(
@@ -3685,9 +3488,11 @@ def test_a_check_on_two_items_gives_two_lines_and_writes_nothing(
 
     said = merged(tree, "a-seedling", "c-seedling", check=True)
     assert said.splitlines() == [
-        "inarch would take greenhouse/a-seedling.md away",
+        "inarch would take greenhouse/a-seedling.md away, and would carry its "
+        "body into greenhouse/b-seedling.md",
         "inarch would take greenhouse/c-seedling.md away, and would clear "
-        "the edge to it in orchard/d-seedling.md",
+        "the edge to it in orchard/d-seedling.md and carry its body into "
+        "greenhouse/b-seedling.md",
     ]
     assert snapshot(tree) == before
 
@@ -3703,36 +3508,20 @@ def test_several_items_on_a_verb_that_does_not_absorb_refuse(
     assert (tree.root / "greenhouse" / "a-seedling.md").exists()
 
 
-def test_several_items_on_a_verb_that_also_archives_refuse_by_name(
-    tree: Declaration,
-) -> None:
-    """One `--record` is one archive entry, so it cannot record two items.
-    No fixture verb archives and absorbs, so this one is built here."""
-    both = dataclasses.replace(tree.transitions["fell"], absorbs=True)
-    orchard(tree, "a-seedling")
-    orchard(tree, "c-seedling")
-
-    with pytest.raises(Refusal, match="one --record is one archive entry") as refused:
-        execute(tree, both, name=("a-seedling", "c-seedling"), asked={"record": RECORD})
-    assert refused.value.messages[0].startswith("fell ")
-
-
 def test_prose_still_naming_a_merged_slug_is_named_on_stderr(
     tree: Declaration,
 ) -> None:
     """**The done line.** A body in another state and the survivor's own body
     each get a line. A longer slug that merely starts with it gets none, and
-    no body is rewritten."""
+    no body is rewritten but the survivor's, which the carry appends to."""
     said: list[str] = []
     seedling(tree, "a-seedling", READY)
-    survivor = prose(
-        seedling(tree, "b-seedling", READY), tree, "Absorbs `a-seedling`.\n"
-    )
+    prose(seedling(tree, "b-seedling", READY), tree, "Absorbs `a-seedling`.\n")
     other = prose(
         orchard(tree, "c-seedling"), tree, "See someday/a-seedling.md for it.\n"
     )
     longer = prose(orchard(tree, "d-seedling"), tree, "Not a-seedling-two.\n")
-    bodies = {path: path.read_bytes() for path in (survivor, other, longer)}
+    bodies = {path: path.read_bytes() for path in (other, longer)}
 
     inarched(tree, announce=said.append)
     mentions = [one for one in said if "its prose still names" in one]
@@ -3818,12 +3607,12 @@ def test_a_check_gives_no_mention_notice(tree: Declaration) -> None:
 
 
 def carried(tree: Declaration, *names: str, into: str = "c-seedling", **given: Any) -> Any:
-    """Seedlings absorbed into one item, their bodies carried along."""
+    """Seedlings absorbed into `c-seedling`, their bodies carried along."""
     return execute(
         tree,
         tree.transitions["inarch"],
         name=names,
-        asked={"into": into, "carry": True},
+        asked={"into": into},
         **given,
     )
 
@@ -3878,11 +3667,11 @@ def test_a_carry_that_would_give_the_survivor_a_second_sub_phases_heading_refuse
     assert snapshot(tree) == before
 
 
-def test_a_survivor_another_session_holds_refuses_a_carry_but_not_a_merge(
+def test_a_survivor_another_session_holds_refuses_a_merge(
     tree: Declaration, session: Identity
 ) -> None:
-    """A carry writes prose into a body the holding session may be rewriting,
-    which a head edge edit does not. Dropping --carry gets past it."""
+    """A merge writes prose into the survivor's body, which the holding
+    session may be rewriting, so the claim refuses it."""
     seedling(tree, "a-seedling", READY)
     seedling(tree, "b-seedling", READY)
     seedling(tree, "c-seedling", READY)
@@ -3893,9 +3682,6 @@ def test_a_survivor_another_session_holds_refuses_a_carry_but_not_a_merge(
     with pytest.raises(Refusal, match="c-seedling is claimed by .*that session's to run"):
         carried(tree, "a-seedling", "b-seedling")
     assert snapshot(tree) == before
-
-    merged(tree, "a-seedling", "b-seedling", into="c-seedling")
-    assert not (tree.root / "greenhouse" / "a-seedling.md").exists()
 
 
 def test_a_check_names_the_carry_and_writes_nothing(tree: Declaration) -> None:

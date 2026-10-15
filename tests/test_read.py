@@ -18,7 +18,7 @@ import datetime as dt
 import os
 import socket
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import pytest
 from dulwich.repo import Repo
@@ -27,6 +27,7 @@ from conftest import DERIVABLE_KEYS, FIXTURE_FILES
 
 from fileplan import claim, depends, numbered, read, stale, subphase
 from fileplan.declaration import Declaration, Refusal, load
+from fileplan.item import Item
 
 # A sibling test module, not a package. Imported so that a stamp a record is
 # taken at, and a pid that is honestly dead, have one home rather than a copy
@@ -147,6 +148,42 @@ def test_a_readme_in_a_state_directory_refuses(tree: Declaration) -> None:
     assert readme.exists()
 
 
+def ignoring(tree: Declaration, *names: str) -> Declaration:
+    """The fixture declaration reloaded with `[fileplan].ignore` naming
+    `names`, so a test says which files a state directory skips."""
+    listed = ", ".join(f'"{name}"' for name in names)
+    tree.source.write_text(f"[fileplan]\nignore = [{listed}]\n\n{tree.source.read_text()}")
+    return load(tree.source)
+
+
+def test_a_declared_name_in_a_state_directory_is_not_read(tree: Declaration) -> None:
+    """35-1: the file an agent tool reads from the directory it works in has
+    no `+++` head and is not an item. Named in `[fileplan].ignore`, it is left
+    out of the walk rather than refusing the listing."""
+    tree = ignoring(tree, "AGENTS.md")
+    file(tree, "greenhouse", "a-seedling.md")
+    agents = file(tree, "greenhouse", "AGENTS.md", "# How to work in here\n")
+    file(tree, "orchard", "AGENTS.md", "# And in here\n")
+    assert [one.path.stem for one in read.items(tree)] == ["a-seedling"]
+    assert agents.exists()
+
+
+def test_every_other_headless_file_still_refuses_beside_an_ignored_one(
+    tree: Declaration,
+) -> None:
+    """The skip is by exact name, so a broken item beside an ignored file
+    still refuses the listing, and the refusal names the broken item alone.
+    Skipping every headless file would make a broken item silently absent,
+    which is what the listing's refusal exists to prevent."""
+    tree = ignoring(tree, "AGENTS.md")
+    file(tree, "greenhouse", "AGENTS.md", "# How to work in here\n")
+    broken = file(tree, "greenhouse", "b-seedling.md", "no head here at all\n")
+    with pytest.raises(Refusal) as refusal:
+        read.items(tree)
+    assert str(broken.relative_to(tree.root)) in str(refusal.value)
+    assert "AGENTS.md" not in str(refusal.value)
+
+
 def test_two_broken_files_are_reported_in_one_refusal(tree: Declaration) -> None:
     """Collected and reported at once, like `shape_errors`. Fixing one file at
     a time because the tool only ever names one is the cost this avoids."""
@@ -203,9 +240,9 @@ def test_a_rows_fields_are_in_a_fixed_order(tree: Declaration) -> None:
     state that reads dependencies at all, not because this item is in one.
 
     `stale-days` comes straight after it, the argument a fourth time over a
-    fact derived from **git**. Present because the fixture has a dated state
-    at all — `cold-frame` — and `None` here because this seedling is in
-    `greenhouse`, which does not opt in.
+    fact derived from **git**. Present on every row, and `None` here because
+    the tree is not in git. `commands` follows it, derived from the
+    transitions, and `None` here because `rows` is handed no question.
 
     The head-key capabilities come in `CAPABILITY_KEYS` order — `position`
     then `number` — because that is the one place the tool says which keys a
@@ -225,6 +262,7 @@ def test_a_rows_fields_are_in_a_fixed_order(tree: Declaration) -> None:
         depends.BLOCKED,
         depends.BLOCKS,
         stale.DAYS,
+        read.COMMANDS,
         "title",
         *tree.keys,
         "path",
@@ -403,25 +441,6 @@ title = "A tree"
 
 - **graft-1 — the first.** and a note somebody typed
 """
-
-
-def test_the_offer_passes_over_a_bullet_no_disposition_could_mark(
-    tree: Declaration,
-) -> None:
-    """John, 2026-09-09: the offer listed it, because hiding it took away the
-    one place a consumer would learn that it exists. 15-1 gives that learning
-    a place of its own, so the offer can agree with the verb. The report is
-    what may not go quiet, and the offer's invariant is unchanged: it may not
-    hide a bullet the verb *would* have taken."""
-    file(tree, "orchard", "a-tree.md", SCRIBBLED)
-    found = read.listing(
-        tree, marking=lambda bullet: bullet.mark is None and not bullet.unmarkable
-    )
-    assert found.rows == []
-    # What the traversal read, not what it offered: the bullet still counts.
-    assert found.walked == 1
-    assert [one[read.BULLET_NAME] for one in found.unmarkable] == ["graft-1"]
-    assert [one[read.PATH] for one in found.unmarkable] == ["orchard/a-tree.md"]
 
 
 def test_an_unmarkable_bullets_line_counts_the_head_as_written_on_disk(
@@ -638,29 +657,13 @@ def test_an_order_that_agrees_reports_nothing(tree: Declaration) -> None:
     assert found.rows[1][depends.BLOCKED] == ["a-tree"]
 
 
-def test_neither_dependency_report_is_narrowed_by_an_offering(
-    tree: Declaration,
-) -> None:
-    """3-1's rule, now with four reports to keep: an offer is a filter, and
-    no filter narrows an exception report. The offering here excludes the
-    very items both reports name."""
-    waiting(tree, "a-tree", "gone-tree", "b-tree", place=100)
-    waiting(tree, "b-tree", place=200)
-    found = read.listing(tree, offering=lambda one: False)
-    assert found.rows == []
-    assert [one[depends.NAMES] for one in found.unknown] == ["gone-tree"]
-    assert [one[depends.NAMES] for one in found.misordered] == ["b-tree"]
-
-
 def test_the_reports_are_computed_over_the_whole_tree(tree: Declaration) -> None:
-    """Not over the offering's narrowed set: what an item waits on is a
-    question about the whole tree, and a narrowed set would answer it with
-    whatever the offer happened to keep — which would turn a filed blocker
-    into an unknown one."""
+    """What an item waits on is a question about the whole tree, so a filed
+    blocker reads as a blocker and never as an unknown edge."""
     file(tree, "orchard", "a-tree.md")
     waiting(tree, "b-tree", "a-tree")
-    found = read.listing(tree, offering=lambda one: one.slug == "b-tree")
-    (row,) = found.rows
+    found = read.listing(tree)
+    (row,) = [one for one in found.rows if one["slug"] == "b-tree"]
     assert row[depends.BLOCKED] == ["a-tree"]
     assert found.unknown == []
 
@@ -1063,13 +1066,15 @@ def test_a_row_carries_stale_days_null_in_a_tree_that_is_not_a_repo(
     assert row[stale.DAYS] is None
 
 
-def test_only_an_item_in_a_dated_state_gets_a_value(tree: Declaration) -> None:
-    """The claim's exact shape: the field is on every row because the
-    *declaration* has such a state, and only the items **in** one are looked
-    up. `greenhouse` is committed here too, so what distinguishes them is the
-    capability rather than what git happens to know."""
+def test_every_committed_item_gets_a_value_with_no_capability(
+    tree: Declaration,
+) -> None:
+    """31-1: the age needs no switch, so an item in any state git knows about
+    carries one. `greenhouse` declares nothing about dates, and its committed
+    item is aged beside the cold frame's."""
     dated(tree, "a-seedling")
     committed = file(tree, "greenhouse", "a-sprout.md")
+    when = dt.datetime.now().astimezone()
     with Repo(str(tree.root)) as repo:
         worktree = repo.get_worktree()
         worktree.stage([str(committed.relative_to(tree.root)).encode()])
@@ -1077,27 +1082,13 @@ def test_only_an_item_in_a_dated_state_gets_a_value(tree: Declaration) -> None:
             b"and the sprout",
             committer=b"A Gardener <gardener@example.invalid>",
             author=b"A Gardener <gardener@example.invalid>",
+            author_timestamp=int(when.timestamp()),
+            author_timezone=int(when.utcoffset().total_seconds()),
+            commit_timestamp=int(when.timestamp()),
+            commit_timezone=0,
         )
     ages = {row["slug"]: row[stale.DAYS] for row in read.listing(tree).rows}
-    assert ages == {"a-sprout": None, "a-seedling": 0}
-
-
-def test_a_declaration_with_no_dated_state_has_no_such_field(
-    tree: Declaration, tmp_path: Path
-) -> None:
-    """The fields are generated by the capability, so where no state opts in
-    the row has no room for one — and nothing asks git anything."""
-    source = tmp_path / "undated" / "plan.toml"
-    source.parent.mkdir()
-    source.write_text(
-        (FIXTURES / "plan.toml").read_text().replace('capabilities = ["dated"]', "")
-    )
-    for name in FIXTURE_FILES[1:]:
-        (source.parent / name).write_text((FIXTURES / name).read_text())
-    undated = load(source)
-    file(undated, "cold-frame", "a-seedling.md")
-    (row,) = read.rows(undated, read.items(undated))
-    assert stale.DAYS not in row
+    assert ages == {"a-sprout": 0, "a-seedling": 0}
 
 
 # The filters are the pure half again, so these take no tmp_path.
@@ -1259,20 +1250,6 @@ def test_a_lost_close_out_at_the_top_of_the_range_is_named_though_it_makes_no_ga
     assert [one[numbered.LINE] for one in found.lost] == [3]
 
 
-def test_neither_register_report_is_narrowed_by_an_offering(
-    tree: Declaration,
-) -> None:
-    """Seven reports now, and the rule has not moved: an offer is a filter, and
-    no filter narrows an exception report. The offering here excludes every
-    item in the tree."""
-    archived(tree, "## 1. A felled tree\n\n## Section 2: lost\n")
-    numbered_tree(tree, "a-tree", 3)
-    found = read.listing(tree, offering=lambda one: False)
-    assert found.rows == []
-    assert [one[numbered.KEY] for one in found.gaps] == [2]
-    assert [one[numbered.LINE] for one in found.lost] == [3]
-
-
 # The register itself, beside the two reports. Not an eighth report: it says
 # what the register holds rather than what is wrong with it, so every one of
 # these reads it on a corpus with nothing wrong.
@@ -1340,26 +1317,12 @@ def test_the_highest_is_the_number_the_next_mint_adds_one_to(
     assert numbered.next_number(numbered.taken(held)) == one[numbered.HIGHEST] + 1
 
 
-def test_the_register_is_not_narrowed_by_an_offering(tree: Declaration) -> None:
-    """It is about the tree rather than about rows of it, so the rule the
-    seven reports keep is the rule this keeps: an offer is a filter, and no
-    filter touches it."""
-    numbered_tree(tree, "a-tree", 3)
-    found = read.listing(tree, offering=lambda one: False)
-    assert found.rows == []
-    (one,) = found.register
-    assert (one[numbered.FLOOR], one[numbered.HIGHEST]) == (1, 3)
-
-
 # --------------------------------------------------------------------------
-# The offering: the seam `next <transition>` is built on
+# `commands`: what could take each item, brought by the caller (31-3)
 # --------------------------------------------------------------------------
 #
 # A predicate over **items**, not over rows, and this module goes on knowing
-# nothing about transitions — the caller brings the question. What an offering
-# may narrow is `rows` and nothing else: `walked` is the size of the
-# traversal, and the exception reports are about the tree rather than about
-# the rows of it.
+# nothing about transitions — the caller brings the question.
 
 #: A started section carrying no steps at all, so `undecomposed` names it.
 #: `graft-status` is the fixture's status key, and carrying it *at all* is
@@ -1374,56 +1337,11 @@ No steps here.
 """
 
 
-def test_an_offering_narrows_the_rows(tree: Declaration) -> None:
-    file(tree, "greenhouse", "a-seedling.md")
-    file(tree, "greenhouse", "b-seedling.md")
-    found = read.listing(tree, offering=lambda one: one.slug == "a-seedling")
-    assert [row["slug"] for row in found.rows] == ["a-seedling"]
-
-
-def test_the_traversal_still_walked_the_whole_tree(tree: Declaration) -> None:
-    """`walked` is what the frame counts *of*. Without it an offer of one out
-    of three would say `1 of 1` and hide the two it passed over — the
-    make-problems-visible polarity, at the seam that decides the number."""
-    file(tree, "greenhouse", "a-seedling.md")
-    file(tree, "greenhouse", "b-seedling.md")
-    file(tree, "cold-frame", "c-seedling.md")
-    found = read.listing(tree, offering=lambda one: one.slug == "a-seedling")
-    assert len(found.rows) == 1
-    assert found.walked == 3
-
-
-def test_an_offering_does_not_narrow_the_stranded_claims(
+def test_every_item_is_a_row_and_walked_is_their_count(
     tree: Declaration,
 ) -> None:
-    """A stranded claim is a *record*, not an item, so nothing that narrows
-    items may touch it — and an offering is a filter. The offering here
-    excludes the very item a record would have belonged to."""
-    file(tree, "potting-bench", "a-seedling.md")
-    held(tree, "a-seedling")
-    held(tree, "b-seedling")
-    found = read.listing(tree, offering=lambda one: False)
-    assert found.rows == []
-    assert [one["slug"] for one in found.stranded] == ["b-seedling"]
-
-
-def test_an_offering_does_not_narrow_the_undecomposed_report(
-    tree: Declaration,
-) -> None:
-    """The other exception report, by the same rule: hiding is the failure
-    mode, and an offer that quietly dropped a started section carrying no
-    sub-phases would be that failure with the offer as its excuse."""
-    file(tree, "orchard", "a-tree.md", UNSTEPPED)
-    found = read.listing(tree, offering=lambda one: False)
-    assert found.rows == []
-    assert found.undecomposed == ["a-tree"]
-
-
-def test_no_offering_means_every_row_and_walked_is_their_count(
-    tree: Declaration,
-) -> None:
-    """Which is why `list` is unchanged: the two numbers are equal wherever
-    nothing narrows the items."""
+    """Nothing in the read narrows the items: that is the filters' job, after
+    the rows are built."""
     file(tree, "greenhouse", "a-seedling.md")
     file(tree, "cold-frame", "b-seedling.md")
     found = read.listing(tree)
@@ -2148,13 +2066,12 @@ def test_a_row_carries_exactly_the_derived_keys_the_roster_names(
     assert [key for key in row if key in DERIVABLE_KEYS] == list(tree.derived)
 
 
-def test_a_declaration_that_derives_nothing_carries_none_of_them(
+def test_a_declaration_that_derives_nothing_else_carries_only_the_age(
     tmp_path: Path,
 ) -> None:
     """The negative half, graded on a document rather than on the fixture:
-    every gate off means every name absent from the row, so a field that
-    arrived unconditionally would fail here rather than in whatever consumer
-    tree first had no git in it."""
+    every gate off means every name absent from the row, except the age,
+    which arrives unconditionally (31-1) and is `None` outside git."""
     (tmp_path / "plan.toml").write_text(
         '[states.greenhouse]\npath = "greenhouse"\n'
     )
@@ -2163,9 +2080,10 @@ def test_a_declaration_that_derives_nothing_carries_none_of_them(
     (tmp_path / "greenhouse" / "a-seedling.md").write_text(
         '+++\ntitle = "A seedling"\n+++\n\nThe body starts here.\n'
     )
-    assert plain.derived == ()
+    assert plain.derived == (stale.DAYS,)
     [row] = read.rows(plain, read.items(plain))
-    assert [key for key in row if key in DERIVABLE_KEYS] == []
+    assert [key for key in row if key in DERIVABLE_KEYS] == [stale.DAYS]
+    assert row[stale.DAYS] is None
 
 
 # --------------------------------------------------------------------------
@@ -2220,3 +2138,32 @@ def test_a_cutting_whose_batch_is_gone_is_not_named(tree: Declaration) -> None:
     than a report."""
     lined_out(tree, "c2", batch=False)
     assert read.listing(tree).unfound == []
+
+
+def test_the_callers_question_fills_each_rows_commands(tree: Declaration) -> None:
+    """`taking` is handed each item and the whole tree, and what it says is the
+    row's `commands`, `None` where it names nothing."""
+    file(tree, "greenhouse", "a-seedling.md")
+    file(tree, "greenhouse", "b-seedling.md")
+    walked: list[int] = []
+
+    def taking(one: Item, whole: Sequence[Item]) -> list[str]:
+        walked.append(len(whole))
+        return ["transplant"] if one.slug == "a-seedling" else []
+
+    found = read.listing(tree, taking=taking)
+    assert {row["slug"]: row[read.COMMANDS] for row in found.rows} == {
+        "a-seedling": ["transplant"],
+        "b-seedling": None,
+    }
+    assert walked == [2, 2]
+
+
+def test_without_the_question_every_rows_commands_is_none(
+    tree: Declaration,
+) -> None:
+    """The field is the declaration's, present whatever the caller brings,
+    so the shape never depends on who asked."""
+    file(tree, "greenhouse", "a-seedling.md")
+    (row,) = read.listing(tree).rows
+    assert read.COMMANDS in row and row[read.COMMANDS] is None

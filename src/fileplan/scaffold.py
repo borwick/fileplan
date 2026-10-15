@@ -3,11 +3,13 @@
 The tool ships one example declaration, and `init` copies the example
 verbatim. There is no templating and no codegen.
 
-The example is a tree rather than a file: a plan.toml, plus the documents its
-pointers resolve against. So this module reads the example through
+The example is a tree rather than a file: a plan.toml, plus the archive
+document its numbered state names, because the declaration does not load
+without it. So this module reads the example through
 `fileplan.declaration.load` rather than parsing it again. The state
 directories `init` makes come out of the loaded declaration. Nothing here
-knows what they are called.
+knows what they are called. Beside the tree it writes `local/.gitignore`,
+so the session state the tool keeps under `local/` is never committed.
 
 The example resolves through `importlib.resources` rather than by walking up
 from this file. After an install there is no repository to walk up from.
@@ -33,6 +35,10 @@ from fileplan.declaration import PLAN_TOML_NAME, Refusal, load
 
 #: The package directory the example tree ships in.
 STARTER = "starter"
+
+#: What `init` writes beside the example: the directory the tool keeps
+#: session state in, ignored by git whole. See docs/method.md#init
+LOCAL_IGNORE = (Path("local") / ".gitignore", "*\n")
 
 #: And the one the interpreter skills ship in. Named for what ships rather
 #: than after any agent vendor's directory: where a consumer puts it is their
@@ -80,12 +86,15 @@ def install(target: Path) -> list[Path]:
         # list here, then whatever directories the files need.
         directories = [Path(state.path) for state in declaration.states.values()]
         relatives = [path.relative_to(source) for path in sources]
+        ignore, ignored = LOCAL_IGNORE
         directories += sorted(
-            {relative.parent for relative in relatives} - {Path(".")} - set(directories)
+            {relative.parent for relative in (*relatives, ignore)}
+            - {Path(".")}
+            - set(directories)
         )
 
         _refuse_an_existing_install(target)
-        for relative in relatives:
+        for relative in (*relatives, ignore):
             if (target / relative).exists():
                 raise Refusal(
                     f"{target / relative} already exists, and `fileplan init` "
@@ -107,6 +116,8 @@ def install(target: Path) -> list[Path]:
         for relative, path in zip(relatives, sources):
             (target / relative).write_bytes(path.read_bytes())
             written.append(target / relative)
+        (target / ignore).write_text(ignored)
+        written.append(target / ignore)
     return written
 
 

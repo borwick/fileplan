@@ -32,6 +32,7 @@ from typing import Any, Mapping
 from fileplan import item
 from fileplan.declaration import (
     CLAIM_KEYS,
+    CLAIMED,
     Declaration,
     Refusal,
     collecting,
@@ -41,8 +42,8 @@ from fileplan.lock import LOCAL_DIR
 
 #: The capability a state opts into. The seam that takes, holds and drops a
 #: claim is `fileplan.transition`, because it mutates under the lock and this
-#: module deliberately takes none. See docs/method.md#the-claimed-state
-NAME = "claimed"
+#: module takes none. See docs/method.md#the-claimed-state
+NAME = CLAIMED
 
 #: Under `local/`, beside the lock: session-local state, gitignored.
 CLAIMS_DIR = "claims"
@@ -223,7 +224,7 @@ def fields(record: Mapping[str, Any], status: str, who: Identity) -> dict[str, s
     """The three values a claim gives a row: its holder, the probe's word, and
     whether `who` is that holder, by `owns`.
 
-    Pure, and deliberately not a sentence: `claim-status` holds one of `STATUSES` and
+    Pure, and not a sentence: `claim-status` holds one of `STATUSES` and
     `claim-holder` one of `HOLDERS`, so each filters like any declared key with
     `values`. `--has claim-status=dead` is "what needs releasing", and
     `--has claim-holder=this-session` is "what this session holds".
@@ -333,9 +334,9 @@ def holders(declaration: Declaration) -> dict[str, dict[str, str]]:
     `fileplan.read.listing`'s question, not this one's.
 
     Every defect is collected and raised at once. A malformed record refuses
-    the listing, which is the deliberate asymmetry with a missing one: a fresh
-    clone must read as unclaimed, where a record that cannot be read says
-    something the tool does not understand about who holds an item. See
+    the listing, where a missing one reads as unclaimed: a fresh clone has no
+    records, and a record that cannot be read says something the tool does
+    not understand about who holds an item. See
     docs/method.md#the-claimed-state
     """
     who = identity(declaration)

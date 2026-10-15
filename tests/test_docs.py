@@ -15,7 +15,7 @@ Four behaviours. The first two were pinned from an earlier implementation:
 The third is 3-1's, and it grades an *absence*: **no named report flag exists
 anywhere in the CLI.** The old tool's five (`--ready`, `--closeable`,
 `--stale`, `--candidates`, `--unsized`) were one question asked five times,
-and `next VERB` asks it once. A guard over a thing that is not there is the
+and a row's `commands` answers it once. A guard over a thing that is not there is the
 only kind that can keep it from coming back.
 
 The fourth is 6-1's, and it grades **output** rather than source: no verb's
@@ -52,7 +52,8 @@ import pytest
 from conftest import FIXTURE_FILES
 
 from fileplan import read
-from fileplan.cli import HALVES, LIST_HELP, _build_group, contract, main
+from fileplan.cli import DECLARED, LIST_HELP, _build_group, contract, main
+from fileplan.declaration import KINDS, _slug
 from fileplan.declaration import heading_slugs, load
 
 REPO = Path(__file__).resolve().parent.parent
@@ -317,16 +318,40 @@ def _pointers() -> list[tuple[str, str]]:
         + list(declaration.keys.values())
         + list(declaration.transitions.values())
     )
-    found = [(entry.name, entry.doc) for entry in entries if entry.doc]
-    # And the transition's second pointer. A `policy` and a `doc` naming one
-    # section would be two homes for one meaning exactly as two `doc`s would,
-    # so they are graded in one list rather than two.
-    found += [
-        (f"{transition.name} (policy)", transition.policy)
+    return [(entry.name, entry.doc) for entry in entries if entry.doc]
+
+
+#: A link from a section of the method to a section of the procedures, as
+#: markdown writes one: `(procedures.md#anchor)`.
+PROCEDURE_LINK = re.compile(r"\(procedures\.md#([a-z0-9-]+)\)")
+
+
+def _procedure_links() -> set[str]:
+    """Every procedure a transition's own `docs/method.md` section links to.
+
+    31-2 folded `policy =` into `doc`: a transition reaches its procedure by a
+    link from the section its `doc` names, so this is what joins the two
+    documents now. Only a transition's section counts, because a link from
+    anywhere else sends no session there."""
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in (REPO / METHOD).read_text().splitlines():
+        if line.startswith("### "):
+            current = _slug(line[4:])
+            sections[current] = []
+        elif line.startswith("#"):
+            current = None
+        elif current is not None:
+            sections[current].append(line)
+    declaration = load(REPO / "plan.toml")
+    return {
+        anchor
         for transition in declaration.transitions.values()
-        if transition.policy
-    ]
-    return found
+        if transition.doc is not None and transition.doc.startswith(f"{METHOD}#")
+        for anchor in PROCEDURE_LINK.findall(
+            " ".join(sections.get(transition.doc.partition("#")[2], []))
+        )
+    }
 
 
 def _anchors_into_the_method() -> set[str]:
@@ -394,9 +419,10 @@ def test_the_transcript_strip_takes_out_pasted_output_and_nothing_else() -> None
 
     # And the shape that made this necessary: this repo really does ship a
     # walked document whose every citation is inside a transcript, and really
-    # does ship examples that are not.
+    # does ship examples that are not. Since 32-3 the starter points at no
+    # document, so the walk may cite nothing at all; what it may not do is
+    # cite outside a transcript.
     walked = (REPO / INITIALIZATION).read_text()
-    assert citations(walked), "the walk cites nothing, so this proves nothing"
     assert citations(prose(walked)) == []
     method = (REPO / METHOD).read_text()
     assert citations(prose(method)), "the method's examples were stripped too"
@@ -476,7 +502,7 @@ def test_the_citation_guard_reads_every_skill_and_no_skill_cites_a_document() ->
     document under `docs/`. The wheel carries the skills and not `docs/`, so a
     citation there sends an installed session to a file it does not have.
     What travels with the tool is `--help` and `--json`, and the `Reading`
-    and `Running it` blocks name the consumer's own documents."""
+    block names the consumer's own documents."""
     shipped = {path for path in (REPO / SKILLS).rglob("*.md")}
     assert shipped, "this repo ships no skills, so this guard proves nothing"
     assert shipped <= set(_haystack())
@@ -553,31 +579,24 @@ def test_the_orphan_check_would_catch_an_uncited_section() -> None:
     assert CONTAINERS <= (heading_slugs(REPO / METHOD) or set())
 
 
-def test_every_procedure_is_named_by_a_policy_pointer() -> None:
-    """The orphan guard over the new document, mirroring the method's. A
-    procedure nothing points at is one no session will ever be sent to read —
-    either a verb lost its `policy` or the procedure was written for a verb
-    that was never declared. Sections are named after the **procedure** rather
-    than the verb, so this is the only thing that joins the two."""
+def test_every_procedure_is_linked_from_a_transitions_section() -> None:
+    """The orphan guard over the procedures, mirroring the method's. A
+    procedure no transition's section links to is one no session will ever be
+    sent to read — either a section lost its link or the procedure was
+    written for a verb that was never declared. Sections are named after the
+    **procedure** rather than the verb, so the link is the only thing that
+    joins the two (31-2)."""
     procedures = heading_slugs(REPO / PROCEDURES, level=2)
     assert procedures, "the procedures document has no sections to check"
-    named = {
-        pointer.partition("#")[2]
-        for _, pointer in _pointers()
-        if pointer.startswith(f"{PROCEDURES}#")
-    }
-    assert procedures - named == set()
+    assert procedures - _procedure_links() == set()
 
 
-def test_the_procedure_orphan_check_would_catch_one_nothing_points_at() -> None:
+def test_the_procedure_orphan_check_would_catch_one_nothing_links_to() -> None:
     """The mutation check on it, the shape the method's orphan check has."""
-    named = {
-        pointer.partition("#")[2]
-        for _, pointer in _pointers()
-        if pointer.startswith(f"{PROCEDURES}#")
-    }
-    assert named, "no transition declares a policy, so this proves nothing"
+    named = _procedure_links()
+    assert named, "no transition's section links a procedure, so this proves nothing"
     assert {"an-orphan"} - named == {"an-orphan"}
+    assert PROCEDURE_LINK.findall("a [run](procedures.md#a-run).") == ["a-run"]
 
 
 def test_no_heading_is_a_heading_in_two_shipped_documents() -> None:
@@ -706,8 +725,9 @@ def test_the_dropped_key_control_catches_a_requires_its_neighbour_destroys() -> 
 #: The old tool's five named report flags (§ "Queries — and the named
 #: reports dissolve"). Every one of them derived a fact no head holds, and
 #: every one asked the same question: which items satisfy transition X's preconditions.
-#: `next VERB` asks it once, generated from the declarations, so none of these
-#: has anywhere to come back.
+#: A row's `commands` answers it once, read off the declarations, and
+#: `list --has commands=VERB` is the old offer, so none of these has anywhere to
+#: come back.
 NAMED_REPORTS = ("--ready", "--closeable", "--stale", "--candidates", "--unsized")
 
 
@@ -732,13 +752,22 @@ def _repo_flags() -> set[str]:
 
 def test_no_named_report_flag_exists_anywhere_in_the_cli() -> None:
     """The whole group and every subgroup, not just `list`: a report flag
-    added to `next work` would be the middle tier growing back one verb at a
+    added to one command would be the middle tier growing back one verb at a
     time. A control over the repo's own declaration, like the guards above it
     — the *behaviour* is graded in the fixture's vocabulary, in
     `test_cli.py`."""
     flags = _repo_flags()
     assert flags, "the walker found no options, so this guard proves nothing"
     assert not flags & set(NAMED_REPORTS), sorted(flags & set(NAMED_REPORTS))
+
+
+def test_there_are_two_reads_and_no_third() -> None:
+    """31-3 folded `next COMMAND` into the listing, so the tool's own reads of
+    the tree are `list` and `show`. `release` and `init` write, and every
+    other command is a declared transition."""
+    group = _build_group(load(REPO / "plan.toml"))
+    own = set(group.commands) - set(load(REPO / "plan.toml").transitions)
+    assert own - {"release", "init"} == {"list", "show"}
 
 
 def test_the_read_names_every_operator_a_filter_may_carry() -> None:
@@ -769,8 +798,8 @@ def test_the_flag_control_reaches_inside_a_subgroup() -> None:
     found — otherwise the guard above would pass forever by looking in the
     wrong place, which is exactly how the old tool's blacklist rotted."""
     group = _build_group(load(REPO / "plan.toml"))
-    inner = group.commands["next"]
-    assert isinstance(inner, click.Group), "next is the subgroup this walks into"
+    inner = click.Group(name="fabricated-group")
+    group.add_command(inner)
     inner.add_command(
         click.Command(
             name="fabricated",
@@ -872,15 +901,44 @@ def test_no_skill_this_repo_ships_names_a_verb_this_repo_declares() -> None:
     6-3 widened it from the generic skill to **every** skill. It was scoped
     while `/next` still spelled this repo's verbs in its invocations; with
     those dissolved into `/do-next`, nothing needs excepting, and a whitelist
-    of what is graded would be the blacklist 1-6 rejected one shape over."""
+    of what is graded would be the blacklist 1-6 rejected one shape over.
+
+    The nine kind names are skipped, the hole the code control names too:
+    the interpreter must name every kind, and this repo declares a verb
+    called `merge` whose kind is `merge`."""
     skills = _skills()
     assert skills, "this repo ships no skills, so this control proves nothing"
-    verbs = list(load(REPO / "plan.toml").transitions)
+    verbs = [verb for verb in load(REPO / "plan.toml").transitions if verb not in KINDS]
     assert verbs, "the repo declares no transitions, so this control proves nothing"
     for where, source in skills.items():
         assert source, f"{where} is empty, so this control proves nothing"
         for verb in verbs:
             assert not re.search(rf"\b{re.escape(verb)}\b", source), (where, verb)
+
+
+#: A read a skill runs, `fileplan list …` or `fileplan show …`, inside a code
+#: span. The bare `fileplan` in a span is the tool's name, not a read.
+SKILL_READ = re.compile(r"`fileplan (?:list|show)(?: [^`]*)?`")
+
+
+def test_every_read_a_skill_runs_asks_for_json() -> None:
+    """33-1: the text a person reads is free to change, so a skill reads the
+    tool's answer as JSON. Every `fileplan list` and `fileplan show` a skill
+    runs carries `--json`; the contract a skill asks for with `--help` is not
+    a read and is not graded."""
+    reads = [
+        (where, match.group(0))
+        for where, source in _skills().items()
+        for match in SKILL_READ.finditer(source)
+    ]
+    assert reads, "no skill runs a read, so this guard proves nothing"
+    assert [(where, read) for where, read in reads if "--json" not in read] == []
+
+
+def test_the_json_read_control_catches_a_text_read() -> None:
+    """The mutation check: a text read in a skill really is found."""
+    found = [m.group(0) for m in SKILL_READ.finditer("Run `fileplan list --state plan`.")]
+    assert found == ["`fileplan list --state plan`"] and "--json" not in found[0]
 
 
 def test_the_verb_name_control_catches_a_verb_written_into_a_skill() -> None:
@@ -955,24 +1013,24 @@ def test_the_interpreter_tells_a_session_to_ask_the_tool_first() -> None:
     assert "--help" in source and "--check" in source
 
 
-def test_the_interpreter_names_every_half_the_tool_declares() -> None:
-    """Step 4 branches on the halves a contract can name, so a half the tool
-    grew and the procedure never learned is a `Declares` block naming
+def test_the_interpreter_names_every_kind_and_option_the_tool_declares() -> None:
+    """Step 4 branches on the kinds and options a contract can name, so one
+    the tool grew and the procedure never learned is a `Declares` block naming
     something the interpreter says nothing about — a session meeting it has
     nothing to act on, and nothing goes red. That is the gap the
-    make-problems-visible rule names, and it has now happened twice: 7-5
-    found two halves missing after four sub-phases, and 9-3 a third.
+    make-problems-visible rule names, and it happened twice with the halves
+    that came before kinds: 7-5 found two missing after four sub-phases, and
+    9-3 a third.
 
     Named at the one artifact that *runs* a transition, for
     `test_the_interpreter_tells_a_session_to_ask_the_tool_first`'s reason:
     the composed skill delegates to this one rather than asking the tool
     itself, so grading every skill would fail it correctly and for the wrong
     reason."""
-    halves = HALVES
-    assert halves, "the tool declares no halves, so this control proves nothing"
+    words = (*KINDS, *DECLARED)
     source = (REPO / SKILLS / "fileplan" / "SKILL.md").read_text()
-    for half in halves:
-        assert f"`{half}`" in source, half
+    for word in words:
+        assert f"`{word}`" in source, word
 
 
 def test_the_half_control_catches_a_half_the_interpreter_never_learned() -> None:
@@ -980,7 +1038,7 @@ def test_the_half_control_catches_a_half_the_interpreter_never_learned() -> None
     found missing, so the control above cannot pass by grading a word every
     document happens to hold."""
     invented = "scatters"
-    assert invented not in HALVES, "pick a word the tool does not declare"
+    assert invented not in (*KINDS, *DECLARED), "pick a word the tool does not declare"
     source = (REPO / SKILLS / "fileplan" / "SKILL.md").read_text()
     assert f"`{invented}`" not in source
     assert f"`{invented}`" in f"* **`{invented}`** \u2014 what its bullet would say."
@@ -992,21 +1050,24 @@ def _declared_json() -> list[dict]:
     return [contract(declaration, one) for one in declaration.transitions.values()]
 
 
-def test_the_declaration_read_carries_every_half_the_tool_declares() -> None:
-    """The same gap as the control above, one artifact over: a half the tool
-    grew and the machine-readable form never learned is a composing session
-    selecting on a half and finding nobody declares it. Nothing goes red, and
+def test_the_declaration_read_carries_every_kind_and_option() -> None:
+    """The same gap as the control above, one artifact over: an option the
+    tool grew and the machine-readable form never learned is a composing
+    session selecting on it and finding nobody declares it. Nothing goes red, and
     the arm silently never runs — which is the whole failure
     `docs/method.md#the-interpreter` says selecting by half rather than by
     name exists to avoid.
 
-    Graded both ways, over every half. A verb declaring it and missing from
+    Graded both ways, over every option. A verb declaring it and missing from
     the JSON is the gap; a verb in the JSON declaring it and not in the
-    declaration would be the tool answering about a workflow nobody wrote."""
+    declaration would be the tool answering about a workflow nobody wrote.
+    Every row carries its transition's kind."""
     rows = _declared_json()
     declaration = load(REPO / "plan.toml")
-    assert HALVES, "the tool declares no halves, so this control proves nothing"
-    for half in HALVES:
+    assert [row["kind"] for row in rows] == [
+        one.kind for one in declaration.transitions.values()
+    ]
+    for half in DECLARED:
         declaring = [
             one.name
             for one in declaration.transitions.values()
@@ -1020,7 +1081,7 @@ def test_the_declaration_control_catches_a_half_the_json_never_learned() -> None
     found missing, so the control above cannot pass by grading a list that
     happens to be there."""
     declaration = load(REPO / "plan.toml")
-    forgotten = "marks"
+    forgotten = "claims"
     declaring = [
         one.name for one in declaration.transitions.values() if getattr(one, forgotten)
     ]

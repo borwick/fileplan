@@ -22,27 +22,27 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable, Mapping
 
-from fileplan.declaration import Refusal
+from fileplan.declaration import (
+    ARCHIVE,
+    CAPABILITY_KEYS,
+    FIRST,
+    FIRST_NUMBER,
+    NUMBERED,
+    RESERVED_KEYS,
+    Refusal,
+)
 
-#: The capability a state opts into. The same word plan.toml spells.
-NAME = "numbered"
+#: The capability a state opts into, and the key it gives an item: both
+#: written in `fileplan.declaration`, which refuses a redeclaration.
+#: `ARCHIVE`, imported beside them, is the state field naming the document
+#: closed numbers are recorded in.
+NAME = NUMBERED
+KEY = CAPABILITY_KEYS[NUMBERED]
 
-#: The key it gives an item. Declared nowhere; a redeclaration is refused in
-#: `fileplan.declaration.CAPABILITY_KEYS`.
-KEY = "number"
-
-#: The state field naming the document closed numbers are recorded in. A
-#: state's, because the register needs it before any transition writes.
-ARCHIVE = "archive"
-
-#: The number a legibly empty corpus mints, and `FIRST_NUMBER`'s default, so
-#: neither the mint nor the gap walk branches around a declared floor.
-FIRST = 1
-
-#: The state field declaring where this register begins: the first number it
-#: may hold, inclusive. A bound on the derived register and never a third
+#: `FIRST` is the number a legibly empty corpus mints and `FIRST_NUMBER`'s
+#: default, so neither the mint nor the gap walk branches around a declared
+#: floor. `FIRST_NUMBER` is a bound on the derived register and never a third
 #: source, so a source claiming a number below it refuses at the mint.
-FIRST_NUMBER = "first-number"
 
 #: An archive entry's heading: the number, a full stop, a space, the title.
 #: `entry` writes what this reads, so the two cannot drift into two parsers.
@@ -53,8 +53,9 @@ HEADING = re.compile(r"^##[ \t]+(?P<number>\d+)\.[ \t]+\S")
 ARCHIVE_HEADING = re.compile(r"^##[ \t]")
 
 #: The state a register belongs to, in the record the two reports carry: a
-#: register is per numbered state, named by its declared name.
-STATE = "state"
+#: register is per numbered state, named by its declared name, which is the
+#: row's own `state` field.
+_, STATE, _ = RESERVED_KEYS
 
 #: Where a lost close-out is, and what it says: the 1-based line number in
 #: the archive, and the line itself.
@@ -219,6 +220,18 @@ def errors(head: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def heading(number: int, title: str) -> str:
+    """An archive entry's heading, as `HEADING` reads it back."""
+    return f"## {number}. {title}"
+
+
+def archived(text: str, where: str) -> dict[str, int]:
+    """The numbers an archive's headings hold, keyed the way a register
+    names a claimant: the document and the number. Pure; the mint, the
+    listing's register and `entry` all read the archive's half through it."""
+    return {f"{where} § {one}.": one for one in numbers(text)}
+
+
 def entry(text: str, number: int, title: str, record: str = "") -> str:
     """`text` with `## <number>. <title>` inserted at its register place.
 
@@ -233,9 +246,7 @@ def entry(text: str, number: int, title: str, record: str = "") -> str:
     refuses through `next_number`, called with `current` so the duplicate loop
     runs and the mint arithmetic does not.
     """
-    held: dict[str, Any] = {
-        f"§ {one}. in the archive": one for one in numbers(text)
-    }
+    held: dict[str, Any] = dict(archived(text, "the archive"))
     held[f'"{title}"'] = number
     next_number(taken(held), current=number)
 
@@ -253,7 +264,7 @@ def entry(text: str, number: int, title: str, record: str = "") -> str:
     while before and not before[-1].strip():
         before.pop()
 
-    written = [f"## {number}. {title}"]
+    written = [heading(number, title)]
     if stripped := record.strip("\n"):
         written += ["", *stripped.splitlines()]
     if before:

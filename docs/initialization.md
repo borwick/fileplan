@@ -2,10 +2,13 @@
 
 From nothing to a tree an agent can work in.
 
-Every command below was run on 2026-09-12 and its output pasted from that run.
-Two blocks are trimmed. The install block leaves out uv's dependency lines, and
-`fileplan --skills` prints the ordinary install location rather than the
-throwaway directory this re-run installed into.
+Every command below was run and its output pasted from that run. The walk
+from `fileplan init` on was re-run on 2026-10-06 against the working tree,
+through `uv run`; the install, `--version` and `--skills` blocks are from the
+2026-09-12 run against a built wheel. Two blocks are trimmed. The install
+block leaves out uv's dependency lines, and `fileplan --skills` prints the
+ordinary install location rather than the throwaway directory that run
+installed into.
 
 ## what you are getting
 
@@ -69,17 +72,18 @@ The refusal names the way out. Run `fileplan init` in an empty directory:
 $ fileplan init .
 inbox
 plan
-docs
-docs/archive.md
-docs/method.md
-docs/procedures.md
+local
+archive.md
 plan.toml
+local/.gitignore
 ```
 
-Two directories for your work, a `plan.toml`, and three stub documents that
-`plan.toml` points into. `fileplan init` writes nothing over a file that is
-already there, and refuses inside a tree that already has a `plan.toml` above
-it, so running `fileplan init` twice costs you nothing.
+Two directories for your work, a `plan.toml`, the archive document a closed
+item's entry is filed in, and `local/`, where fileplan keeps session state
+such as its lock. `local/.gitignore` holds `*`, so none of that is ever
+committed. `fileplan init` writes nothing over a file that is already there,
+and refuses inside a tree that already has a `plan.toml` above it, so running
+`fileplan init` twice costs you nothing.
 
 Now fileplan has a declaration to build its commands from:
 
@@ -89,26 +93,30 @@ $ fileplan
 
 States
   inbox    inbox/
-  plan     plan/
+  plan     plan/   sorted by position
 
 Transitions
-  capture  Log an idea in the inbox.
-  queue    Commit to an idea: move it into the plan.
-  work     Say how the work is going.
-  archive  Close an item out: file its entry and remove the item.
+  capture  Create an item in inbox.
+  queue    Move an item from inbox to plan.
+  work     Edit an item in plan where it stands.
+  archive  Close an item in plan out: file its archive entry, and take its file away.
 
 Declares
-  archive  archives, dissolves
+  capture  create
+  queue    move
+  work     edit
+  archive  close, archives
 
 Run `fileplan list` to see what is filed.
-Run `fileplan next COMMAND` to see what COMMAND could take right now.
 Run `fileplan show ITEM` to see one item's row.
 Run `fileplan COMMAND --help` to see what COMMAND takes.
 ```
 
 `States` and `Transitions` are `plan.toml` read back to you. Add a state to
-the declaration and it appears here. **`Declares`** names the commands that do
-more than move a file: `archive` writes a record and takes the item away.
+the declaration and it appears here. **`Declares`** gives each command's
+kind: `capture` creates an item, `queue` moves one, `work` edits one where it
+stands, and `archive` closes one out, writing a record as it takes the item
+away.
 
 ## making it yours
 
@@ -118,11 +126,40 @@ and fileplan has no opinion about them. Open `plan.toml` and rename them to
 your work's own words.
 
 The starter `plan.toml` declares one loop: log an idea, commit to it, work it,
-close it out. fileplan does more than that loop asks for. An item can be
-claimed by one session at a time, cut into named bullets and marked off one by
-one, given its age in days or a list of what it waits on, or bodied from a
-template. Each of those stays off until `plan.toml` turns it on, and
-[the method](method.md) describes them one at a time.
+close it out. Every line in it is there because the loop needs it:
+
+- **`[states.inbox]`** is a directory called `inbox`. A state with no `path`
+  is at its own name.
+- **`[states.plan]`** declares `queued`, which gives each item a place in an
+  order, and `numbered`, which gives each item a number as it arrives. A
+  queued state lists by place unless it names another `sort`. `archive` is the
+  document a closed item's entry is filed in, under its number.
+- **`[keys.status]`** is a fact an item can carry. `values` closes the set,
+  so any other word refuses by name. There is no `done`: an item that is done
+  is archived, and its file goes away with it.
+- **Each transition says its `kind`.** `capture` is a `create`, so it has no
+  `from` and takes a title. `queue` is a `move` from `inbox` to `plan`, and
+  because `plan` is ordered it also takes `--above`, `--below` and `--at`.
+  `work` is an `edit`, which leaves the file where it is, and its `sets` is
+  what gives it a `--status` option. `archive` is a `close`, which takes the
+  file away, so it names no `to`; `archives = true` files the entry first,
+  from `--record`, because the body goes with the file.
+- **No transition writes a `help` line.** Each one's help is said from its
+  kind and the states it names. Write `help = "..."` to say something better.
+- **Nothing points at a document yet.** Give a key or a transition a `doc`,
+  such as `doc = "notes.md#work"`, when you want a section that says what the
+  word means;
+  `fileplan` then checks that the heading exists every time it runs. A
+  section can link on to a procedure a session follows around a run.
+
+fileplan does more than that loop asks for. An item can be claimed by one
+session at a time, cut into named bullets and marked off one by one, or given
+a list of what it waits on. A `[fileplan]` table can name the oldest release
+the file needs, so an older fileplan says to upgrade instead of blaming the
+file, a `root` the states sit under, or the file names a state directory
+does not read as items. Each of those stays off until
+`plan.toml` turns it on, and [the method](method.md) describes them one at a
+time.
 
 Two commands read your declaration back to you. The bare `fileplan` above
 lists everything `plan.toml` declares. `fileplan COMMAND --help` gives one
@@ -132,7 +169,7 @@ command's whole contract:
 $ fileplan work --help
 Usage: fileplan work [OPTIONS] ITEM
 
-  Say how the work is going.
+  Edit an item in plan where it stands.
 
 Options:
   --status [in progress|waiting]  How the work is going.
@@ -144,19 +181,16 @@ Options:
   Where the item goes
     stays in plan
 
-  Reading
-    work    docs/method.md#work
-    status  docs/method.md#status
-
-  Running it
-    docs/procedures.md#working-an-item
+  Declares
+    edit
 ```
 
-Read the contract from the bottom. **`Reading`** names the sections that say
-what this command and its values *mean*. **`Running it`** names what a session
-*does* around a run. Both are pointers you wrote in `plan.toml`, at documents
-in your own tree, and the stubs `init` left in `docs/` are where you write
-them. fileplan prints the pointers and never writes the prose behind them.
+Once `work` and `status` carry a `doc`, the contract grows a **`Reading`**
+block naming the sections that say what this command and its values *mean*.
+Where a session also has something to *do* around a run, that section links
+to a procedure. Both are documents in your own tree, and fileplan prints the
+pointers and never writes the prose behind them. With no `Reading` block, the
+help line is the whole of what a session reads.
 
 ## the loop, run end to end
 
@@ -184,28 +218,25 @@ The names init wrote are placeholders.
 ```
 $ fileplan list
 rename-the-states  inbox
-  title  Rename the states
-  path   inbox/rename-the-states.md
+  commands  queue
+  title     Rename the states
+  path      inbox/rename-the-states.md
 
 showing 1 of 1 items
-register plan: floor 1, nothing held yet, in docs/archive.md
 ```
 
-The line under the count is the register: `plan` files its closed items in an
-archive document, so the listing says which numbers that document has taken.
-Nothing is closed out yet, so nothing is held.
-
-`next COMMAND` is the same listing, narrowed to what one command could take
-right now:
+Each row's `commands` names what could take the item right now: `queue`, the
+one command whose `from` is `inbox`. So a filter on it is the listing
+narrowed to what one command could take:
 
 ```
-$ fileplan next queue
+$ fileplan list --has commands=queue
 rename-the-states  inbox
-  title  Rename the states
-  path   inbox/rename-the-states.md
+  commands  queue
+  title     Rename the states
+  path      inbox/rename-the-states.md
 
 showing 1 of 1 items
-register plan: floor 1, nothing held yet, in docs/archive.md
 ```
 
 Add `--check` to any command to see what the command would do. The check takes
@@ -227,17 +258,17 @@ $ fileplan list
 rename-the-states  plan
   position  100
   number    1
+  commands  work, archive
   title     Rename the states
   path      plan/rename-the-states.md
 
 showing 1 of 1 items
-register plan: floor 1, highest 1, in docs/archive.md
 ```
 
 The file moved, and two columns appeared that nobody typed. The `plan` state
 is declared `queued` and `numbered`, so an item arriving in `plan` is given a
-place and a number of its own. The `plan` state also declares
-`sort = "position"`, so the listing reads `plan` in place order. The order is
+place and a number of its own. A queued state sorts by place, so the listing
+reads `plan` in place order. The order is
 what makes the listing answer *what is next* rather than *what exists*.
 
 `work` leaves the item where it is and stamps a key into its head:
@@ -250,12 +281,12 @@ $ fileplan list
 rename-the-states  plan
   position  100
   number    1
+  commands  work, archive
   title     Rename the states
   status    in progress
   path      plan/rename-the-states.md
 
 showing 1 of 1 items
-register plan: floor 1, highest 1, in docs/archive.md
 ```
 
 A value the declaration does not allow is refused by name rather than filed:
@@ -273,16 +304,16 @@ archived instead, and `archive` is the last command in the loop:
 
 ```
 $ fileplan archive rename-the-states --record "Renamed everything to our own words."
-docs/archive.md: filed `## 1. Rename the states` at its place in the register, with the record under it
+archive.md: filed `## 1. Rename the states` at its place in the register, with the record under it
 plan/rename-the-states.md is gone: archive took it away
-docs/archive.md
+archive.md
 ```
 
 The item file goes away, so the entry is written from `--record` rather than
 from the body:
 
 ```
-$ cat docs/archive.md
+$ cat archive.md
 # Archive
 
 Closed items are filed here, newest last. Each one goes under its own number.
@@ -294,11 +325,12 @@ Renamed everything to our own words.
 $ fileplan list
 
 showing 0 of 0 items
-register plan: floor 1, highest 1, in docs/archive.md
+Nothing is filed. `fileplan capture TITLE --body TEXT` files one in inbox.
 ```
 
 That heading is now the only record that number 1 is taken, which is why the
-next item queued gets 2. That is the whole loop. Everything you add to it is a
+next item queued gets 2, and the empty listing names the command that files
+the next one. That is the whole loop. Everything you add to it is a
 line in `plan.toml`.
 
 ## reading the plan from a commit hook
@@ -311,10 +343,10 @@ the `plan.toml` inside the scratch copy:
 ```
 $ staged=$(mktemp -d) && git checkout-index -a --prefix="$staged/"
 $ FILEPLAN_PLAN_TOML="$staged/plan.toml" fileplan list --json
-{"version":1,"kind":"items","matched":2,"read":2,"gaps":[],"lost":[],"register":[{"state":"plan","archive":"docs/archive.md","floor":1,"highest":1}],"rows":[{"slug":"wire-the-commit-gate","state":"inbox","position":null,"number":null,"stale-days":null,"title":"Wire the commit gate","status":null,"path":"inbox/wire-the-commit-gate.md"},{"slug":"rename-the-states","state":"plan","position":100,"number":1,"stale-days":null,"title":"Rename the states","status":null,"path":"plan/rename-the-states.md"}]}
+{"version":1,"kind":"items","matched":2,"read":2,"gaps":[],"lost":[],"register":[{"state":"plan","archive":"archive.md","floor":1,"highest":1}],"undeclared":[],"unsorted":[],"rows":[{"slug":"wire-the-commit-gate","state":"inbox","position":null,"number":null,"stale-days":null,"commands":["queue"],"title":"Wire the commit gate","status":null,"path":"inbox/wire-the-commit-gate.md"},{"slug":"rename-the-states","state":"plan","position":100,"number":1,"stale-days":null,"commands":["work","archive"],"title":"Rename the states","status":null,"path":"plan/rename-the-states.md"}]}
 ```
 
-That run is the declaration above with `dated` added to `plan`. The item is
+That run is the declaration above. The item is
 queued rather than closed out, and a second capture is staged but not
 committed. The staged item is on the row list.
 
@@ -364,8 +396,8 @@ the contract, checks the item against the contract, reads the sections the
 contract names, does what those sections say, and runs the command. The skill
 branches on what the declaration says a command *declares*, never on the
 command's name. So it works for a command it has never seen, including yours.
-Your `Reading` and `Running it` pointers are the program, and the skill is the
-interpreter.
+Your `Reading` pointers, and the procedures their sections link to, are the
+program, and the skill is the interpreter.
 
 **`/do-next` is a worked example of composing runs.** It reads the tree, works
 out which of three arms a session is in, and hands every move to `/fileplan`.

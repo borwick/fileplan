@@ -22,14 +22,14 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from fileplan.declaration import Refusal
+from fileplan.declaration import CAPABILITY_KEYS, QUEUED, Refusal
 
 #: The capability a state opts into. The same word plan.toml spells.
-NAME = "queued"
+NAME = QUEUED
 
 #: The key it gives an item. Declared nowhere; a redeclaration is refused in
 #: `fileplan.declaration.CAPABILITY_KEYS`.
-KEY = "position"
+KEY = CAPABILITY_KEYS[QUEUED]
 
 #: Room to insert without renumbering: 100, 200, 300.
 SPACING = 100

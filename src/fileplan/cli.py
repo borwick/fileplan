@@ -4,8 +4,7 @@ Nothing here is written per transition. The loop over the declaration's
 transitions is the whole of the registration. A capability generates its own
 options for the transitions that can use them.
 
-Some names are the tool's own and reserved. `list`, `next` and `show` are the
-reads. `release` comes from a capability, and `init` writes a first
+Some names are the tool's own and reserved. `list` and `show` are the reads. `release` comes from a capability, and `init` writes a first
 declaration.
 
 `--version`, `--skills` and `init` answer before the declaration loads.
@@ -34,6 +33,10 @@ from fileplan import (
     subphase,
 )
 from fileplan.declaration import (
+    ADD_BULLET,
+    MERGE,
+    PLACING,
+    RENAME,
     Declaration,
     Key,
     Refusal,
@@ -41,21 +44,12 @@ from fileplan.declaration import (
     load,
     named,
 )
-from fileplan.transition import (
-    execute,
-    offer_errors,
-    dangle_errors,
-    release,
-    unmarked_errors,
-)
+from fileplan.transition import INTO, KEEP_CLAIMS as KEEPING, MARKING, NOTE, RECORD
+from fileplan.transition import RETITLE as RETITLING
+from fileplan.transition import commands, execute, release
 
 #: The read's own name. It is not a declared verb and cannot become one.
 LIST_COMMAND = "list"
-
-#: The read named by the verb: a group rather than a command, because what is
-#: next is always next for a declared transition.
-#: See docs/method.md#the-next-read
-NEXT_COMMAND = "next"
 
 #: The listing's row for one item, registered unconditionally.
 #: See docs/method.md#show
@@ -80,7 +74,6 @@ SKILLS_FLAG = "--skills"
 #: takes one. Reserved whether or not the command is registered.
 RESERVED = {
     LIST_COMMAND: "the read",
-    NEXT_COMMAND: "the read named by the command",
     SHOW_COMMAND: "the read of one item",
     RELEASE_COMMAND: "the release",
     INIT_COMMAND: "the scaffold",
@@ -101,7 +94,7 @@ PLACEMENT = (
     ),
 )
 
-#: The options the `bulleted` capability puts on a verb that `mints`. `--last`
+#: The options an add-bullet takes. `--last`
 #: is the only way the pending bullet leaves. See docs/method.md#bulleted
 MINTING = (
     (
@@ -121,10 +114,13 @@ MINTING = (
     ),
 )
 
-#: The option a verb that both `archives` and `dissolves` takes: the prose that
-#: goes under the entry's heading. Required, and only on that one shape.
+#: `RECORD` is the option a close that `archives` takes: the prose that goes
+#: under the entry's heading, required, and only on that one shape. `INTO`
+#: is a merge's survivor, `NOTE` a mark-bullet's reason, `MARKING` the key a
+#: mark-bullet's bullet is read back under, `RETITLING` a rename's new title
+#: and `KEEPING` the key `--keep-claims` is read back under. Each is the
+#: executor's name, imported from `fileplan.transition`.
 #: See docs/method.md#the-register
-RECORD = "record"
 
 #: The options a verb that `files` takes: what to call the item it creates from
 #: the bullet it disposes of, and the prose that goes in it. `--title` is
@@ -147,78 +143,41 @@ FILING = (
     ),
 )
 
-#: The option a verb that `absorbs` takes: the item this one continues as.
-#: Required, and only on that one shape. See docs/method.md#dissolving
-INTO = "into"
+#: The second positional a mark-bullet takes: the bullet the run acts on.
+#: Its own click parameter, because `name` is already the item handle's, and
+#: its metavar. See docs/method.md#marking
+BULLET, MARKING_METAVAR = "bullet", "NAME"
 
-#: The option a verb that `seeds` takes: the declared template the new item is
-#: bodied from. Not required, and it needs the `sets` collision check. Two
-#: words, because `from` is a Python keyword and cannot be the click
-#: parameter. See docs/method.md#seeds
-SEEDING, TEMPLATE = "from", "template"
+#: The metavar of a rename's second positional, the item's new title. A
+#: positional, so it cannot collide with the `--title` a mint or a filing
+#: takes. See docs/method.md#retitle
+RETITLE_METAVAR = TITLE = "TITLE"
 
-#: The second positional a verb that `marks` takes: the bullet the run acts on.
-#: Three words, because `name` is already the item handle's click parameter —
-#: the parameter, the key the executor reads it back under, and the metavar.
-#: See docs/method.md#marking
-BULLET, MARKING, MARKING_METAVAR = "bullet", "name", "NAME"
-
-#: The second positional a verb that `retitles` takes: the item's new title.
-#: The parameter, which is also the key the executor reads it back under, and
-#: the metavar. A positional, so it cannot collide with the `--title` a mint or
-#: a filing takes. See docs/method.md#retitle
-RETITLING, RETITLE_METAVAR = "new_title", "TITLE"
-
-#: The option a verb that `marks` takes beside that positional: why the finding
-#: was disposed of this way. Optional, and on every marking verb. It needs the
-#: `sets` collision check. See docs/method.md#marking
-NOTE = "note"
+#: What a handle naming one item, or several, shows as on the command line,
+#: and the option a create's prose comes in by. Read by the usage hints and
+#: the empty listing's line as well as by the commands, so the three agree.
+ITEM, ITEMS, BODY = "ITEM", "ITEM...", "body"
 
 #: The flag a verb that `claims` takes: hold this claim beside the others this
-#: session already holds. The flag and the key the executor reads it back
-#: under. It needs the `sets` collision check.
+#: session already holds. It needs the `sets` collision check.
 #: See docs/method.md#the-claimed-state
-KEEP_CLAIMS, KEEPING = "keep-claims", "keep_claims"
-
-#: The flag a verb that `carries` takes, and the key the executor reads it
-#: back under. See docs/method.md#merge
-CARRY = "carry"
+KEEP_CLAIMS = "keep-claims"
 
 #: The flag every generated transition carries: run the verb's whole path and
 #: stop at the seam where nothing has been written. A declared key of the same
 #: name refuses by name. See docs/method.md#the-check
 CHECK = "check"
 
-#: The blocks the `--help` epilog carries after the options, in this order.
-#: Each is a paragraph opened with click's `\b`, which stops the help
-#: formatter rewrapping a table into prose. The halves are listed by name and
-#: nothing else: what each means is a section the `Reading` block points at.
-HALVES = (
-    "claims",
-    "mints",
-    "seeds",
-    "files",
-    "marks",
-    "archives",
-    "dissolves",
-    "absorbs",
-    "carries",
-    "retitles",
-)
+#: The options a transition may declare beside its kind, which the
+#: `Declares` block lists after the kind, by name and nothing else: what each
+#: means is a section the `Reading` block points at. See docs/method.md#kinds
+DECLARED = ("claims", "files", "archives")
 
 #: What the JSON envelope calls this listing, and the noun the text frame
 #: counts in on every read whose rows are items.
 LIST_KIND = "items"
 
-#: And the kind, and the frame's noun, for a read whose rows are bullets. The
-#: tool's own noun rather than a word spelled here.
-SUB_PHASE_KIND = subphase.NAME
-
-#: And what it calls an offer. The envelope also carries `transition`, so a
-#: consumer knows which verb the rows are next for.
-NEXT_KIND = "next"
-
-#: And what it calls one item. Singular, against `items` and `next`.
+#: And what it calls one item. Singular, against `items`.
 SHOW_KIND = "item"
 
 #: And what it calls the whole declaration: the states, then one contract per
@@ -226,9 +185,8 @@ SHOW_KIND = "item"
 #: the tree. See docs/method.md#the-contract
 DECLARATION_KIND = "declaration"
 
-#: And what it calls one bullet, derived from the noun above rather than
-#: spelled beside it.
-BULLET_KIND = SUB_PHASE_KIND.removesuffix("s")
+#: And what it calls one bullet: the tool's own noun for them, singular.
+BULLET_KIND = subphase.NAME.removesuffix("s")
 
 #: The one field a bullet read carries that a bullet row does not: the verbatim
 #: lines. Not a row field, because that would put a body in every listing.
@@ -286,27 +244,32 @@ def _pointer(exc: click.ClickException, declaration: Declaration) -> str | None:
 
     Three dead ends a consumer's sessions hit often enough to count. Each
     keeps click's refusal and adds where to go: nothing about what is
-    accepted changes. See docs/method.md#the-listing and
-    docs/method.md#the-next-read
+    accepted changes. See docs/method.md#the-listing
     """
     ctx = getattr(exc, "ctx", None)
     if ctx is None:
         return None
     name = ctx.command.name
-    if (
-        isinstance(exc, click.NoSuchOption)
-        and exc.option_name == f"--{CHECK}"
-        and ctx.parent is not None
-        and ctx.parent.command.name == NEXT_COMMAND
-    ):
-        return f"--{CHECK} belongs to the command: fileplan {name} ITEM --{CHECK}"
     if isinstance(exc, click.MissingParameter) and exc.param is not None:
-        if exc.param.human_readable_name == "ITEM":
+        if exc.param.name == RECORD and name in declaration.transitions:
+            source = declaration.transitions[name].source
+            archive = declaration.states[source].archive if source else None
             return (
-                f"fileplan {NEXT_COMMAND} {name} lists what it can take"
-                if name in declaration.transitions
-                else f"fileplan {LIST_COMMAND} lists every item"
+                f"--{RECORD} is the entry filed under the item's number in "
+                f"{archive}: what it decided and what it shipped. `--{RECORD} "
+                "-` reads it from stdin"
             )
+        # The handle every transition takes is the `name` parameter, whatever
+        # its metavar says; a create's is a title, and gets no hint.
+        if name in declaration.transitions and exc.param.name == "name":
+            if declaration.transitions[name].source is None:
+                return None
+            return (
+                f"fileplan {LIST_COMMAND} --has {read.COMMANDS}={name} lists "
+                "what it can take"
+            )
+        if exc.param.human_readable_name == ITEM:
+            return f"fileplan {LIST_COMMAND} lists every item"
     extra = str(exc.message).removeprefix("Got unexpected extra argument")
     if name == LIST_COMMAND and extra != exc.message:
         word = extra.lstrip("s (").rstrip(")").split()[0]
@@ -367,7 +330,6 @@ def _build_group(declaration: Declaration) -> click.Group:
 
     # The reads first: finding what to act on comes before acting on it.
     group.add_command(_list_command(declaration))
-    group.add_command(_next_group(declaration))
     group.add_command(_show_command(declaration))
     for transition in declaration.transitions.values():
         if transition.name in RESERVED:
@@ -394,31 +356,41 @@ def _build_group(declaration: Declaration) -> click.Group:
 
 
 def _command(declaration: Declaration, transition: Transition) -> click.Command:
+    # Each gate on what this kind takes, decided once: the parameters below
+    # and the pops in `run` read the same names.
     creating = transition.source is None
+    absorbing = transition.kind == MERGE
+    marking = transition.marks is not None
+    renaming = transition.kind == RENAME
+    placed = _places(declaration, transition)
+    minting = transition.kind == ADD_BULLET
+    filing = transition.files is not None
+    recording = transition.records
+    claiming = transition.claims
     params: list[click.Parameter] = [
-        # One positional, variadic only where the verb absorbs: several
+        # One positional, variadic only on a merge: several
         # items can continue as one survivor. See docs/method.md#merge
-        click.Argument(["name"], nargs=-1, required=True, metavar="ITEM...")
-        if transition.absorbs
-        else click.Argument(["name"], metavar="TITLE" if creating else "ITEM")
+        click.Argument(["name"], nargs=-1, required=True, metavar=ITEMS)
+        if absorbing
+        else click.Argument(["name"], metavar=TITLE if creating else ITEM)
     ]
-    if transition.marks is not None:
+    if marking:
         # After the item's, so the usage line reads ITEM NAME.
         params.append(click.Argument([BULLET], metavar=MARKING_METAVAR))
         params.append(_note_option(transition))
-    if transition.retitles:
+    if renaming:
         # After the item's too: ITEM TITLE, as `idea TITLE` takes one.
         params.append(click.Argument([RETITLING], metavar=RETITLE_METAVAR))
     if creating:
-        if "body" in transition.sets:
+        if BODY in transition.sets:
             raise Refusal(
-                f'transitions.{transition.name}.sets names "body", and a '
+                f'transitions.{transition.name}.sets names "{BODY}", and a '
                 "transition that creates an item already takes --body for its "
                 "prose. One option cannot mean two things"
             )
         params.append(
             click.Option(
-                ["--body"],
+                [f"--{BODY}"],
                 metavar="TEXT",
                 help=(
                     "The item's description. `-` reads the description from "
@@ -427,62 +399,48 @@ def _command(declaration: Declaration, transition: Transition) -> click.Command:
             )
         )
     params += [_option(declaration, key) for key in transition.sets]
-    placed = _places(declaration, transition)
     if placed:
         params += _placement_options(transition)
-    if transition.mints:
+    if minting:
         params += _minting_options(transition)
-    filing = transition.files is not None
     if filing:
         params += _filing_options(transition)
         # The filed item's keys, after its title and body: each is written onto
         # the item this run files, never the one it moves.
         params += [_option(declaration, key) for key in transition.files_sets]
-    recording = transition.archives and transition.dissolves
     if recording:
         params.append(_record_option())
-    absorbing = transition.absorbs
     if absorbing:
         params.append(_into_option())
-    if transition.carries:
-        params.append(_carry_option())
-    seeding = transition.seeds
-    if seeding:
-        params.append(_from_option(declaration, transition))
-    if transition.claims:
+    if claiming:
         params.append(_keep_claims_option(transition))
     params.append(_check_option(transition))
 
     def run(**given: Any) -> None:
         check = bool(given.pop(CHECK))
         asked = {flag: given.pop(flag) for flag, *_ in PLACEMENT} if placed else {}
-        if transition.mints:
+        if minting:
             asked.update({flag: given.pop(flag) for flag, *_ in MINTING})
         if filing:
             # Before the `body` below pops it: this is the filed item's prose.
             asked.update({flag: given.pop(flag) for flag, *_ in FILING})
-            asked["body"] = _prose(asked["body"])
-        if transition.marks is not None:
+            asked[BODY] = _prose(asked[BODY])
+        if marking:
             asked[MARKING] = given.pop(BULLET)
             asked[NOTE] = given.pop(NOTE)
-        if transition.retitles:
+        if renaming:
             asked[RETITLING] = given.pop(RETITLING)
         if recording:
             asked[RECORD] = _prose(given.pop(RECORD))
         if absorbing:
             asked[INTO] = given.pop(INTO)
-        if transition.carries:
-            asked[CARRY] = given.pop(CARRY)
-        if seeding:
-            # Before the `values=` comprehension below sweeps what is left.
-            asked[TEMPLATE] = given.pop(TEMPLATE)
-        if transition.claims:
+        if claiming:
             asked[KEEPING] = given.pop(KEEPING)
         wrote = execute(
             declaration,
             transition,
             name=given.pop("name"),
-            body=_prose(given.pop("body", None)),
+            body=_drafted(transition, _prose(given.pop(BODY, None))),
             values={
                 _key(name): _handed_back(value) for name, value in given.items()
             },
@@ -596,7 +554,8 @@ def contract(declaration: Declaration, transition: Transition) -> dict[str, Any]
         # reading the contract rather than `--help` has nowhere else to get
         # them.
         "sets": list(transition.sets),
-        "declares": [name for name in HALVES if getattr(transition, name)],
+        "kind": transition.kind,
+        "declares": _declared(transition),
         # The table as declared, or `null`: where the filed item goes, which
         # keys record where it came from, and under `sets` the keys this verb
         # takes as options and writes onto the filed item rather than the
@@ -604,20 +563,22 @@ def contract(declaration: Declaration, transition: Transition) -> dict[str, Any]
         # See docs/method.md#filing
         "files": None if transition.files is None else dict(transition.files),
         "reading": _reading(declaration, transition),
-        "policy": transition.policy,
     }
+
+
+def _declared(transition: Transition) -> list[str]:
+    """The options `transition` declares beside its kind, in `DECLARED` order."""
+    return [name for name in DECLARED if getattr(transition, name)]
 
 
 def _epilog(declaration: Declaration, transition: Transition) -> str:
     """The contract `--help` carries after the options.
 
-    Where the item goes, what the verb requires, refuses and drops, which
-    halves it declares, where a verb that files puts the filed item and which
-    keys it writes there, the sections that hold the meaning — the transition's
-    own `doc` plus the `doc` of every key it sets — and, where one is
-    declared, the procedure a session follows around the run. Two blocks
-    rather than one, so a caller need not read a label to tell a meaning from
-    a procedure.
+    Where the item goes, what the verb requires, refuses and drops, its kind
+    and the options it declares, where a verb that files puts the filed item
+    and which keys it writes there, and the sections that hold the meaning —
+    the transition's own `doc` plus the `doc` of every key it sets. A
+    procedure is reached by a link from the transition's own section.
 
     Rendered from `contract`, which is generated from the `Transition` the
     command is generated from, and it reads the declaration rather than the
@@ -640,17 +601,15 @@ def _epilog(declaration: Declaration, transition: Transition) -> str:
     # key has no value to mean.
     if row["drops"]:
         blocks.append(("Drops", row["drops"]))
-    if row["declares"]:
-        blocks.append(("Declares", row["declares"]))
+    blocks.append(("Declares", [row["kind"], *row["declares"]]))
     # Which head each key lands on: `sets` is the carrier's, and the keys
     # named here are the filed item's. See docs/method.md#filing
     if row["files"] is not None:
         blocks.append(("Files", [_filed(row["files"])]))
-    blocks.append(("Reading", _named(row["reading"])))
-    # Its own block rather than a labelled line inside `Reading`. A verb with no
-    # `policy` carries no block. See docs/method.md#the-interpreter
-    if row["policy"]:
-        blocks.append(("Running it", [row["policy"]]))
+    # Absent rather than empty where nothing names a section: then the `help`
+    # line is the whole procedure. See docs/method.md#the-contract
+    if row["reading"]:
+        blocks.append(("Reading", _named(row["reading"])))
     return "\n\n".join(
         "\b\n" + "\n".join([title, *(f"  {line}" for line in lines)])
         for title, lines in blocks
@@ -667,7 +626,7 @@ def _going(row: Mapping[str, Any]) -> str:
     source, to = row["from"], row["to"]
     if source is None:
         return f"into {to}"
-    if "dissolves" in row["declares"]:
+    if to is None:
         return f"out of {source}, and the file is deleted"
     if source == to:
         return f"stays in {source}"
@@ -688,15 +647,17 @@ def _reading(declaration: Declaration, transition: Transition) -> dict[str, str]
 
     The transition's is the program; a key's says what the value the caller is
     about to supply means, whichever head it lands on: the keys it `sets`, then
-    those its `files` table does.
+    those its `files` table does. A name with no `doc` is left out, so a
+    transition and keys that name none have an empty `Reading`.
     """
-    return {
+    pointers = {
         transition.name: transition.doc,
         **{
             key: declaration.keys[key].doc
             for key in (*transition.sets, *transition.files_sets)
         },
     }
+    return {name: doc for name, doc in pointers.items() if doc is not None}
 
 
 def _named(pointers: Mapping[str, str]) -> list[str]:
@@ -707,18 +668,12 @@ def _named(pointers: Mapping[str, str]) -> list[str]:
 
 
 def _places(declaration: Declaration, transition: Transition) -> bool:
-    """Whether giving the item a place in an order is something this run does.
-
-    Two arms, both derived from what the verb already declares: the item
-    arrives in the ordered state, so the run gives it a place; or the verb
-    stays where it is and placing is all it does, writing nothing else.
-    See docs/method.md#the-queue
+    """Whether giving the item a place in an order is something this run does:
+    a kind that places, landing in a queued state. See docs/method.md#the-queue
     """
-    if transition.to is None:
-        return False
-    if not declaration.states[transition.to].has(queued.NAME):
-        return False
-    return transition.source != transition.to or not transition.writes
+    return transition.kind in PLACING and declaration.states[
+        str(transition.to)
+    ].has(queued.NAME)
 
 
 def _placement_options(transition: Transition) -> list[click.Parameter]:
@@ -742,11 +697,11 @@ def _placement_options(transition: Transition) -> list[click.Parameter]:
 
 
 def _minting_options(transition: Transition) -> list[click.Parameter]:
-    """What a verb that `mints` takes: a sub-phase to write, or the last one.
+    """What an add-bullet takes: a sub-phase to write, or the last one.
 
     `_placement_options`' shape, and a `sets` key of the same name refuses by
-    name. `--title` cannot collide with the positional: `mints` on a
-    transition with no `from` refuses back in `plan.toml`.
+    name. `--title` cannot collide with the positional: an add-bullet always
+    has a `from`, so its positional is an item rather than a title.
     """
     for flag, *_ in MINTING:
         if (field := _setting(transition, flag)) is not None:
@@ -791,10 +746,10 @@ def _filing_options(transition: Transition) -> list[click.Parameter]:
 
 
 def _record_option() -> click.Option:
-    """The prose a verb that archives and dissolves files under its entry.
+    """The prose a close that archives files under its entry.
 
-    Required, and it needs no `sets` collision check: a verb that dissolves
-    refuses `sets` back in `plan.toml`. `-` reads stdin through `_prose`.
+    Required, and it needs no `sets` collision check: a close takes no `sets`
+    in `plan.toml`. `-` reads stdin through `_prose`.
     """
     return click.Option(
         [f"--{RECORD}", RECORD],
@@ -857,7 +812,7 @@ def _keep_claims_option(transition: Transition) -> click.Option:
 
 
 def _into_option() -> click.Option:
-    """The survivor a verb that absorbs points every edge at.
+    """The survivor a merge points every edge at.
 
     Required, and it needs no `sets` collision check. The handle resolves
     tree-wide like every other, so the work may continue as an item in any
@@ -870,54 +825,6 @@ def _into_option() -> click.Option:
         help=(
             "The item the work continues as. Every dependency naming the "
             "item being absorbed is pointed at ITEM instead."
-        ),
-    )
-
-
-def _carry_option() -> click.Option:
-    """Carry each absorbed body into the survivor, rather than lose it.
-
-    A flag, so the default run is a plain merge, and it needs no `sets`
-    collision check for `--into`'s reason: a dissolving verb sets nothing.
-    See docs/method.md#merge
-    """
-    return click.Option(
-        [f"--{CARRY}", CARRY],
-        is_flag=True,
-        help=(
-            "Append each absorbed item's body to ITEM, under a heading "
-            "holding its title."
-        ),
-    )
-
-
-def _from_option(declaration: Declaration, transition: Transition) -> click.Option:
-    """The declared template a verb that `seeds` may body its new item from.
-
-    Not required, and it is the one of the three that needs the `sets`
-    collision check. The declared names go in the help, in declared order, and
-    a seeding verb with none says so. Not a `click.Choice` over them: an empty
-    choice is unconstructible, and the refusal would then be click's rather
-    than the tool's.
-    See docs/method.md#seeds
-    """
-    if (field := _setting(transition, SEEDING)) is not None:
-        raise Refusal(
-            f'{field} names "{SEEDING}", and a '
-            f"transition that seeds already takes --{SEEDING} for the "
-            "template it bodies the new item from. One option cannot mean "
-            "two things"
-        )
-    declared = ", ".join(declaration.templates)
-    return click.Option(
-        [f"--{SEEDING}", TEMPLATE],
-        metavar="NAME",
-        help=(
-            f"Write the new item's body from a declared template. One of: "
-            f"{declared}."
-            if declared
-            else "Write the new item's body from a declared template. This "
-            "plan.toml declares none."
         ),
     )
 
@@ -961,14 +868,44 @@ def _prose(body: str | None) -> str | None:
     return sys.stdin.read() if body == "-" else body
 
 
+#: What the editor opens with for a create given no `--body`: lines starting
+#: with `#` are left out of the item. See docs/method.md#idea
+EDITOR_TEMPLATE = (
+    "\n# Describe the new item here. Lines starting with # are left out,\n"
+    "# and an empty description files nothing.\n"
+)
+
+
+def _drafted(transition: Transition, body: str | None) -> str | None:
+    """A create's body, from `$EDITOR` when none was given and a person is at
+    a terminal; otherwise the body as given, so a run with no terminal —
+    an agent's, a script's — refuses exactly as before.
+    See docs/method.md#idea
+    """
+    if body is not None or transition.source is not None or not _on_a_terminal():
+        return body
+    edited = click.edit(EDITOR_TEMPLATE)
+    if edited is None:
+        return None
+    return "\n".join(
+        line for line in edited.splitlines() if not line.startswith("#")
+    ).strip() or None
+
+
+def _on_a_terminal() -> bool:
+    """Whether a person is at a terminal: stdin and stdout both are one."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
 # --------------------------------------------------------------------------
 # Writing a first declaration: the command that precedes one
 # --------------------------------------------------------------------------
 
 INIT_HELP = """Write a first plan.toml into DIRECTORY, or into this one.
 
-Copies the example plan.toml, copies the documents its pointers name, and
-makes the directories it declares. Rename everything in it: the states and
+Copies the example plan.toml and the archive document it names, makes the
+directories it declares, and writes local/.gitignore so the tool's session
+state is never committed. Rename everything in it: the states and
 commands there are placeholders for your own.
 
 `fileplan init` refuses to write over an existing plan.toml, or anywhere
@@ -1050,7 +987,7 @@ def _release_command(declaration: Declaration) -> click.Command:
 
     return click.Command(
         name=RELEASE_COMMAND,
-        params=[click.Argument(["name"], metavar="ITEM")],
+        params=[click.Argument(["name"], metavar=ITEM)],
         callback=run,
         help=RELEASE_HELP,
         short_help="Free the claim on an item.",
@@ -1108,7 +1045,7 @@ def _list_command(declaration: Declaration) -> click.Command:
 
     Not a declared transition: it moves nothing, writes nothing and takes no
     lock. Its parameters and its whole body are `_read_params` and
-    `_read_run`, which `next` calls too.
+    `_read_run`, which `show` calls too.
     See docs/method.md#the-listing
     """
     return click.Command(
@@ -1182,52 +1119,44 @@ def _read_run(
     declaration: Declaration,
     kind: str,
     *,
-    offering: Callable[[item.Item], bool] | None = None,
-    marking: Callable[[subphase.Bullet], bool] | None = None,
     naming: str | None = None,
     bulleting: str | None = None,
     **meta: Any,
 ) -> Callable[..., None]:
     """One read's whole body: traverse, filter, render, frame.
 
-    `list` and every `next` subcommand call this, so there is one traversal
-    and one call to each renderer. `offering` is the narrowing an offer adds,
-    applied to the items before the rows are built, and `meta` is what the
-    envelope says about which read this is.
+    `list` and `show` call this, so there is one traversal and one call to
+    each renderer. `meta` is what the envelope says about which read this is.
 
     `naming` is `show`'s narrowing: the parameter holding a handle, resolved
     against the rows this traversal already found, applied after the walk so
     `show` stays one traversal. `bulleting` mirrors it one level in, narrowing
     to one bullet of that item; given neither, nothing changes. A read that
     names its item takes no filters.
-
-    `marking` is a disposition's, and it switches the rows to the second kind:
-    the record's header line becomes the bullet's two fields and the frame's
-    noun becomes the tool's word for a bullet.
-    See docs/method.md#show and docs/method.md#the-next-read
+    See docs/method.md#show
     """
-    heading = render.BULLET_HEADING if marking else render.HEADING
-    noun = SUB_PHASE_KIND if marking else LIST_KIND
 
     def run(**given: Any) -> None:
         as_json = given.pop("as_json")
         handle = given.pop(naming) if naming else None
         wanted = given.pop(bulleting) if bulleting else None
-        # A disposition's offer takes no filters either: a bullet is not an item.
-        tests = [] if naming or marking else _tests(declaration, given)
+        tests = [] if naming else _tests(declaration, given)
         sorts = _sorts(declaration, given.pop("sort", ()))
         # `--sort` replaces every state's declared sort, and a read naming one
-        # item or offering bullets has nothing to sort.
+        # item has nothing to sort.
         by_state = (
             {}
-            if naming or marking
+            if naming
             else {
                 name: sorts or [read.sorting(declaration, state.sort)]
                 for name, state in declaration.states.items()
                 if sorts or state.sort
             }
         )
-        found = read.listing(declaration, offering=offering, marking=marking)
+        found = read.listing(
+            declaration,
+            taking=lambda one, walked: commands(declaration, one, walked),
+        )
         if handle is not None:
             named = [(row[read.SLUG], row[read.PATH]) for row in found.rows]
             carrying = {
@@ -1262,36 +1191,14 @@ def _read_run(
         if wanted is not None:
             record, verbatim = _one_bullet(declaration, chosen[0], wanted)
             chosen, reading = [record], BULLET_KIND
-        # Present whenever the declaration claims, empty or not, so the shape does
-        # not depend on the corpus. Absent entirely where nothing claims.
-        beside = {"stranded": found.stranded} if declaration.has(claim.NAME) else {}
-        # Whenever the declaration carries a cursor at all, by the same rule.
-        if any(state.cursor for state in declaration.states.values()):
-            beside["undecomposed"] = found.undecomposed
-        # And the two dependency reports, by the same rule. They are about the
-        # tree, so they reach `next <transition>` too.
-        if declaration.has_dependencies:
-            beside["unknown"] = found.unknown
-            beside["misordered"] = found.misordered
-        # And the two register reports, by the same rule.
-        if declaration.has(numbered.NAME):
-            beside["gaps"] = found.gaps
-            beside["lost"] = found.lost
-            # And the register itself, which is not a third report: it says
-            # what the register holds rather than what is wrong with it.
-            beside["register"] = found.register
-        # And the unmarkable report, wherever any verb marks at all.
-        if declaration.marked_states:
-            beside["unmarkable"] = found.unmarkable
-        # And the unread report, wherever any state counts sub-phases.
-        if declaration.counts_sub_phases:
-            beside["unread"] = found.unread
-        # And the undeclared report, wherever any key declares its values.
-        if any(key.values for key in declaration.keys.values()):
-            beside["undeclared"] = found.undeclared
-        # And the unfound report, wherever any verb files an item.
-        if declaration.files:
-            beside["unfound"] = found.unfound
+        # Each report wherever the declaration could fill it, empty or not, so
+        # the shape does not depend on the corpus. They are about the tree, so
+        # they reach `show` too.
+        beside = {
+            field: getattr(found, field)
+            for field, gate in read.REPORTS
+            if gate(declaration)
+        }
         # And the unsorted report, whenever the read sorts anything: the shape
         # follows the invocation and the declaration, never the corpus.
         if by_state:
@@ -1315,47 +1222,24 @@ def _read_run(
         printed = (
             verbatim.splitlines()
             if verbatim is not None
-            else render.records(chosen, heading=heading)
+            else render.records(chosen, heading=render.HEADING)
         )
         for line in printed:
             click.echo(line)
         # The frame goes to stderr, never stdout, and so does every exception
         # report: they are about the tree rather than rows of it.
         click.echo(
-            f"\nshowing {len(chosen)} of {found.walked} {noun}", err=True
+            f"\nshowing {len(chosen)} of {found.walked} {LIST_KIND}", err=True
         )
-        # Part of the frame, above the exception reports: it prints on every
-        # read rather than only when something is wrong.
-        for one in found.register:
-            click.echo(_register(one), err=True)
-        for one in found.stranded:
-            click.echo(_stranded(one), err=True)
-        for slug in found.undecomposed:
-            click.echo(
-                f"started but not decomposed: {slug} carries no sub-phases",
-                err=True,
-            )
-        for one in found.unknown:
-            click.echo(_unknown(one), err=True)
-        for one in found.misordered:
-            click.echo(_misordered(one), err=True)
-        for one in found.gaps:
-            click.echo(_gap(one), err=True)
-        for one in found.lost:
-            click.echo(_lost(one), err=True)
-        for one in found.unmarkable:
-            click.echo(_unmarkable(one), err=True)
-        for one in found.unread:
-            click.echo(_unread(one), err=True)
-        for one in found.undeclared:
-            click.echo(
-                f"undeclared value: {one[read.SLUG]} carries "
-                f'"{one[read.VALUE]}" in {one[read.KEY]}, which its values '
-                f"do not declare ({one[read.PATH]})",
-                err=True,
-            )
-        for one in found.unfound:
-            click.echo(_unfound(one), err=True)
+        # An empty tree says how to file the first item, so a newcomer's first
+        # listing names a command rather than a count. See docs/method.md#the-listing
+        if not found.walked and handle is None:
+            for said in _first_item(declaration):
+                click.echo(said, err=True)
+        for field, _ in read.REPORTS:
+            said = REPORT_LINES[field]
+            for one in getattr(found, field) if said else ():
+                click.echo(said(one), err=True)
         for one in unsorted:
             click.echo(
                 f"unsorted: {one[read.SLUG]} carries no {one[read.KEY]}, so it "
@@ -1443,24 +1327,29 @@ def _lost(one: Mapping[str, Any]) -> str:
     )
 
 
-def _register(one: Mapping[str, Any]) -> str:
-    """One numbered state's register, as a line of the text form's frame.
+def _undecomposed(slug: str) -> str:
+    """One started section carrying no sub-phases, as a line of the frame."""
+    return f"started but not decomposed: {slug} carries no sub-phases"
 
-    Not an exception report: it says what the register holds rather than what
-    is wrong with it, so it prints on every read beside the counts rather
-    than only when something is short. The two numbers are spelled by the
-    names the envelope gives them, `_gap`'s arrangement, so a person reading
-    this line and a consumer reading the object share one vocabulary.
-    See docs/method.md#the-register
-    """
-    top = one[numbered.HIGHEST]
-    said = (
-        f"{numbered.HIGHEST} {top}" if top is not None else "nothing held yet"
-    )
+
+def _undeclared(one: Mapping[str, Any]) -> str:
+    """One head value its key's `values` do not declare, as a line."""
     return (
-        f"register {one[numbered.STATE]}: {numbered.FLOOR} "
-        f"{one[numbered.FLOOR]}, {said}, in {one[numbered.ARCHIVE]}"
+        f"undeclared value: {one[read.SLUG]} carries "
+        f'"{one[read.VALUE]}" in {one[read.KEY]}, which its values '
+        f"do not declare ({one[read.PATH]})"
     )
+
+
+def _first_item(declaration: Declaration) -> list[str]:
+    """What an empty tree's listing says to do: one line per create, in
+    declared order, or nothing where the declaration creates nothing."""
+    return [
+        f"Nothing is filed. `fileplan {one.name} {TITLE} --{BODY} TEXT` files "
+        f"one in {one.to}."
+        for one in declaration.transitions.values()
+        if one.source is None
+    ]
 
 
 def _unmarkable(one: Mapping[str, Any]) -> str:
@@ -1491,6 +1380,25 @@ def _unread(one: Mapping[str, Any]) -> str:
         f"({one[read.PATH]}:{one[read.BULLET_LINE]}) is not read as a "
         f"sub-phase: {one[read.BULLET_REASON]}"
     )
+
+
+
+#: The text line each of `read.REPORTS` prints per record, or `None` for the
+#: register, which the text form leaves to `--json`. Keyed by every report,
+#: so a report with no line here fails the first listing that reads it.
+REPORT_LINES: Mapping[str, Callable[[Any], str] | None] = {
+    "stranded": _stranded,
+    "undecomposed": _undecomposed,
+    "unknown": _unknown,
+    "misordered": _misordered,
+    "gaps": _gap,
+    "lost": _lost,
+    "register": None,
+    "unmarkable": _unmarkable,
+    "unread": _unread,
+    "undeclared": _undeclared,
+    "unfound": _unfound,
+}
 
 
 def _tests(declaration: Declaration, given: dict[str, Any]) -> list[read.Test]:
@@ -1532,163 +1440,6 @@ def _sorts(declaration: Declaration, given: tuple[str, ...]) -> list[read.Sort]:
             "one way. Keeping one would drop the others without saying so"
         )
     return sorts
-
-
-# --------------------------------------------------------------------------
-# The read named by the verb: one subcommand per transition that moves
-# --------------------------------------------------------------------------
-
-NEXT_HELP = """What {name} could take right now, as readable records or as JSON.
-
-An item is offered when it sits in {name}'s `from` state, satisfies
-everything {name} requires and refuses, and no other session holds it. This
-read takes the listing's filters and its sort, so an offer narrows and orders
-the same way a listing does.
-
-Some defects are in the **tree** rather than in one item: a gap in the
-register, or an exhausted gap in the order. Those block every item alike, and
-`fileplan {list_}` is where they are reported.
-"""
-
-class _Offers(_Declared):
-    """The `next` group: `_Declared`'s order, and a refusal by name.
-
-    A verb the declaration really has, that creates an item, refuses by name
-    rather than listing nothing: an always-empty offer would read as "nothing
-    is ready" where the truth is that the question does not apply.
-    """
-
-    def __init__(self, *args: Any, creating: tuple[str, ...], **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        #: The declared verbs with no `from`, so the refusal can name what is
-        #: true of them rather than calling them undeclared.
-        self.creating = creating
-
-    def get_command(self, ctx: click.Context, name: str) -> click.Command | None:
-        found = super().get_command(ctx, name)
-        if found is not None:
-            return found
-        if name in self.creating:
-            raise Refusal(
-                f"{name} creates an item rather than moving one, so nothing "
-                "in the tree can be next for it"
-            )
-        raise Refusal(
-            f"{name} is not a declared transition. "
-            f"One of: {', '.join(self.commands)}"
-        )
-
-
-def _next_group(declaration: Declaration) -> click.Group:
-    """`fileplan next VERB`: one subcommand per transition that moves an item.
-
-    Generated from the declarations, in declared order, and holding no verb's
-    name. A transition with no `from` creates an item and gets no subcommand:
-    see `_Offers`. Everything else is `_list_command`'s parameters and body,
-    with one predicate added.
-    See docs/method.md#the-next-read
-    """
-    group = _Offers(
-        name=NEXT_COMMAND,
-        help="What a declared command could take right now.",
-        short_help="What a command could take right now.",
-        creating=tuple(
-            name
-            for name, transition in declaration.transitions.items()
-            if transition.source is None
-        ),
-    )
-    for transition in declaration.transitions.values():
-        if transition.source is None:
-            continue
-        # A disposition's offer is a read of bullets: the items are narrowed by
-        # the verb's preconditions, then each of their findings to the ones the
-        # verb would not refuse — unmarked, and markable at all. Both predicates
-        # are the same functions the verb refuses through, and an unmarkable
-        # bullet is named by the listing rather than dropped in silence.
-        marks = transition.marks is not None
-        open_ = _still_open(declaration, transition)
-        group.add_command(
-            click.Command(
-                name=transition.name,
-                params=[_json_option()] if marks else _read_params(declaration),
-                callback=_read_run(
-                    declaration,
-                    SUB_PHASE_KIND if marks else NEXT_KIND,
-                    offering=lambda one, t=transition, o=open_: (
-                        one.state.name == t.source
-                        and not offer_errors(one.head, t)
-                        and not _held_elsewhere(declaration, t, one.slug)
-                        and not o(one)
-                        and not unmarked_errors(one, t)
-                    ),
-                    marking=(
-                        (lambda bullet: bullet.mark is None and not bullet.unmarkable)
-                        if marks
-                        else None
-                    ),
-                    transition=transition.name,
-                ),
-                help=NEXT_HELP.format(
-                    name=transition.name,
-                    list_=LIST_COMMAND,
-                ),
-                # The declared help, so `fileplan next --help` reads as the
-                # workflow's own list of verbs.
-                short_help=transition.help,
-            )
-        )
-    return group
-
-
-def _still_open(
-    declaration: Declaration, transition: Transition
-) -> Callable[[item.Item], bool]:
-    """Whether an item still has a carrier holding findings `transition` needs.
-
-    The predicate is `dangle_errors`, the same function the verb refuses
-    through, so the offer and the run cannot disagree. It reads the tree once
-    per run, lazily and memoised, and `main` builds a fresh command group per
-    invocation so the memo cannot outlive one run.
-    See docs/method.md#the-dangle-check
-    """
-    walked: list[item.Item] | None = None
-
-    def still_open(one: item.Item) -> bool:
-        nonlocal walked
-        if walked is None:
-            walked = read.items(declaration)
-        return bool(dangle_errors(one, transition, walked, declaration.root))
-
-    return still_open
-
-
-def _held_elsewhere(
-    declaration: Declaration, transition: Transition, slug: str
-) -> bool:
-    """Whether a session that is not this one holds `slug`'s claim.
-
-    The executor's own question, asked under `transition._claiming`'s own
-    gate: a verb that neither enters nor leaves a claimed state never reads a
-    record, so neither does the offer. Not "is it claimed at all", which would
-    hide the item this session already holds.
-    See docs/method.md#the-claimed-state
-    """
-    source = declaration.states[transition.source] if transition.source else None
-    destination = (
-        declaration.states[transition.to] if transition.to is not None else None
-    )
-    if not (destination and destination.has(claim.NAME)) and not (
-        source and source.has(claim.NAME)
-    ):
-        return False
-    path = claim.path(declaration.root, slug)
-    if not path.exists():
-        # A missing record means unclaimed, here as everywhere.
-        return False
-    return not claim.owns(
-        claim.read(path, declaration.root), claim.identity(declaration)
-    )
 
 
 # --------------------------------------------------------------------------
@@ -1769,7 +1520,7 @@ def _show_command(declaration: Declaration) -> click.Command:
     return click.Command(
         name=SHOW_COMMAND,
         params=[
-            click.Argument(["name"], metavar="ITEM"),
+            click.Argument(["name"], metavar=ITEM),
             # The disposition's own second positional, spelled by its own two
             # constants. The brackets are click's own for an optional one.
             click.Argument(
@@ -1793,14 +1544,13 @@ def _contents(
 ) -> None:
     """What this workflow is: its states, then its verbs, in declared order.
 
-    Both are read off `plan.toml`. A third block indexes the halves, so a
-    session composing several runs can ask which verb declares which half in
-    one read. A verb declaring none is absent from it, and a declaration whose
-    verbs declare none carries no block at all.
+    Both are read off `plan.toml`. A third block indexes each verb's kind and
+    the options it declares, so a session composing several runs can ask
+    which verb is which kind in one read.
 
     `--json` is the second rendering, and it carries every verb's whole
-    contract rather than the halves alone: a consumer asking which verb
-    declares a half usually has to read `Reading` to tell two of them apart.
+    contract rather than the kinds alone: a consumer asking which verb is an
+    edit usually has to read `Reading` to tell two of them apart.
     The states ride in the envelope, as the text prints them — what a
     declaration says about its own states is in the consumer's `plan.toml`
     already, and what only the tool knows is what it derives from it.
@@ -1822,7 +1572,7 @@ def _contents(
                 ],
                 source=str(declaration.source),
                 states=[
-                    {"name": state.name, "path": state.path}
+                    {"name": state.name, "path": state.path, "sort": state.sort}
                     for state in declaration.states.values()
                 ],
                 keys=[
@@ -1851,8 +1601,13 @@ def _contents(
     )
 
     click.echo("States")
+    places = max((len(state.path) for state in declaration.states.values()), default=0)
     for state in declaration.states.values():
-        click.echo(f"  {state.name:<{width}}  {state.path}/")
+        # The sort, declared or defaulted, so a default is never hidden.
+        sorting = f"  sorted by {state.sort}" if state.sort else ""
+        click.echo(
+            f"  {state.name:<{width}}  {state.path + '/':<{places + 1}}{sorting}".rstrip()
+        )
 
     if declaration.transitions:
         click.echo("\nTransitions")
@@ -1860,21 +1615,15 @@ def _contents(
             click.echo(f"  {transition.name:<{width}}  {transition.help}")
 
     # Its own block rather than a fourth column: a column after the `help` lines
-    # wraps into prose nobody can read a half out of.
-    declaring = [
-        (transition.name, [name for name in HALVES if getattr(transition, name)])
-        for transition in declaration.transitions.values()
-    ]
-    if any(halves for _, halves in declaring):
+    # wraps into prose nobody can read a kind out of.
+    if declaration.transitions:
         click.echo("\nDeclares")
-        for name, halves in declaring:
-            if halves:
-                click.echo(f"  {name:<{width}}  {', '.join(halves)}")
+        for transition in declaration.transitions.values():
+            said = ", ".join([transition.kind, *_declared(transition)])
+            click.echo(f"  {transition.name:<{width}}  {said}")
 
     click.echo(
         f"\nRun `fileplan {LIST_COMMAND}` to see what is filed.\n"
-        f"Run `fileplan {NEXT_COMMAND} COMMAND` to see what COMMAND could "
-        "take right now.\n"
         f"Run `fileplan {SHOW_COMMAND} ITEM` to see one item's row.\n"
         "Run `fileplan COMMAND --help` to see what COMMAND takes."
     )
@@ -1882,7 +1631,9 @@ def _contents(
 
 def _described(command: click.Command) -> dict[str, Any]:
     """One of the tool's own commands as the contract gives it, nested the
-    way click holds it: `next`'s offers each take their own options."""
+    way click holds it. None of the tool's own nests another today, so each
+    `commands` is empty, and the field stays so the shape does not depend on
+    that."""
     return {
         "name": command.name,
         "help": command.short_help or command.help,

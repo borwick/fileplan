@@ -63,10 +63,9 @@ def run_lock(root: Path) -> Iterator[None]:
 def describe_session() -> str:
     """Who this process is, for a holder line: host and pid.
 
-    `os.getpid()` rather than the session identity a claim records, and the
-    two do not share a home (John, 2026-09-02): this names the process holding
-    the flock, alive for the run, where `fileplan.claim.identity` names the
-    session. Two questions with two answers, not drift.
+    `os.getpid()` rather than the session identity a claim records: this names
+    the process holding the flock, alive for the run, where
+    `fileplan.claim.identity` names the session.
     """
     return f"{socket.gethostname()} pid {os.getpid()}"
 

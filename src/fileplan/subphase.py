@@ -42,8 +42,8 @@ NAMED = re.compile(r"^-\s+\*\*(?P<bold>[^*]+?)\*\*")
 #: the token is what a name would be, up to whatever ends one or a `*`.
 BOLDED = re.compile(r"^-\s+\*\*(?P<token>[^\s*\u2014\u2013]*)")
 
-#: What ends a name inside that bold run. A bare hyphen is deliberately not
-#: one, so `4-1` survives whole and a name is always one token.
+#: What ends a name inside that bold run. A bare hyphen is not one, so `4-1`
+#: survives whole and a name is always one token.
 NAME_END = re.compile(r"[\s\u2014\u2013]")
 
 #: The strict marked form: a named bullet whose bold run is followed by a
@@ -703,7 +703,7 @@ def opens(body: str, *, heading: str, pending: str) -> bool:
 def title_errors(title: str) -> list[str]:
     """Every way `title` cannot go into the strict form. Pure.
 
-    Narrow on purpose: empty, a newline, a `**` that would close the bold
+    Narrow: empty, a newline, a `**` that would close the bold
     run its name is read from, or a lone `*`, which `NAMED` cannot read
     through either. Each is a bullet the reader beside this could not count or
     name, so it refuses before anything is written. A note sits outside the

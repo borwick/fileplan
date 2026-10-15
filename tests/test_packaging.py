@@ -442,10 +442,10 @@ def unversioned(tmp_path: Path) -> Path:
     # The reader must actually be asked, or the control below is vacuous:
     # nothing filed asks git nothing, and a null column would then prove only
     # that the tree was empty.
-    dated = next(
-        state for state in declaration.states.values() if "dated" in state.capabilities
+    assert any(
+        list((tmp_path / state.path).glob("*.md"))
+        for state in declaration.states.values()
     )
-    assert list((tmp_path / dated.path).glob("*.md"))
     return tmp_path
 
 
@@ -453,14 +453,13 @@ def test_no_invocation_outside_a_git_repo_raises_a_traceback(
     unversioned: Path,
 ) -> None:
     """The inherited behaviour, at the operator's contract rather than the
-    unit. The declaration's `dated` state is what puts the one git reader on
-    the path, so a `NotGitRepository` escaping it would surface here as a
+    unit. Every listing puts the one git reader on the path, so a `NotGitRepository` escaping it would surface here as a
     traceback rather than as a null column."""
     environment = {
         **without_the_override(),
         PLAN_TOML_ENV: str(unversioned / PLAN_TOML_NAME),
     }
-    reads = (["list"], ["list", "--json"], ["show", "--help"], ["next", "--help"])
+    reads = (["list"], ["list", "--json"], ["show", "--help"])
 
     for argv in reads:
         result = subprocess.run(

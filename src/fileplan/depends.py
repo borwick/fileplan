@@ -11,7 +11,7 @@ both.
 A dissolving transition clears every dependency pointing at the item it takes
 away. So the tree never holds a dependency on a closed item. Nothing stores a
 closed slug, so the tool cannot tell "gone because closed" from "never
-existed". The tool does not try (John, 2026-09-04).
+existed", and does not try.
 
 A dependency pointing later in the queue than the item holding it is
 `misordered`. A misordered dependency is named rather than acted on. Nothing
@@ -129,7 +129,7 @@ def unknown(edges: Iterable[str], filed: Container[str]) -> tuple[str, ...]:
     """The edges naming nothing filed: the ones a session goes looking for.
 
     Exactly the complement of `blocking`, so the two partition the edges with
-    nothing lost. Deliberately not part of `blocked-by`: "waiting on X" and "X
+    nothing lost. Not part of `blocked-by`: "waiting on X" and "X
     does not exist" are different facts.
     """
     return tuple(slug for slug in edges if slug not in filed)
@@ -145,8 +145,8 @@ def misordered(
 ) -> list[dict[str, Any]]:
     """Every edge of `slug`'s naming an item later in the order.
 
-    Named, never acted on: an order somebody set deliberately is not
-    rearranged by a key about something else. An item with no place at either
+    Named, never acted on: an order somebody set is not rearranged by a key
+    about something else. An item with no place at either
     end is ignored.
     """
     if not isinstance(place, int) or isinstance(place, bool):

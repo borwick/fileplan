@@ -13,14 +13,9 @@ from __future__ import annotations
 
 import pytest
 
-from fileplan import numbered, read
+from fileplan import numbered
 from fileplan.declaration import (
-    ARCHIVE,
-    CAPABILITY_KEYS,
-    FIRST_NUMBER,
-    NUMBERED,
     Refusal,
-    State,
 )
 
 WHERE = "orchard-archive.md"
@@ -29,21 +24,6 @@ WHERE = "orchard-archive.md"
 def held(*numbers: int) -> dict[int, list[str]]:
     """A register holding ``numbers``, one item each."""
     return numbered.taken({f"item-{one}": one for one in numbers})
-
-
-# --------------------------------------------------------------------------
-# The two spellings, pinned together
-# --------------------------------------------------------------------------
-
-
-def test_the_capability_is_spelled_the_same_in_both_modules() -> None:
-    """`declaration.py` cannot import this module — this one imports `Refusal`
-    from it, so the import runs the other way — and spells the two words for
-    itself, exactly as it does for `claimed`. Two copies of a word are safe
-    only while something says they agree, and this is that something."""
-    assert NUMBERED == numbered.NAME
-    assert ARCHIVE == numbered.ARCHIVE
-    assert CAPABILITY_KEYS[numbered.NAME] == numbered.KEY
 
 
 # --------------------------------------------------------------------------
@@ -293,15 +273,6 @@ def test_the_refusal_is_built_from_the_walk_the_report_is_built_from() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_the_state_field_is_spelled_the_same_in_both_modules() -> None:
-    """`read.py` imports this module, so the word is spelled here and the
-    import runs the other way — the shape `NAME` and `ARCHIVE` already have
-    against `declaration.py`. Two copies of a word are safe only while
-    something says they agree, and this is that something. Both mean the
-    state's **declared name**, never its directory."""
-    assert numbered.STATE == read.STATE
-
-
 def test_a_lost_record_carries_the_state_the_archive_and_the_line() -> None:
     """A second record shape rather than a discriminator on the first: a gap
     is a *number* and this is a *document line*, so one merged array would be
@@ -347,8 +318,7 @@ def test_anything_that_is_not_a_whole_number_refuses(value: object) -> None:
 #: An archive with a preamble and two entries with a gap between them, which
 #: is the shape a real one has: prose at the top that is not an entry, and
 #: room for the number about to be filed. Not spelled `ARCHIVE`: that name is
-#: already the state *field*, imported above and pinned against
-#: `numbered.ARCHIVE` at the top of this file.
+#: already the state *field*, imported above.
 FILED = """\
 # The orchard's archive
 
@@ -441,7 +411,7 @@ def test_a_number_the_archive_already_holds_refuses_naming_both() -> None:
         numbered.entry(FILED, 7, "A second seven")
     said = str(refusal.value)
     assert "number 7 is claimed by" in said
-    assert "A second seven" in said and "§ 7. in the archive" in said
+    assert "A second seven" in said and "the archive § 7." in said
 
 
 def test_a_gap_elsewhere_does_not_refuse_a_filing() -> None:
@@ -570,11 +540,3 @@ def test_a_register_with_no_declared_floor_starts_at_the_first_number() -> None:
     assert numbered.next_number({}) == numbered.next_number({}, first=numbered.FIRST)
     assert numbered.missing(held(3)) == numbered.missing(held(3), first=numbered.FIRST)
 
-
-def test_the_floor_field_is_spelled_the_same_in_both_modules() -> None:
-    """`NAME` and `ARCHIVE`'s rule for the third word, and its default: two
-    copies of a word are safe only while something says they agree. The
-    default lives in `declaration.py` as a literal because the import runs
-    that way — this is what pins it to the meaning."""
-    assert FIRST_NUMBER == numbered.FIRST_NUMBER
-    assert State(name="x", path="x").first_number == numbered.FIRST

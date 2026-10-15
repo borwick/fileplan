@@ -30,8 +30,8 @@ from fileplan import claim, depends, item, numbered, queued, stale, subphase
 from fileplan.declaration import (
     CAPABILITY_KEYS,
     CLAIM_KEYS,
+    COMMAND_KEYS,
     CLAIMED,
-    DATED,
     INTRINSIC_KEYS,
     RESERVED_KEYS,
     Declaration,
@@ -43,15 +43,17 @@ from fileplan.declaration import (
 from fileplan.item import Item
 
 #: The fields a row carries off the tree rather than out of a head, in the
-#: order a row spells them. `declaration.RESERVED_KEYS` is the same list, and
-#: it is why no declared key may take one of these names.
-SLUG, STATE, PATH = "slug", "state", "path"
+#: order a row spells them, read off `RESERVED_KEYS`, which is why no declared
+#: key may take one of these names.
+SLUG, STATE, PATH = RESERVED_KEYS
 
-#: The fields a bullet row carries, in the order it spells them, with `PATH`
-#: closing it as it closes an item row. `mark` is present and `null` on an
-#: unmarked bullet, by the corpus-independence rule every row field follows.
-#: An offer over these takes no filters, because every filter names a key an
-#: item carries. See docs/method.md#the-next-read
+#: The row field naming the commands that could take an item right now.
+#: See docs/method.md#commands
+COMMANDS = COMMAND_KEYS[0]
+
+#: The fields of a bullet, as `show ITEM NAME`'s record spells them first and
+#: the `unmarkable` and `unread` reports carry them. `mark` is present and
+#: `null` on an unmarked bullet. See docs/method.md#show
 BULLET_NAME, BULLET_ITEM, BULLET_TITLE, BULLET_MARK = "name", "item", "title", "mark"
 
 #: What a bullet carries after its name's bold run, spelled after
@@ -142,7 +144,9 @@ def items(declaration: Declaration) -> list[Item]:
     A state whose directory does not exist yet is empty, not broken. A `path`
     is a literal directory, so the glob is flat and a file below one is in no
     state at all. A state's declared `sort` is the listing's to apply, so
-    `ordered` reads it and this does not.
+    `ordered` reads it and this does not. A name in `[fileplan].ignore` is
+    left out of the walk, and every other `*.md` is still claimed to be an
+    item.
     """
     found: list[Item] = []
     errors: list[str] = []
@@ -151,7 +155,10 @@ def items(declaration: Declaration) -> list[Item]:
         if not directory.is_dir():
             continue
         here: list[Item] = []
-        paths = sorted(directory.glob(f"*{item.SUFFIX}"), key=lambda p: p.stem)
+        paths = sorted(
+            (p for p in directory.glob(f"*{item.SUFFIX}") if p.name not in declaration.ignore),
+            key=lambda p: p.stem,
+        )
         for path, one in collecting(
             lambda p: item.read(p, declaration), paths, errors
         ):
@@ -197,6 +204,7 @@ def rows(
     claimed: Mapping[str, Mapping[str, Any]] = MappingProxyType({}),
     blocking: Mapping[str, tuple[str, ...]] = MappingProxyType({}),
     ages: Mapping[str, int] = MappingProxyType({}),
+    commands: Mapping[str, list[str]] = MappingProxyType({}),
 ) -> list[dict[str, Any]]:
     """`found` as mappings, one per item, every declared key present.
 
@@ -225,7 +233,7 @@ def rows(
     held = CLAIM_KEYS if declaration.has(CLAIMED) else ()
     counts = declaration.counts_sub_phases
     waits = declaration.has_dependencies
-    dated = declaration.has(DATED)
+    takes = declaration.takes_items
     # `blocking` inverted: who waits on each slug, in the traversal's order.
     waited: dict[str, list[str]] = {}
     for slug, named in blocking.items():
@@ -277,7 +285,8 @@ def rows(
                 if waits
                 else {}
             ),
-            **({stale.DAYS: ages.get(one.slug)} if dated else {}),
+            stale.DAYS: ages.get(one.slug),
+            **({COMMANDS: commands.get(one.slug) or None} if takes else {}),
             **{key: one.get(key) for key in INTRINSIC_KEYS},
             **{key: one.get(key) for key in declaration.keys},
             PATH: str(one.path.relative_to(declaration.root)),
@@ -348,11 +357,38 @@ class Listing:
     register: list[dict[str, Any]] = field(default_factory=list)
 
 
+#: The `Listing` fields the envelope carries beside the rows, in envelope
+#: order, each with the gate it is present under: whenever the declaration
+#: could fill it, empty or not, and absent otherwise. One roster, read by the
+#: JSON envelope and by the text form's reports, so a report added to
+#: `Listing` is added here or reaches neither. See docs/method.md#the-listing
+REPORTS: tuple[tuple[str, Callable[[Declaration], bool]], ...] = (
+    ("stranded", lambda one: one.has(CLAIMED)),
+    # Started means a status key on a state that counts sub-phases, which is
+    # what `listing` computes the report over.
+    (
+        "undecomposed",
+        lambda one: any(
+            state.status and state.sub_phases for state in one.states.values()
+        ),
+    ),
+    ("unknown", lambda one: one.has_dependencies),
+    ("misordered", lambda one: one.has_dependencies),
+    ("gaps", lambda one: one.has(numbered.NAME)),
+    ("lost", lambda one: one.has(numbered.NAME)),
+    # Not a report: what the register holds rather than what is wrong with it.
+    ("register", lambda one: one.has(numbered.NAME)),
+    ("unmarkable", lambda one: bool(one.marked_states)),
+    ("unread", lambda one: one.counts_sub_phases),
+    ("undeclared", lambda one: any(key.values for key in one.keys.values())),
+    ("unfound", lambda one: bool(one.files)),
+)
+
+
 def listing(
     declaration: Declaration,
     *,
-    offering: Callable[[Item], bool] | None = None,
-    marking: Callable[[subphase.Bullet], bool] | None = None,
+    taking: Callable[[Item, Sequence[Item]], list[str]] | None = None,
 ) -> Listing:
     """The composed read: the traversal, the claims, and the rows they make.
 
@@ -362,26 +398,17 @@ def listing(
 
     A claim belongs to an item in a claimed state, and every other record is
     stranded: one whose slug names no item, and one naming an item that has
-    since moved to a state which claims nothing. The rule is the executor's,
-    so the listing and the transition cannot disagree. A stranded claim is
+    since moved to a state which claims nothing. The executor keeps the same
+    rule by path rather than by traversal, so one malformed item cannot
+    refuse a claim; the listing reads the tree it has already walked. A stranded claim is
     named, never filtered and never removed. A declaration with no claimed
     state reads no records at all. See docs/method.md#the-listing
 
-    `offering` narrows which items become rows, and nothing else. The
-    predicate is the caller's, so this module goes on knowing nothing about
-    transitions. It is asked of an `Item` rather than of a row, because a row
-    spells an absent key `None` and a precondition read over one would offer
-    everything.
-
-    `marking` switches the rows to the second kind, one per named bullet
-    rather than one per item, which is what makes a carrier of a hundred
-    findings a read. The two compose: a row survives when its item passes
-    `offering` and its bullet passes this. See docs/method.md#the-next-read
-
-    `walked` stays the size of the whole traversal either way, and every
-    exception report is computed over all of it: an offer is a filter, and a
-    report about the tree is narrowed by none. The dependency facts have to be
-    computed over all of `found` for the second reason as well.
+    `taking` says which commands could take an item, handed the item and the
+    whole tree. The predicate is the caller's, so this module goes on knowing
+    nothing about transitions. It is asked of an `Item` rather than of a row,
+    because a row spells an absent key `None` and a precondition read over one
+    would pass everything. Without it, `commands` is `None` on every row.
 
     This is where the clock is read, once, beside `local/claims/`
     (docs/method.md#stale-days), and where each numbered state's archive is
@@ -389,7 +416,6 @@ def listing(
     (docs/method.md#the-register).
     """
     found = items(declaration)
-    offered = [one for one in found if offering(one)] if offering else found
     blocking, unknown, misordered = _dependencies(found)
     gaps, lost, register = _register(declaration, found)
     unmarkable = _unmarkable(declaration, found)
@@ -398,7 +424,7 @@ def listing(
     unfound = _unfound(declaration, found)
     ages = stale.ages(
         declaration.root,
-        [(one.slug, one.path) for one in found if one.state.has(DATED)],
+        [(one.slug, one.path) for one in found],
         dt.date.today(),
     )
     # Started means the item carries the status key at all, never that its
@@ -431,13 +457,20 @@ def listing(
             if slug not in here
         ]
 
-    if marking is not None:
-        made, walked = _bullets(declaration, found, offered, marking)
-    else:
-        made = rows(
-            declaration, offered, claimed=held, blocking=blocking, ages=ages
-        )
-        walked = len(found)
+    commands = (
+        {one.slug: taking(one, found) for one in found}
+        if taking is not None and declaration.takes_items
+        else {}
+    )
+    made = rows(
+        declaration,
+        found,
+        claimed=held,
+        blocking=blocking,
+        ages=ages,
+        commands=commands,
+    )
+    walked = len(found)
 
     return Listing(
         rows=made,
@@ -454,50 +487,6 @@ def listing(
         unfound=unfound,
         register=register,
     )
-
-
-def _bullets(
-    declaration: Declaration,
-    found: Sequence[Item],
-    offered: Sequence[Item],
-    marking: Callable[[subphase.Bullet], bool],
-) -> tuple[list[dict[str, Any]], int]:
-    """The bullet rows, and how many bullets the traversal read.
-
-    Every named bullet of every item in a state that carries bullets is
-    walked, whether or not its item was offered: `walked` is what the
-    traversal read rather than what it offered. A state with no sub-phase
-    heading contributes nothing rather than an empty row.
-
-    What `fileplan.subphase.bullets` leaves out is left out of `walked` too —
-    an unnamed bullet and the pending marker are not things any verb could
-    take, so counting them would make an offer read as passing over work.
-    """
-    offering = {one.slug for one in offered}
-    made: list[dict[str, Any]] = []
-    walked = 0
-    for one in found:
-        if not one.state.sub_phases:
-            continue
-        for bullet in subphase.bullets(
-            one.body,
-            one.state.sub_phases,
-            pending=one.state.pending,
-            marks=one.state.marks,
-        ):
-            walked += 1
-            if one.slug in offering and marking(bullet):
-                made.append(
-                    {
-                        BULLET_NAME: bullet.name,
-                        BULLET_ITEM: one.slug,
-                        STATE: one.state.name,
-                        BULLET_TITLE: bullet.title,
-                        BULLET_MARK: bullet.mark,
-                        PATH: str(one.path.relative_to(declaration.root)),
-                    }
-                )
-    return made, walked
 
 
 def _unmarkable(
@@ -678,7 +667,7 @@ def _register(
             for one in found
             if one.state.name == state.name
         }
-        held.update({f"{where} § {one}.": one for one in numbered.numbers(text)})
+        held.update(numbered.archived(text, where))
         held_numbers = numbered.taken(held)
         gaps += [
             {
@@ -858,9 +847,9 @@ def matching(
 def _satisfies(row: Mapping[str, Any], test: Test) -> bool:
     value = row.get(test.key)
     if test.operator == PRESENT:
-        return not _empty(value)
+        return not empty(value)
     if test.operator == MISSING:
-        return _empty(value)
+        return empty(value)
     if test.operator == "=":
         return carries(value, test.value)
     if test.operator == "!=":
@@ -874,7 +863,9 @@ def _satisfies(row: Mapping[str, Any], test: Test) -> bool:
     return _compares(value, test)
 
 
-def _empty(value: Any) -> bool:
+def empty(value: Any) -> bool:
+    """Whether a value carries nothing: absent, `""` or `[]`. The one rule a
+    filter's presence test and a transition's `requires` share."""
     return value is None or value in ("", [])
 
 
@@ -924,7 +915,7 @@ def _drawn_from(value: Any, wanted: str) -> bool:
     nothing. Over a single-valued key this degenerates to "is one of", which
     is the same rule rather than a second one. See docs/method.md#the-listing
     """
-    if _empty(value):
+    if empty(value):
         return False
     named = _drawn(wanted)
     return all(
@@ -1040,8 +1031,8 @@ def ordered(
         )
         mine = sorts.get(state, ())
         for one in reversed(mine):
-            carrying = [row for row in here if not _empty(row.get(one.key))]
-            missing = [row for row in here if _empty(row.get(one.key))]
+            carrying = [row for row in here if not empty(row.get(one.key))]
+            missing = [row for row in here if empty(row.get(one.key))]
             carrying.sort(
                 key=lambda row: tuple(
                     _rank(entry, one.order) for entry in _entries(row[one.key])
@@ -1054,7 +1045,7 @@ def ordered(
             {SLUG: row[SLUG], KEY: one.key, PATH: row[PATH]}
             for row in here
             for one in mine
-            if _empty(row.get(one.key))
+            if empty(row.get(one.key))
         ]
     return result, unsorted
 

@@ -1,7 +1,13 @@
 # This repo's own workflow. Directories are states, a transition moves an item
 # between them, and keys are the facts an item's head carries. A state's, a
 # key's or a transition's `doc =` points at the section of docs/method.md that
-# explains the word; a template's points at the document it seeds.
+# explains the word.
+
+# The files an agent tool reads from the directory it works in, which no
+# state directory reads as items. Every other `*.md` there is an item or a
+# refusal. See docs/method.md#ignore.
+[fileplan]
+ignore = ["CLAUDE.md", "AGENTS.md"]
 
 # Ideas that are not queued.
 [states.someday-maybe]
@@ -9,14 +15,14 @@ path = "someday-maybe"
 doc  = "docs/method.md#someday-maybe"
 
 # Sections being worked. Ordered, claimed by one session at a time,
-# numbered, cut into sub-phases, and dated from git. `sort` lists them by
+# numbered and cut into sub-phases. `sort` lists them by
 # the places `queue` and `requeue` give them.
-# See docs/method.md#sub-phases, docs/method.md#bulleted,
-# docs/method.md#stale-days and docs/method.md#the-queue.
+# See docs/method.md#sub-phases, docs/method.md#bulleted and
+# docs/method.md#the-queue.
 [states.plan]
 path              = "plan"
 doc               = "docs/method.md#plan"
-capabilities      = ["queued", "claimed", "numbered", "bulleted", "dated"]
+capabilities      = ["queued", "claimed", "numbered", "bulleted"]
 sort              = "position"
 archive           = "docs/plan-archive.md"
 sub-phases        = "Sub-phases"
@@ -88,94 +94,86 @@ doc    = "docs/method.md#sub-phase-status"
 help   = "How far the current sub-phase has got."
 values = ["open", "planned", "in progress"]
 
-# A document `idea --from simplify` copies into a new item.
-[templates.simplify]
-doc = "docs/templates/simplify-code.md"
-
 [transitions.idea]
-doc   = "docs/method.md#idea"
-help  = "File a new idea into someday-maybe."
-to    = "someday-maybe"
-seeds = true
+kind = "create"
+doc  = "docs/method.md#idea"
+help = "File a new idea into someday-maybe."
+to   = "someday-maybe"
 
 [transitions.queue]
+kind = "move"
 doc  = "docs/method.md#queue"
 help = "Commit to an idea: move it into the plan, at a place in the order."
 from = "someday-maybe"
 to   = "plan"
 
 [transitions.requeue]
+kind = "reorder"
 doc  = "docs/method.md#requeue"
 help = "Move an item to another place in the plan's order."
 from = "plan"
-to   = "plan"
 
 # A new title makes a new slug, so the file moves and every reference to the
 # old slug follows it. Declared twice, once in each state an item is renamed
-# in, and only the first carries the policy: one anchor takes one pointer.
+# in.
 [transitions.retitle]
-doc      = "docs/method.md#retitle"
-policy   = "docs/procedures.md#when-a-handle-changes"
-help     = "Give a section a new title, and move it to the slug that makes."
-from     = "plan"
-to       = "plan"
-retitles = true
+kind = "rename"
+doc  = "docs/method.md#retitle"
+help = "Give a section a new title, and move it to the slug that makes."
+from = "plan"
 
 [transitions.retitle-idea]
-doc      = "docs/method.md#retitle-idea"
-help     = "Give an idea a new title, and move it to the slug that makes."
-from     = "someday-maybe"
-to       = "someday-maybe"
-retitles = true
+kind = "rename"
+doc  = "docs/method.md#retitle-idea"
+help = "Give an idea a new title, and move it to the slug that makes."
+from = "someday-maybe"
 
-# `policy =` says what a session does around the run. Most transitions have
-# none.
-# See docs/method.md#the-interpreter.
+# A transition's `doc` section links to the procedure a session follows
+# around the run, where there is one. See docs/method.md#the-interpreter.
 [transitions.decompose]
-doc    = "docs/method.md#decompose"
-policy = "docs/procedures.md#decomposing-a-section"
-help   = "Write the next sub-phase into a section, or close the decomposition."
-from   = "plan"
-to     = "plan"
-mints  = true
+kind = "add-bullet"
+doc  = "docs/method.md#decompose"
+help = "Write the next sub-phase into a section, or close the decomposition."
+from = "plan"
 
 [transitions.work]
+kind   = "edit"
 doc    = "docs/method.md#work"
-policy = "docs/procedures.md#planning-and-working-a-sub-phase"
 help   = "Take up a section, and say which sub-phase you are on."
 from   = "plan"
-to     = "plan"
 claims = true
 sets   = ["sub-phase", "sub-phase-status"]
 
 # Ending a sub-phase marks its bullet and drops the status key.
 # See docs/method.md#sub-phase-status.
 [transitions.finish]
+kind  = "mark-bullet"
 doc   = "docs/method.md#finish"
 help  = "Say a sub-phase is finished."
 from  = "plan"
-to    = "plan"
 marks = "done"
 drops = ["sub-phase-status"]
 
 [transitions.skip]
+kind  = "mark-bullet"
 doc   = "docs/method.md#skip"
 help  = "Say a sub-phase will not be done."
 from  = "plan"
-to    = "plan"
 marks = "skipped"
 drops = ["sub-phase-status"]
 
 [transitions.decline]
+kind     = "move"
 doc      = "docs/method.md#decline"
 help     = "Set an item aside, because we chose not to do the work."
 from     = "plan"
 to       = "abandoned"
 archives = true
 
-# The same decision one state back, and it declares no halves at all:
+# The same decision one state back, and a plain move:
 # `someday-maybe` numbers nothing, so there is no entry to file.
 [transitions.discard]
+kind = "move"
 doc  = "docs/method.md#discard"
 help = "Discard an idea we are not going to act on."
 from = "someday-maybe"
@@ -184,56 +182,52 @@ to   = "abandoned"
 # Requires the cursor only. The status key is dropped by the marking
 # transitions just before a close-out, so it must not be required here.
 [transitions.archive-plan]
-doc       = "docs/method.md#archive-plan"
-policy    = "docs/procedures.md#closing-a-section-out"
-help      = "Close a section out: file its archive entry and remove the item."
-from      = "plan"
-archives  = true
-dissolves = true
-requires  = ["sub-phase"]
+kind     = "close"
+doc      = "docs/method.md#archive-plan"
+help     = "Close a section out: file its archive entry and remove the item."
+from     = "plan"
+archives = true
+requires = ["sub-phase"]
 
 [transitions.merge]
-doc       = "docs/method.md#merge"
-help      = "Absorb an idea into another item: the work continues as that item."
-from      = "someday-maybe"
-dissolves = true
-absorbs   = true
-# --carry: when the absorbed ideas are the specification, keep their text.
-carries   = true
+kind = "merge"
+doc  = "docs/method.md#merge"
+help = "Absorb an idea into another item: the work continues as that item."
+from = "someday-maybe"
 
 [transitions.investigate]
+kind = "create"
 doc  = "docs/method.md#investigate"
 help = "Open a carrier for an investigation."
 to   = "carrier"
 sets = ["opened-for", "opened-in"]
 
 [transitions.note]
-doc   = "docs/method.md#note"
-help  = "Write a finding into an open carrier."
-from  = "carrier"
-to    = "carrier"
-mints = true
+kind = "add-bullet"
+doc  = "docs/method.md#note"
+help = "Write a finding into an open carrier."
+from = "carrier"
 
 # The three ways to deal with a finding. Each writes its word on the bullet.
 [transitions.fix-it]
+kind  = "mark-bullet"
 doc   = "docs/method.md#fix-it"
 help  = "The finding was simple: say it is fixed and move on."
 from  = "carrier"
-to    = "carrier"
 marks = "fixed"
 
 [transitions.dismiss]
+kind  = "mark-bullet"
 doc   = "docs/method.md#dismiss"
 help  = "This finding is not worth acting on."
 from  = "carrier"
-to    = "carrier"
 marks = "dismissed"
 
 [transitions.file-it]
+kind  = "mark-bullet"
 doc   = "docs/method.md#file-it"
 help  = "File this finding as an item of its own."
 from  = "carrier"
-to    = "carrier"
 marks = "filed"
 
 [transitions.file-it.files]

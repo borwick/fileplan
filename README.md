@@ -18,15 +18,16 @@ Create a plan file for each "phase" or set of work you want to do. The plan file
 Then, `fileplan` reads a `plan.toml` file that defines your workflow. A `plan.toml` can be composed of:
 
   - states
-    - "paths" (directories) assigned to states
-    - "doc" - documentation for this state
+    - "paths" (directories) assigned to states, each its own name by default
+    - "doc" - optional documentation for this state
     - capabilities
   - keys
     - attributes related to a plan file
   - transitions
+    - "kind" - what the transition does: create, move, edit, close, and five more
     - from state
     - to state
-    - "doc" - documentation for this transition
+    - "doc" - optional documentation for this transition
   - "identity"
     - "doc" - documentation on how agents set their identities and "claim" items
     - "pid" - environment variables to use to derive agent ID
@@ -39,11 +40,10 @@ Start with the default workflow:
 $ fileplan init .
 inbox
 plan
-docs
-docs/archive.md
-docs/method.md
-docs/procedures.md
+local
+archive.md
 plan.toml
+local/.gitignore
 ```
 
 Create an item:
@@ -67,11 +67,11 @@ The plan file can then be found and managed via `fileplan`:
 ```
 $ fileplan list
 rename-the-states  inbox
-  title  Rename the states
-  path   inbox/rename-the-states.md
+  commands  queue
+  title     Rename the states
+  path      inbox/rename-the-states.md
 
 showing 1 of 1 items
-register plan: floor 1, nothing held yet, in docs/archive.md
 ```
 
 Transition the plan file with the `queue` transition:
@@ -84,11 +84,11 @@ $ fileplan list
 rename-the-states  plan
   position  100
   number    1
+  commands  work, archive
   title     Rename the states
   path      plan/rename-the-states.md
 
 showing 1 of 1 items
-register plan: floor 1, highest 1, in docs/archive.md
 ```
 
 Mark the plan file as in progress:
@@ -108,11 +108,11 @@ Mark it done with `archive`:
 
 ```
 $ fileplan archive rename-the-states --record "Renamed everything to our own words."
-docs/archive.md: filed `## 1. Rename the states` at its place in the register, with the record under it
+archive.md: filed `## 1. Rename the states` at its place in the register, with the record under it
 plan/rename-the-states.md is gone: archive took it away
-docs/archive.md
+archive.md
 
-$ cat docs/archive.md
+$ cat archive.md
 # Archive
 
 Closed items are filed here, newest last. Each one goes under its own number.
@@ -124,63 +124,58 @@ Renamed everything to our own words.
 
 ## The plan.toml behind it
 
-Here is the `plan.toml` for the workflow above, without the documentation
-pointers:
+Here is the `plan.toml` for the workflow above, as `fileplan init` writes
+it, without its comments:
 
 ```toml
 [states.inbox]
-path = "inbox"
 
 [states.plan]
-path         = "plan"
 capabilities = ["queued", "numbered"]
-sort         = "position"
+archive      = "archive.md"
 
 [keys.status]
 help   = "How the work is going."
 values = ["in progress", "waiting"]
 
 [transitions.capture]
-help = "Log an idea in the inbox."
+kind = "create"
 to   = "inbox"
 
 [transitions.queue]
-help = "Commit to an idea: move it into the plan."
+kind = "move"
 from = "inbox"
 to   = "plan"
 
 [transitions.work]
-help = "Say how the work is going."
+kind = "edit"
 from = "plan"
-to   = "plan"
 sets = ["status"]
 
 [transitions.archive]
-help      = "Close an item out: file its entry and remove the item."
-from      = "plan"
-archives  = true
-dissolves = true
+kind     = "close"
+from     = "plan"
+archives = true
 ```
 
 Every name in that file is a placeholder. `inbox`, `plan`, `capture`, `queue`,
 `work` and `archive` are not fileplan's words. Rename each one to the word your
 own work already uses.
 
-A transition's `from` and `to` decide what the transition does:
+A transition's `kind` decides what the transition does:
 
-  - No `from` creates a new plan file.
-  - A `from` and a `to` move the plan file to another directory.
-  - A `from` and a `to` that match leave the plan file where it is, and write a
-    key into the plan file's frontmatter.
+  - `create` writes a new plan file into the state its `to` names.
+  - `move` moves the plan file from its `from` directory to its `to`.
+  - `edit` leaves the plan file where it is, and writes a key into the plan
+    file's frontmatter.
+  - `close` deletes the plan file, which is why `archive` declares no `to`.
 
-`archives = true` writes the closing entry into an archive document.
-`dissolves = true` deletes the plan file, which is why `archive` declares no
-`to`.
+`archives = true` writes the closing entry into an archive document. There
+are nine kinds in all, and [the method](https://github.com/borwick/fileplan/blob/main/docs/method.md#kinds) lists them.
 
 Capabilities give a state extra behaviour. The `plan` state above declares
 `queued` and `numbered`, which is why the plan file picked up a position and a
-number when it arrived there. The `register` line in the listing says which
-numbers the archive document has taken.
+number when it arrived there.
 
 ## Asking fileplan about your workflow
 
@@ -195,24 +190,27 @@ $ fileplan
 
 States
   inbox    inbox/
-  plan     plan/
+  plan     plan/   sorted by position
 
 Transitions
-  capture  Log an idea in the inbox.
-  queue    Commit to an idea: move it into the plan.
-  work     Say how the work is going.
-  archive  Close an item out: file its entry and remove the item.
+  capture  Create an item in inbox.
+  queue    Move an item from inbox to plan.
+  work     Edit an item in plan where it stands.
+  archive  Close an item in plan out: file its archive entry, and take its file away.
 
 Declares
-  archive  archives, dissolves
+  capture  create
+  queue    move
+  work     edit
+  archive  close, archives
 
 Run `fileplan list` to see what is filed.
-Run `fileplan next COMMAND` to see what COMMAND could take right now.
 Run `fileplan show ITEM` to see one item's row.
 Run `fileplan COMMAND --help` to see what COMMAND takes.
 ```
 
-`Declares` lists the transitions that do more than move a plan file.
+`Declares` gives each transition's kind, and any option it declares beside
+the kind.
 
 Ask one transition what it takes:
 
@@ -220,7 +218,7 @@ Ask one transition what it takes:
 $ fileplan work --help
 Usage: fileplan work [OPTIONS] ITEM
 
-  Say how the work is going.
+  Edit an item in plan where it stands.
 
 Options:
   --status [in progress|waiting]  How the work is going.
@@ -232,18 +230,15 @@ Options:
   Where the item goes
     stays in plan
 
-  Reading
-    work    docs/method.md#work
-    status  docs/method.md#status
-
-  Running it
-    docs/procedures.md#working-an-item
+  Declares
+    edit
 ```
 
-`Reading` and `Running it` are the `doc` and `policy` pointers from your
-`plan.toml`, resolved to the sections they name. The sections are in your own
-documentation. fileplan prints the pointers and never writes the prose behind
-them.
+No transition in the starter names a document, so none of them has more to
+read than its help line. Give `work` a `doc` pointing at a section and its
+contract grows a `Reading` block naming that section, which fileplan checks
+exists on every run. The section is your own documentation, and fileplan
+never writes the prose behind it.
 
 Add `--check` to any transition to print what the transition would do, and stop
 before writing anything.

@@ -13,6 +13,13 @@ below is one half of it.
 
 ## States
 
+A state is a directory, and its `path` says which, relative to the folder
+holding `plan.toml`. A state that writes no `path` is at its own name. A
+`[fileplan]` table may name a `root`, such as `root = "docs"`, and a state
+with no `path` is then at `docs/` and its name. A state that writes its own
+`path` is not moved by the root. The bare `fileplan` overview prints every
+state's path, defaulted or not.
+
 ### someday-maybe
 
 Where an idea lands when it is filed. An idea here has not been committed to
@@ -53,8 +60,8 @@ Work that was committed to and then **set aside**: we chose not to do it.
 [`decline`](#decline) is the way in, and there is no way out. An item here is
 finished with, in one sense: nothing is waiting on a decision about it.
 
-The state declares **no capabilities**. Nothing here is ordered, numbered,
-claimed or dated. An order is the sequence work is picked up in, and this work
+The state declares **no capabilities**. Nothing here is ordered, numbered or
+claimed. An order is the sequence work is picked up in, and this work
 is not being picked up. The [number](#the-register) the item carried was
 dropped on the way out, like every other capability key. What is left is the
 item's title, its prose, and whatever declared keys it was carrying.
@@ -96,8 +103,8 @@ sub-phase-name    = "f{ordinal}"
 ```
 
 The `bulleted` capability is the whole of the state. Nothing here is
-[ordered](#the-queue), [numbered](#the-register),
-[claimed](#the-claimed-state) or [dated](#stale-days). An order is the
+[ordered](#the-queue), [numbered](#the-register) or
+[claimed](#the-claimed-state). An order is the
 sequence work is picked up in, and an investigation is not work being picked
 up. A number names a section in an archive, and a carrier is never archived. A
 claim is one session at a time, and reading a carrier is not holding it.
@@ -280,6 +287,48 @@ sibling session may have its own work in the same index. The recipe is to
 stage the paths the run printed, and to `git add` a deleted path, since there
 is no `git rm`.
 
+### ignore
+
+[The listing](#the-listing) claims every `*.md` in a state directory to be an
+item, and a file that is not one refuses the listing by name. One kind of file
+is placed in a state directory without being an item: the file an agent tool
+reads from the directory it works in, such as `AGENTS.md`. With that file in
+place every `fileplan list` refuses, saying there is no `+++` head on line 1.
+`ignore` names such files, and every state directory skips them:
+
+```toml
+[fileplan]
+ignore = ["AGENTS.md"]
+```
+
+The list holds **exact file names**, not globs, so the rule stays one
+sentence: a file whose name is in the list is left out of the walk, and every
+other `*.md` is still claimed to be an item. A broken item beside an ignored
+file still refuses the listing, and the refusal names the broken item alone.
+
+The load refuses a list that could skip nothing, each by name. The value must
+be a list of strings. An empty list refuses, since it says nothing. A name
+written twice refuses. A name holding a path separator refuses, because the
+list holds file names and each one is applied in every state directory. A
+name without the `.md` suffix refuses, because the traversal never reads
+such a file, so listing it would skip nothing.
+
+Two other shapes were refused. A list built into the tool would put an agent
+vendor's file name under `src/`, and would be a rule a consumer has to know
+exists rather than read in their own `plan.toml`. Skipping any file without a
+`+++` head would make every broken item silently absent, which is the hiding
+the listing's refusal was written against.
+
+`show` has no arm for an ignored name. A handle is a slug, and `fileplan show
+AGENTS.md` refuses as any handle that matches no item does. A refusal that
+says the declaration ignores the file would be a special case with nothing to
+buy.
+
+This repo's own list holds two agent files and not `README.md`. A state's
+meaning has one home, the section its `doc =` points at, and a README beside
+the items is a second copy of that meaning. A consumer may list a README; this
+tree does not.
+
 ### title
 
 The one line that names the item — **intrinsic**, not a declared key. An item
@@ -435,8 +484,8 @@ redeclare.
 
 ```toml
 [transitions.work]
+kind   = "edit"
 from   = "plan"
-to     = "plan"
 claims = true
 ```
 
@@ -585,22 +634,25 @@ Generating the example from a string literal would be the same file with the
 reviewability taken out. So the bytes a consumer receives are the bytes the
 package shipped.
 
-The example is a **tree** rather than a file — `plan.toml` plus the two
-documents its `doc =` and `policy =` pointers resolve against. A tree is what
-lets the scaffolder read the example through the real loader instead of
-parsing it again. The state directories `init` makes come out of that loaded
+The example is a **tree** rather than a file — `plan.toml` plus the archive
+document its numbered state names, because the declaration does not load
+without it. The example names no other document: every `doc` is optional, so
+a first tree needs no stub to point at. A tree is what lets the scaffolder
+read the example through the real loader instead of parsing it again. The state directories `init` makes come out of that loaded
 declaration. Nothing in the tool's source knows what the example calls them.
 The example ships as package data, because after an install there is no repo
 to walk up from.
 
-What `init` declares is a **funnel and nothing else**: states with placeholder
-names, the transitions between them, one key, and no capabilities. The whole
+What `init` declares is **one loop and nothing else**: two states with
+placeholder names, the four transitions of capturing, queueing, working and
+closing an item, one key, and the two capabilities the close needs, `queued`
+and `numbered`. The starter fits one screen, and the initialization document
+says what each line does. The whole
 roster — [the queue](#the-queue), [the claim](#the-claim),
 [the register](#the-register), [sub-phases](#sub-phases),
-[stale-days](#stale-days), the [dissolving](#dissolving) halves,
-[templates](#templates), `[identity]`, `[fileplan]` — is in this document,
-one section each, and the starter's header says so. A first tree files items and moves them, and does nothing
-else. Nothing in the roster is a fact about somebody else's work until they
+[stale-days](#stale-days), the [close and merge](#dissolving) kinds,
+`[identity]`, `[fileplan]` — is in this document, one section each. A first
+tree files items, moves them and closes them, and does nothing else. Nothing in the roster is a fact about somebody else's work until they
 say so. Shipping this repo's own workflow trimmed would be the
 planning-shaped default the design refuses.
 
@@ -619,11 +671,11 @@ its first instruction is not to run `init`.
 [contract](#the-contract). A run of `init` already finds out what would refuse
 without writing, because every refusal comes before the first write.
 
-`init` touches no `.gitignore` and writes no `.claude/`. Writing a
-`.gitignore` would be one bespoke rule for one file. A tree `git init` has
-usually already given one, and the example's own header says `local/` belongs
-there. Writing a `.claude/` would compile an agent vendor's directory into the
-tool. [The claim](#the-claim) keeps that same hazard out of the source for
+`init` writes **`local/.gitignore` holding `*`**, so the session state the
+tool keeps under `local/` — the lock, the claims — is never committed. That
+file is the tool's own, inside the tool's own directory, so it edits no
+`.gitignore` a repo already has. `init` writes no `.claude/`. Writing one
+would compile an agent vendor's directory into the tool. [The claim](#the-claim) keeps that same hazard out of the source for
 environment variables. The skills a consumer wants are shipped rather than
 scaffolded, and [the skills](#the-skills) is where they are. One flag prints
 the directory, and the consumer's own harness says where a copy goes.
@@ -657,8 +709,8 @@ second construction is the same failure as a second declaration of the number,
 one artifact further out. The number is bumped by the tool that owns
 `pyproject.toml`, never by hand, which is what keeps one declaration true.
 
-**A `plan.toml` can name the oldest release it needs**, in a `[fileplan]`
-table with one field:
+**A `plan.toml` can name the oldest release it needs**, in the `[fileplan]`
+table, which also holds `root` ([States](#states)) and [`ignore`](#ignore):
 
 ```toml
 [fileplan]
@@ -667,8 +719,8 @@ minimum = "0.7.0"
 
 `minimum` is a version of dotted integers, compared number by number, with
 trailing zeros ignored, so `0.7` and `0.7.0` are the same release. There is
-no maximum and no range. A `[fileplan]` table without `minimum` refuses, since
-an empty table says nothing.
+no maximum and no range. An empty `[fileplan]` table refuses, since it says
+nothing.
 
 The minimum is checked **before every other load error**. A `plan.toml`
 written for a newer release may use a field the installed tool does not know.
@@ -714,7 +766,7 @@ not a consumer's.
 
 **A shipped skill cites nothing the install lacks.** The package carries the
 skills and not `docs/`, so a skill points at what travels with the tool:
-`--help`, whose `Reading` and `Running it` blocks name the consumer's own
+`--help`, whose `Reading` block names the consumer's own
 documents, and `--json`. The skills spell the command as plain `fileplan`, so
 a consumer's copy needs no edit, and say once that this source tree runs it
 through `uv run`. A test reads the built wheel and follows every link a skill
@@ -729,8 +781,10 @@ renderings**. The listing is a read rather than a transition: it moves
 nothing, writes nothing, and takes no lock. The traversal walks the declared
 states in declared order. The traversal claims every `*.md` in a state to be
 an item. A file that is not an item refuses the listing by name rather than
-being skipped. Silence would make a broken file look merely absent. A state
-whose directory does not exist yet is empty, not broken.
+being skipped. Silence would make a broken file look merely absent. The one
+exception is a name the declaration lists in [`ignore`](#ignore), which every
+state directory skips. A state whose directory does not exist yet is empty,
+not broken.
 
 **States come in declared order, and each state says how its items are
 ordered.** A state's `sort` field names one key, in `--sort`'s spelling:
@@ -742,8 +796,8 @@ order [`queue`](#queue) and [`requeue`](#requeue) set.
 The load checks that a state's `sort` names a key an item in that state can
 carry. That covers `title`, every declared key, and the keys this state's own
 capabilities and fields give. `position` counts only on a
-[queued](#the-queue) state, and `stale-days` only on a
-[dated](#stale-days) one. Any other key refuses by name, and the refusal lists
+[queued](#the-queue) state, and [`stale-days`](#stale-days) counts on every
+state. Any other key refuses by name, and the refusal lists
 what the state carries. A key no item in the state could carry would put every
 item under `unsorted` on every read. A mistake in the declaration belongs at
 load, not on every read.
@@ -800,9 +854,9 @@ filed. They filter like any declared key. `--lacks claimed-by` is the
 unclaimed work, `--has claim-status=dead` is what needs releasing, and `--has
 claim-holder=this-session` is what this session holds.
 
-Beside the claim fields, where a state opts into the [`dated`
-capability](#stale-days), every row carries **`stale-days`**. `stale-days` is
-the whole days since the item file's last commit. The tool reads `stale-days`
+Beside the claim fields, every row carries
+**[`stale-days`](#stale-days)**: the whole days since the item file's last
+commit. The tool reads `stale-days`
 out of git rather than storing it anywhere, and writes `null` wherever git has
 no answer. `[keys.stale-days]` refuses by name for the reason the claim
 fields do, and so does a transition naming it. `stale-days` is derived rather
@@ -828,6 +882,17 @@ the [close check](#the-close-check) refuses a close-out with, off the same
 reading of the same bullets. So the row and the refusal cannot come to
 disagree about one body. The field filters like any other: `--has
 sub-phases-left=0` is the sections with nothing left in them.
+
+Last among the derived fields, every row carries
+**[`commands`](#commands)**: what could take the item right now, wherever
+some transition starts from an item. `--has commands=VERB` is what `VERB`
+could take.
+
+**An empty tree says how to file the first item.** Where the traversal
+found nothing at all, the text form ends with one line per create
+transition, such as ``Nothing is filed. `fileplan capture TITLE --body
+TEXT` files one in inbox.`` A listing that filters a tree down to nothing
+says nothing more, because the tree is not empty.
 
 A claim belongs to an item **in a claimed state**, and every other record is
 **stranded**. There are two kinds. One kind's slug names no item. The other
@@ -881,11 +946,9 @@ selects the report it cares about.
 present whenever the declaration could fill it and absent otherwise:
 
 * `version` is the envelope's version, an integer.
-* `kind` names the read: `items` for `list`, `item` for `show`, `sub-phase`
-  for `show ITEM NAME`, `next` for an offer of items and `sub-phases` for an
-  offer of bullets. It is a word, never the array. The rows are always under
-  `rows`.
-* `transition` names the command an offer is for, on a `next` read only.
+* `kind` names the read: `items` for `list`, `item` for `show` and
+  `sub-phase` for `show ITEM NAME`. It is a word, never the array. The rows
+  are always under `rows`.
 * `matched` is how many rows the read returns, and `read` is how many the
   traversal walked.
 * `stranded` is present wherever a state claims.
@@ -975,133 +1038,84 @@ refuses it. The line after click's says `did you mean --state plan?`.
 A bad filter refuses **before the tree is walked**. The parse is where a
 refusal happens, so `--state zzz` costs no traversal to reject.
 
-Every one of those filters is on [`next`](#the-next-read) too, which is the
-same read with one narrowing. [`show`](#show) is the same read again, narrowed
-by a handle rather than by a filter. `show` takes no filter at all.
+[`show`](#show) is the same read again, narrowed by a handle rather than by a
+filter. `show` takes no filter at all.
 
-### the next read
+### commands
 
-`fileplan next COMMAND` is the listing, narrowed to **what that command could
-take right now**. There is one subcommand per declared transition that *moves*
-an item. Each subcommand is generated in `plan.toml`'s order and carries that
-transition's own `help`. So the vocabulary is the workflow's, and no
-transition's name is written in the tool.
+Every row carries **`commands`**: the commands that could take the item right
+now, in `plan.toml`'s order, or `null` where none could. The field is present
+whenever some transition starts from an item, whatever is filed.
 
-An item is offered when two things hold:
+```
+lower-the-floor                                   plan
+  ...
+  commands  requeue, retitle, decompose, work, decline
+```
+
+A command is named when everything its own run checks about the item holds:
 
 * the item is **in the transition's `from` state**;
 * the item's head satisfies everything the transition [`requires` and
-  `refuses`](#transitions).
+  `refuses`](#transitions);
+* no **other** session holds the item's [claim](#the-claim), where the
+  transition enters or leaves a claimed state;
+* no open [carrier](#carrier) names the item, where the transition is a close
+  that archives ([the dangle check](#the-dangle-check));
+* every sub-phase carries a mark, under the same close ([the close
+  check](#the-close-check));
+* the item carries a number, where the transition archives ([the
+  register](#the-register));
+* no bullet in the body is one the reader passes over, where the transition
+  writes or marks a bullet ([sub-phases](#sub-phases)), and the item carries
+  what its state's name form needs, counting any key the transition sets;
+* for a [mark-bullet](#marking), the item has a bullet a mark could still go
+  on.
 
-Those two are the checks the transition itself runs, composed once rather than
-spelled a second time. So the offer and the transition agree by construction,
-instead of by a test that two lists match.
+Each check is the function the run refuses through, composed once rather than
+spelled a second time. So the row and the run agree by construction, instead
+of by a test that two lists match.
 
-**A transition that stays in its state is offered again after it runs.**
-Running it again is legal, so hiding the item would break that agreement. A
-workflow that means "once" says so in the declaration, with `refuses = { KEY =
-true }` on the key the transition sets ([transitions](#transitions)). A
-workflow that only wants to read "not yet done" narrows the offer with
-`--lacks KEY`.
+**What could a command take is a filter.** `fileplan list --has
+commands=archive-plan` is the sections that could close right now, which is
+the old tool's `--closeable`. Earlier releases spelled it as a third read,
+`fileplan next COMMAND`. Folding it into the row left two reads, `list` and
+[`show`](#show), and every filter, sort and rendering a listing has.
 
-A [claim](#the-claim) excludes an item only when the claim is **another
-session's**. The offer is what the transition would not refuse. A transition
-keeps a claim the running session already holds, rather than re-stamping it.
-So the section this session picked up yesterday is still what `next` hands
-back today. The [listing](#the-listing) keeps that same rule for a claim you
-hold, and the offer applies it. `--lacks claimed-by` is how you ask the
-stricter question: work nobody at all has picked up. A transition that neither
-enters nor leaves a claimed state reads no claim record and is narrowed by
-none.
+**A transition that stays in its state is named again after it runs.**
+Running it again is legal. A workflow that means "once" says so in the
+declaration, with `refuses = { KEY = true }` on the key the transition sets
+([transitions](#transitions)).
 
-The offer is **one traversal in two renderings**, exactly as the listing is.
-The offer runs the listing's own code with a predicate handed to it. The same
-filters narrow the offer further, and `--state` on an offer is redundant
-rather than wrong. The text form frames with `N of M`, where M is the whole
-tree the traversal walked. `--json` carries the same envelope with `"kind":
-"next"` and a `transition` field naming which transition the rows are next
-for.
+A claim excludes an item only when the claim is **another session's**. A
+transition keeps a claim the running session already holds, so the section
+this session picked up yesterday still names `work` today. `--lacks
+claimed-by` is how you ask the stricter question: work nobody at all has
+picked up.
 
-A transition with **no `from` creates** an item, so nothing in the tree can
-ever be next for that transition. A creating transition gets no subcommand and
-refuses **by name**. A name the declaration does not have refuses by name too,
-and that refusal lists the names the declaration does have. An always-empty
-listing would read as "nothing is ready" where the truth is "the question does
-not apply".
+A transition with **no `from` creates** an item, so no row ever names it.
 
-**The offer grades one *item*.** A transition can still refuse for a defect in
-the **tree** — a gap in the register, an exhausted gap in the order. A
-transition can also refuse over the values a particular run was given. Both
-kinds of defect block every item alike rather than describing any one item.
-[`list`](#the-listing) is where a tree defect is found. So an offer can name
-an item the transition then refuses. What an offer cannot do is hide an item
-the transition would have taken. A refusal that describes **one** item is
-therefore graded here rather than left to the run. An open
-[carrier](#carrier) naming the item is the case that exists. The offer grades
-that carrier through the same function the transition refuses with ([the
-dangle check](#the-dangle-check)).
+**The row grades one item.** A transition can still refuse for a defect in
+the **tree**, such as a gap in the register, or over the values a particular
+run was given. Those block every item alike, and [`list`](#the-listing) is
+where a tree defect is reported. So a row can name a command the run then
+refuses. What a row cannot do is leave out a command the run would have
+taken.
 
-The offer answers **yes or no and never why not**, deliberately. The offer is
-a listing. A listing narrowed to the items a transition would take has nothing
-to say about the items it would not. [`--check`](#the-check) is where
-a single item asks why not, and `--check` asks the transition rather than a
-second copy of the rules.
+The row answers **yes or no and never why not**. [`--check`](#the-check) is
+where a single item asks why not, and `--check` asks the transition rather
+than a second copy of the rules.
 
-**A transition that [marks](#marking) offers bullets, not items.** The subject
-of a marking transition is one finding, so its offer is the traversal's second
-row kind. There is one row per bullet, carrying the bullet's name, the item
-holding it, that item's state, what the bullet says, the bullet's mark and the
-item's path:
+**A mark-bullet's subject is one bullet, not the item.** The row names the
+command while any bullet is left to mark. Which one is the next is
+`next-sub-phase` ([the cursor](#the-cursor)), and [`show ITEM NAME`](#show)
+reads one bullet. A bullet carrying text after its bold run cannot be marked,
+and the listing reports it rather than counting it as left
+([marking](#marking)).
 
-```
-f1  cache-misses
-  state  carrier
-  title  The index is rebuilt per call
-  path   carriers/cache-misses.md
-
-showing 2 of 40 sub-phases
-```
-
-The bullet read is what makes a 100k-token carrier affordable. A session never
-opens the carrier. The session lists the findings one line each and acts on
-one. The two narrowings **compose**. An item passes the transition's own
-preconditions exactly as it does for any other offer. Then the item's bullets
-are narrowed to the ones that transition could still take. The takeable
-bullets are the unmarked ones a mark could be read on. A bullet carrying text
-after its bold run is passed over, and [the listing](#the-listing) reports
-that bullet. Every disposition therefore lists the same findings until one of
-them runs.
-
-`walked` is the whole traversal's bullets, including the ones in items the
-offer passed over. `walked` counts what the traversal read rather than what
-the traversal offered. The rule does not change for a second row kind.
-What `walked` leaves out is what no transition could take. An
-[unnamed](#sub-phases) bullet is one, because nothing can point at an unnamed
-bullet. The [pending bullet](#bulleted) is the other, because the pending
-bullet marks the decomposition rather than being work. Both still **count**.
-`list` saying `sub-phases 7` beside an offer saying `5 of 5` is the difference
-showing rather than hiding.
-
-The frame counts in the tool's own noun, `sub-phases`. What a workflow *calls*
-its bullets is the heading's business. The tool may no more say "findings"
-than it may say [`done`](#the-cursor).
-
-**The bullet offer takes `--json` and no filters.** Every filter names a key
-an *item* carries, and a bullet row is not an item. Narrowing which items
-contribute findings is the obvious extension, and that extension has no
-caller. So it is deliberately not built.
-
-[`list`](#the-listing) and [`show`](#show) are untouched by the bullet offer.
-Both walk items and show the row rather than the body, so a mark appears in
-neither read. A session that wants to see the marks reads the file the row's
-`path` names. The alternative is running the offer for the disposition the
-session cares about.
-
-**A usage error points here.** `--check` is the command's, so `fileplan next
-work --check` is click's refusal. The line after it says `fileplan work ITEM
---check`. A command run with no `ITEM` gets `fileplan next VERB` as the way to
-see what it can take. `show` and `release` are not transitions, so theirs is
-`fileplan list`.
+**A usage error points here.** A transition run with no `ITEM` says
+`fileplan list --has commands=VERB` is the way to see what it can take.
+`show` and `release` are not transitions, so theirs is `fileplan list`.
 
 ### show
 
@@ -1122,8 +1136,8 @@ narrowing.
 
 `show` prints the **row**, never the body. `cat` the `path` the row names to
 read the prose. What the row adds is everything the file does not hold —
-`claimed-by`, `claim-status` and `claim-holder`, `blocked-by` and `blocks`, `stale-days`, and
-the fields counted off the body. Putting the body in the row would put the body in
+`claimed-by`, `claim-status` and `claim-holder`, `blocked-by` and `blocks`,
+`stale-days`, `commands`, and the fields counted off the body. Putting the body in the row would put the body in
 *every* `list --json` as well. The token budget rules that out. Putting the
 body in only one rendering would break the very thing that makes both
 renderings agree.
@@ -1138,9 +1152,9 @@ the verbatim lines carry, not more. `title`, `mark` and `text` are extracted
 *from* the lines a person reads. The three extracted fields are shaped for the
 audience that would otherwise re-parse the bold.
 
-A bullet read is `show` narrowed one step further. [A disposition's
-offer](#the-next-read) already lists bullets, so a bullet is already a subject
-of the read surface. `show ITEM NAME` narrows that subject to one. A finding
+A bullet read is `show` narrowed one step further. A
+[mark-bullet](#commands)'s subject is a bullet, so a bullet is already a
+subject of the read surface. `show ITEM NAME` narrows to one. A finding
 in a [carrier](#carrier) can therefore be read one bullet at a time. The
 alternative is opening a file that may run to a hundred thousand tokens. A
 fenced transcript inside a finding comes back whole, because [a fenced line is
@@ -1154,9 +1168,8 @@ arm of its own. An item whose state counts no sub-phases refuses by name.
 There is nothing in such an item for a name to point at.
 
 The counts frame and every [exception report](#the-listing) are the **whole
-tree's**, unnarrowed. [The register](#the-register) is unnarrowed too, and
-prints beside the counts here. The frame under `show` reads `showing 1 of 12
-items`. The `12` is what the traversal read, which is what the frame counts
+tree's**, unnarrowed. [The register](#the-register) is unnarrowed too, in
+`--json`'s envelope. The frame under `show` reads `showing 1 of 12 items`. The `12` is what the traversal read, which is what the frame counts
 of. A read that hid a stranded claim or an unknown edge because you asked
 about one item would be the first read to hide one.
 
@@ -1165,14 +1178,15 @@ about one item would be the first read to hide one.
 `fileplan COMMAND --help` is what a transition promises. First the options the
 command takes, then the **contract**. The contract says where the item goes,
 what the transition requires, what it refuses, and what it takes off the head.
-The contract also says which halves the transition declares, and names the
-sections that hold the meaning of all of it.
+The contract also says the transition's [kind](#kinds) and the options it
+declares, and names the sections that hold the meaning of all of it.
 
 ```
 Where the item goes
   stays in plan
 
 Declares
+  edit
   claims
 
 Reading
@@ -1194,6 +1208,16 @@ says what the key's value means, and so does each key a filing transition
 writes onto the filed item. The key's `help` was always on the option, and
 the `help` says what to pass rather than what the key is.
 
+**`doc` is optional on every entry.** A transition or a key whose meaning
+needs no section of its own names none, and its line is left out of
+`Reading`. A transition naming none, with no key naming one either, carries
+no `Reading` block at all, and then its `help` line is the whole of what a
+session reads. That pulls against the design's rule that the process lives
+in documents a transition points at, and the way through is that the rule
+is still kept by any workflow that writes a section: the pointer is graded
+exactly as before wherever it is given. What changed is that a new repo is
+no longer made to write an empty heading per word before its first run.
+
 The tool surfaces the pointers rather than leaving a reader to find them. A
 skill that opened `plan.toml` to look up a pointer would be **a second parser
 of the declaration**. The skill is the one artifact whose whole premise is
@@ -1213,7 +1237,7 @@ hold for the run to go. `Drops` says what the head will not hold afterwards.
 `Drops` stays **out** of `Reading`, which names what the values a run *writes*
 mean. A dropped key has no value to mean, and the key's own section is one
 `fileplan` read away. A transition that drops nothing carries no `Drops`
-block, the shape `Declares` already has.
+block, the shape `Files` already has.
 
 A transition that [files](#filing) an item carries a **`Files` block**, after
 `Declares`. The block says where the filed item goes and which keys the run
@@ -1224,7 +1248,7 @@ the declared table with its `sets`, or `null` for a transition that files
 nothing.
 
 **`--help` describes the declaration.** [`list`](#the-listing), [`next
-COMMAND`](#the-next-read) and [`show`](#show) walk the **tree** and are the
+COMMAND`](#commands) and [`show`](#show) walk the **tree** and are the
 whole of that read surface. `--help` and the bare `fileplan` table of contents
 answer a different question, with different answers and no items in them.
 Nothing in a contract counts, filters or resolves a handle.
@@ -1233,9 +1257,10 @@ Nothing in a contract counts, filters or resolves a handle.
 contents grows the flag, and the flag renders the whole declaration. The
 states come first, then one object per declared transition. Each object
 carries every block above, under the block's own name. So a composing session
-asks once, instead of running `--help` per command. `Declares` alone is not
-always the answer, because halves are shared. `Reading` is what tells two
-transitions declaring one half apart, and `Reading` is in the same read.
+asks once, instead of running `--help` per command. In `--json`, `kind` is
+its own field and `declares` holds the options alone. `Declares` alone is not
+always the answer, because two transitions can share a kind. `Reading` is
+what tells two edits apart, and `Reading` is in the same read.
 
 The states carry a name and a path, as the text prints them. What a
 declaration says about itself is already in the consumer's own `plan.toml`.
@@ -1263,14 +1288,11 @@ The entries are read off the same click parameters `--help` renders, so the
 JSON and the help cannot disagree. A test runs `--help` for every command and
 holds each option it prints to the JSON.
 
-`commands` holds the tool's own words: `list`, `next`, `show`, `init`, and
-`release` where some state is claimed. Each command has a `name`, a `help`,
-`options` and `commands`. The tool's own words are not transition objects,
-because a transition object's `from`, `to` and blocks would all be empty for
-them. `commands` is empty everywhere except `next`, which holds one entry per
-`next COMMAND`. Each `next COMMAND` takes its own options: an offer of items
-takes the [listing](#the-listing)'s filters, and an offer of bullets takes
-`--json` alone.
+`commands` holds the tool's own words: `list`, `show`, `init`, and `release`
+where some state is claimed. Each command has a `name`, a `help`, `options`
+and `commands`, which is empty: none of them nests another. The tool's own
+words are not transition objects, because a transition object's `from`, `to`
+and blocks would all be empty for them.
 
 `keys` holds every declared key, with its `name`, `help`, `doc` and `values`.
 `values` is the closed set, or `null` for free text.
@@ -1300,11 +1322,11 @@ preconditions. Every arm of the executor already resolves everything it needs
 before writing anything. Resolving first is what makes a refusal leave the
 tree byte-identical. So the check returns at the seam instead of carrying on:
 
-| the declared half | the seam it stops at |
+| the kind | the seam it stops at |
 |---|---|
-| creates | the reservation, `open("x")` on the destination |
-| moves | the write, inside `_place`, after the head is graded |
-| dissolves | `unlink()` on the item |
+| `create` | the reservation, `open("x")` on the destination |
+| `close` and `merge` | `unlink()` on the item |
+| every other kind | the write, inside `_place`, after the head is graded |
 
 A check that could disagree with its run would be exactly the second home the
 flag exists to avoid. So nothing is extracted into a shared prefix, and
@@ -1365,52 +1387,100 @@ namespace and stays legal. A key and an option meet on one command line; a
 transition and an option never do. So this repo can declare [`note`](#note)
 while every marking transition takes [`--note`](#marking).
 
+### kinds
+
+Every transition says what kind of transition it is, in one field:
+
+```toml
+[transitions.decompose]
+kind = "add-bullet"
+doc  = "docs/method.md#decompose"
+help = "Write the next sub-phase into a section."
+from = "plan"
+```
+
+There are nine kinds, and the kind decides which other fields the
+transition takes. A field the kind does not take refuses by name, and the
+refusal lists the fields the kind does take.
+
+| Kind | What it does | `from` and `to` | Its own fields |
+|---|---|---|---|
+| `create` | writes a new item | `to` only | `sets`, `claims` |
+| `move` | moves an item to another state | both, and they differ | `sets`, `drops`, `claims`, `archives` |
+| `reorder` | changes an item's place in a queued state | `from` only | none |
+| `edit` | writes keys, or takes a claim, where the item is | `from` only | `sets`, `drops`, `claims` |
+| `rename` | gives an item a new title and slug | `from` only | none |
+| `close` | takes the item's file away | `from` only | `archives` |
+| `merge` | takes the item away into a survivor | `from` only | none |
+| `add-bullet` | writes the next bullet into the item's body | `from` only | `sets` |
+| `mark-bullet` | writes a word onto one bullet | `from` only | `marks`, `sets`, `drops`, `files` |
+
+Every kind that starts from an item also takes `requires` and `refuses`, and
+every kind takes `doc` and `help`. A transition with no `help` gets one from
+its kind, said with the states it names: a move from `inbox` to `plan` reads
+"Move an item from inbox to plan." A repo writes `help` only to say something
+better. A kind that stays in its state
+writes only `from`, because the item does not go anywhere. A `to` beside it
+refuses, rather than being ignored. A `close` or a `merge` names no `to` at
+all, because the item lands nowhere.
+
+Three rules go beyond the table. A move whose `to` is its `from` refuses, and
+says to write `edit` or `reorder`. A reorder refuses in a state that is not
+`queued`, because the items there have no order to change. An edit that names
+no `sets`, no `drops` and no `claims` refuses, because it would write nothing.
+
+**Why a kind is declared.** Before kinds, a transition never said what
+it was. Six true/false fields said it between them, and each refused some of
+the others: `mints` and `marks` could not go together, `absorbs` needed
+`dissolves`, and `dissolves` refused a `to`. A reader had to learn those rules
+to predict which options a command would take. The command line was then
+worked out from the fields in many separate places. Every transition in this
+repo, in the starter and in the consumer's workflow fits exactly one kind, so
+the kind is now written down and those rules collapse into the table above.
+
+A plan.toml written before kinds refuses by name, and the refusal says the
+line to write. The kind it suggests is read off the fields that used to spell
+it: no `from` is a create, `mints` an add-bullet, `marks` a mark-bullet,
+`retitles` a rename, `dissolves` a close, and `dissolves` with `absorbs` a
+merge. A `to` that differs from `from` is a move. A transition staying where
+it is becomes an edit if it writes a key or a claim, and a reorder if it does
+not. The four fields that did nothing but spell a kind (`mints`, `retitles`,
+`dissolves` and `absorbs`) refuse by name too.
+
 ### the interpreter
 
 One skill runs any single declared transition, and the sections the contract
 names are the program that skill runs. The skill asks the tool for the
 [contract](#the-contract), then asks with [`--check`](#the-check) whether this
 item passes. The skill then reads the sections the contract names, does what
-those sections say, and runs the command. The skill branches on the halves the
-contract says the transition **declares**, never on the transition's name. So
-one procedure covers a creating transition, an in-place one and a dissolving
-one. A stranger can follow the same procedure for a transition nobody has seen
+those sections say, and runs the command. The skill branches on the
+[kind](#kinds) and the options the contract says the transition **declares**,
+never on the transition's name. So one procedure covers a create, an edit and
+a close. A stranger can follow the same procedure for a transition nobody has seen
 before.
 
 Nothing in the skill is this workflow's. The worked example is *generated*:
 step one is `fileplan COMMAND --help`, so the example a reader gets is the
 command they actually have.
 
-`policy =` is the slot the procedure lives in — a second pointer beside
-`doc`, on the transition:
+**A procedure is reached by a link from the transition's own section.** The
+`doc` a transition names says what the transition and its values **mean**.
+Where a session also has something to **do** around the run — questions to
+ask first, what a value commits you to, what the run costs that nothing else
+warns about — that section links to a section of the procedures document:
 
-```toml
-[transitions.decompose]
-doc    = "docs/method.md#decompose"
-policy = "docs/procedures.md#decomposing-a-section"
+```
+What a session does around a run of `decompose` is [decomposing a
+section](procedures.md#decomposing-a-section).
 ```
 
-The two pointers are separate because they answer different questions. `doc`
-is what the transition and its values **mean**, which is this document.
-`policy` is what a session **does** around the run. A policy section says
-which questions to ask first, what a value commits you to, and what the run
-costs that nothing else warns you about. Folding the procedure into the `doc`
-section would make one field mean two things. The contract could then no
-longer tell a caller which of the two it had handed over.
-
-`policy` is optional, and **absence is the common case**. Most transitions
-have no procedure beyond their semantics. A transition with no `policy`
-carries no `Running it` block at all. The missing block is how the interpreter
-is told there is nothing further to read — the shape `Declares` already has.
-The polarity is deliberate. A workflow that never writes a procedure gets a
-command that reads as "just run it", which is true. A command claiming a
-procedure nobody wrote would not be.
-
-Where `policy` points is graded exactly as `doc` is. The value is a string,
-carrying an anchor, resolving to a heading in a document the tree ships, at
-**every** invocation. Grading is the whole reason to declare the pointer,
-rather than let an interpreter find a document by convention. A convention
-breaks silently, and a declared pointer refuses by name.
+Most transitions have no procedure beyond their meaning, and their section
+links to none. One pointer per transition keeps the declaration to one field
+for one question. Earlier releases had a second field, `policy =`, and a
+`Running it` block in the contract. A plan.toml that still declares `policy`
+refuses by name and says to move the link into the section. This repo's
+tests grade that every section of the procedures document is linked from the
+section of a transition that uses it.
 
 The claim is taken by **the run**, not before the run. A claim is taken by a
 transition that declares `claims` ([the claimed state](#the-claimed-state)),
@@ -1431,26 +1501,25 @@ run.
 name each transition before asking for its contract. Naming a transition by
 *name* would put the workflow's vocabulary back into the interpreter. One name
 changed in `plan.toml` and the composed procedure stops working, silently, on
-the arm that never runs. So a composed procedure selects by declared half,
-exactly as the single-transition procedure branches by declared half. The bare
-table of contents carries a `Declares` block for that selection. One read says
-which transition declares which half, against opening every contract in turn.
-The block is the same tuple the epilog renders per transition, indexed instead
-of listed. [`list`](#the-listing) and [`show`](#show) already have that
-relationship: two renderings of one fact. A session wanting the `Reading`
-blocks beside the halves reads [`fileplan --json`](#the-contract), which is
-every transition's contract in one read. A transition declaring no half is
-absent from the `Declares` block. Where two transitions declare one half, the
-composed procedure reads their `help` lines and chooses. Choosing is a
+the arm that never runs. So a composed procedure selects by kind and
+declared option, exactly as the single-transition procedure branches on them.
+The bare table of contents carries a `Declares` block for that selection: one
+line per transition, its kind and then its options. One read says which
+transition is which kind, against opening every contract in turn. The block is
+what the epilog renders per transition, indexed instead of listed.
+[`list`](#the-listing) and [`show`](#show) already have that relationship: two
+renderings of one fact. A session wanting the `Reading` blocks beside the
+kinds reads [`fileplan --json`](#the-contract), which is every transition's
+contract in one read. Where two transitions match one need, the composed
+procedure reads their `help` lines and chooses. Choosing is a
 judgment, and judgment belongs in the skill rather than in the declaration.
 
-So a **composed** procedure lives in a skill rather than in a `policy`
-document. `policy =` sits on a transition, so every section of the procedures
-document is reached by a pointer from a transition. A section describing a
-session that is not a transition could be pointed at by nothing. The orphan
-check would refuse that section. What one run needs is declared and
-pointed at. What composes several runs is not the declaration's business at
-all.
+So a **composed** procedure lives in a skill rather than in the procedures
+document. Every section of the procedures document is reached by a link from
+a transition's section. A section describing a session that is not a
+transition could be linked from nothing, and the orphan check would refuse
+it. What one run needs is linked from its transition. What composes several
+runs is not the declaration's business at all.
 
 ### dependencies
 
@@ -1501,9 +1570,9 @@ are different facts. A field spelling both would let the second hide inside
 the first.
 
 What makes reversing the rule safe is the rule at the other end. **When an
-item dissolves, the transition that dissolves it clears the met edge from
-every item naming it.** The edge is taken out, or, when the transition
-[absorbs](#dissolving), pointed at the item the work continues as. The run
+item is taken away, the close or merge that takes it clears the met edge from
+every item naming it.** The edge is taken out, or, when the transition is a
+[merge](#dissolving), pointed at the item the work continues as. The run
 says on stderr which items it edited. So the tree never holds an edge to an
 item that has closed or merged. An edge naming nothing is then a typo or a
 rename, rather than a finished dependency. Nothing anywhere stores a closed
@@ -1540,9 +1609,10 @@ something else. Two statements that disagree are a person's to settle.
 
 **Both reports gate nothing and refuse nothing.** An unresolvable edge does
 not refuse the listing. Grading a head *value* at read time would break a
-whole listing over one item. An unresolvable edge does not narrow
-[an offer](#the-next-read) either. A gate would make a precondition depend on
-a derived fact, and the offer's checks stay pure over a head. So an unknown
+whole listing over one item. An unresolvable edge does not take a command off
+a row's [`commands`](#commands) either. A gate would make a precondition
+depend on a derived fact, and the checks behind `commands` stay pure over a
+head. So an unknown
 edge costs an item nothing mechanically. The edge is a line in the default
 read, and a session goes and looks.
 
@@ -1556,14 +1626,8 @@ dangles later, after a rename or an abandon, is still only reported.
 
 ### stale-days
 
-A state may opt into the **`dated` capability**, and [`plan`](#plan) does.
-Every row then carries **`stale-days`**. That is the whole days between the
-item file's **last commit** and today.
-
-```toml
-[states.plan]
-capabilities = ["queued", "claimed", "numbered", "bulleted", "dated"]
-```
+Every row carries **`stale-days`**: the whole days between the item file's
+**last commit** and today. Nothing is declared to switch it on.
 
 **Nothing is stored to make that number.** There is no head key, no stamp a
 transition writes, no counter anywhere. The anchor is already in git, and git
@@ -1571,9 +1635,9 @@ is read when the listing runs. (John settled that on 2026-09-04, asked as: the
 file's last commit, its first commit, or a sha a transition stamps.) A stored
 grade would be true on the day it was written, and true-looking forever after.
 The rule this repo keeps is that stale data is worse than none, and that
-nothing cheap to re-derive gets stored. So the capability has **no transition
-half**. Unlike `claims` and `mints` there is nothing for a transition to
-write, and nobody should go looking for the missing one.
+nothing cheap to re-derive gets stored. Unlike `claims` or an `add-bullet`
+there is nothing for a transition to write, and nobody should go looking for
+the missing one.
 
 Two consequences follow from reading the *last* commit:
 
@@ -1592,11 +1656,15 @@ where author time is when the work actually happened. The author's own zone,
 because "the day they did it" is what a person means by a date.
 
 `stale-days` is `null` wherever git has no answer. No answer is a tree that is
-not a git repo, a file git has never been given, or an item in a state that
-does not opt in. A tree that is not a repo **lists normally**: every value
-`null`, no traceback, rc 0. A consumer's tree need not be in git, and that
-costs them nothing. Staleness is a capability rather than a field every row
-carries for the same reason. No history is walked where nobody asked for one.
+not a git repo, or a file git has never been given. A tree that is not a repo
+**lists normally**: every value `null`, no traceback, rc 0. A consumer's tree
+need not be in git, and that costs them nothing.
+
+**Why there is no switch.** Earlier releases had a state opt into a `dated`
+capability, so no history was walked where nobody asked for one. The walk
+costs milliseconds, and a switch is a setting a newcomer has to learn about
+before seeing a number that every listing can show. A plan.toml that still
+names `dated` refuses by name and says to drop it.
 
 `stale-days` filters like any other field. `--has 'stale-days>=14'` is what
 nobody has been near in a fortnight. The comparison is numeric, because both
@@ -1604,13 +1672,13 @@ sides are numbers. `--has stale-days` is the items git has an answer about.
 `--lacks stale-days` is the ones it does not, the items filed today among
 them.
 
-**`stale-days` reports, and it does not gate.** No [offer](#the-next-read) is
-narrowed by it, and no precondition reads it. A gate would make a precondition
+**`stale-days` reports, and it does not gate.** No row's
+[`commands`](#commands) depends on it, and no precondition reads it. A gate would make a precondition
 depend on a derived fact. The precondition checks would then stop being pure
 over a head, and every one of their tests would need a tree on disk. A filter
 is how you act on the number.
 
-The **cost of the read** is one history walk per dated item. Each stops at the
+The **cost of the read** is one history walk per item. Each stops at the
 first commit that touched that file. At this repo's scale that is
 milliseconds. One walk inspecting every commit's changes for all the paths at
 once is the optimisation, if a tree ever holds thousands of items. That walk
@@ -1625,15 +1693,15 @@ would be machinery for n=0.
 ### the close check
 
 A record is filed and the body it was written from is taken away in **one
-run**. So a transition that both [`archives` and `dissolves`](#dissolving)
-refuses while any named sub-phase carries no [mark](#marking).
+run**. So a [`close`](#dissolving) that declares `archives` refuses while
+any named sub-phase carries no [mark](#marking).
 
-The close check is a rule over the two **halves**, never over a transition's
-name. [The dangle check](#the-dangle-check) beside it reads the same two
-halves for the same reason. The harm is the dissolve. A sub-phase nobody
+The close check is a rule over the kind and the option, never over a
+transition's name. [The dangle check](#the-dangle-check) beside it reads the
+same pair for the same reason. The harm is the deletion. A sub-phase nobody
 marked is a piece of the section the entry does not have in it. Once the body
 is gone nothing is left to write it from. [`decline`](#decline) archives and
-does not dissolve, so it does not inherit the rule. A section abandoned *half
+is a move, so it does not inherit the rule. A section abandoned *half
 done* is the whole content of that decision.
 
 **The close check reads the body, so it fires at the close rather than as a
@@ -1647,9 +1715,9 @@ path. The bullets are in the file the operator already has open. The state's
 [pending marker](#bulleted) is among them and always blocks. The pending
 marker is the tool saying the decomposition itself is unfinished. The dangle
 check's reading of a forgotten marker as *loud and harmless* stays true of
-[carriers](#carrier). The [offer](#the-next-read) narrows through the same
-function the run refuses through, so `fileplan next archive-plan` still says
-exactly which sections could close.
+[carriers](#carrier). A row's [`commands`](#commands) is worked out through
+the same function the run refuses through, so `fileplan list --has
+commands=archive-plan` says exactly which sections could close.
 
 **What the close check does not reach.** What a body-reading rule reaches is a
 mark the tool itself wrote, never prose. The check can say "this bullet is
@@ -1687,19 +1755,20 @@ gates itself, without a capability whose only job would be a second way to
 spell "absent". The key it names is an ordinary `sets` key. A session names it
 on the run that opens the carrier, and no transition writes it by itself.
 
-**What the field gates is one refusal.** A transition that
-[archives *and* dissolves](#dissolving) takes the item away and writes the
-record that outlives it. So the transition **refuses** while a carrier still
+**What the field gates is one refusal.** A [`close`](#dissolving) that
+declares `archives` takes the item away and writes the record that outlives
+it. So the transition **refuses** while a carrier still
 names that item and holds a finding nothing has [marked](#marking). The
 refusal names the carrier's file, the declared key it names the item in, and
-how many of its bullets carry no mark. Both halves are needed, because the
-harm is the **dangle**. Only a dissolving transition creates a dangle. A
-section given up on instead lives on where the transition moved it, so what
-named it still resolves and nothing is orphaned. The dangle check is a rule
-over declared halves, never over a transition's name. And the check keeps
+how many of its bullets carry no mark. The kind and the option are both
+needed, because the harm is the **dangle**. Only a transition that takes the
+file away creates a dangle. A section given up on instead lives on where the
+transition moved it, so what named it still resolves and nothing is orphaned.
+The dangle check is a rule over the kind and its options, never over a
+transition's name. And the check keeps
 abandoning a half-done section one run, rather than one run per open finding.
 
-The dangle check has a **sibling over the same two halves**, one file nearer.
+The dangle check has a **sibling over the same pair**, one file nearer.
 The closing item's *own* unmarked sub-phases refuse the same run. That
 sibling's home is [the close check](#the-close-check), which is where the two
 are told apart. The dangle check reads a carrier's bullets through the key the
@@ -1709,7 +1778,7 @@ The check reads the **tree**: what the state names, and what the bullets under
 it carry. That is what every other precondition already reads. Nothing it asks
 is derived from git, and that is the line [`stale-days`](#stale-days) draws. A
 precondition reading history would stop being pure over a head, and every test
-of it would need a repo on disk. The [offer](#the-next-read) is narrowed by it
+of it would need a repo on disk. A row's [`commands`](#commands) reads it
 through the same function the transition refuses with. So the read and the run
 cannot disagree about which items are affected. What the check does not add is
 another [exception report](#the-listing). The refusal is where a forgotten
@@ -1800,7 +1869,10 @@ the highest and [the gaps](#the-listing) answer **is N a section**, with
 nothing re-derived. Below the floor is recorded elsewhere by declaration.
 Above the highest nothing has been minted. Between them a number is held
 unless it is a gap. The record says what the register holds rather than what
-is wrong with it, so it prints on every read.
+is wrong with it, so it is in `--json`'s envelope on every read and nowhere in
+the text form. A person meets the register only when something is wrong
+with it, as a gap or a lost close-out; "floor" is a word a newcomer never has
+to learn to read a listing.
 
 An **archive entry's heading is `## <number>. <title>`**. That is the number,
 a full stop, a space, then the title. The register reads that form and the
@@ -1851,6 +1923,7 @@ opts in:
 
 ```toml
 [transitions.decline]
+kind     = "move"
 from     = "plan"
 to       = "abandoned"
 archives = true
@@ -1869,11 +1942,10 @@ a document reading 1, 2, 4, 3. The parser and the writer are in one module. So
 the form the entry is written in and the form the register reads cannot drift
 apart.
 
-**Recording an item and deleting it are two different opt-ins.** A transition
-that sets an item aside records it and moves the file. A transition that
-closes it out records it and takes the file away. `archives` is the recording
-half alone, so a transition that wants both says both. And the half that
-deletes is graded, and documented, on its own.
+**Recording an item and deleting it are two different choices.** A move
+that sets an item aside records it and moves the file. A close records it and
+takes the file away. `archives` is the recording alone, an option on a
+`move` or a `close`, and the deletion is the close's kind.
 
 **The item is written first and the entry second**, which is
 [the claim record](#the-claimed-state)'s order. A crash between the two leaves
@@ -1888,9 +1960,10 @@ Four things refuse, and one deliberately does not:
 
 - `archives = true` **out of a state that mints no number** refuses at load.
   An entry is named by its number, and there would be nothing to name it by.
-- `archives = true` **on a transition that does not leave its state** refuses
-  at load. The number is dropped on the way *out*, so an in-place transition
-  would file the number and leave the item carrying it too.
+- `archives = true` **on a kind that stays** refuses at load, because only a
+  move and a close take it. The number is dropped on the way *out*, so an
+  in-place transition would file the number and leave the item carrying it
+  too.
 - An item carrying **no number** refuses at the run, by name.
 - A number the archive **already holds** refuses at the run, naming both
   claimants. It is the same refusal a mint gives, because it is the same
@@ -1910,34 +1983,31 @@ declining to accept the fix.
 
 ### dissolving
 
-A transition may **take the item's file away** instead of moving it:
+Two [kinds](#kinds) **take the item's file away** instead of moving it, a
+`close` and a `merge`:
 
 ```toml
 [transitions.archive-plan]
-from      = "plan"
-archives  = true
-dissolves = true
+kind     = "close"
+from     = "plan"
+archives = true
 ```
 
-`dissolves` is the **deletion half**, whose other half is
-[`archives`](#the-register). A transition that closes a section out declares
-both: record it, then remove it. [`decline`](#decline) declares only
-`archives`, and moves the file.
+A close that declares [`archives`](#the-register) records the item, then
+removes it. That is how a section is closed out. [`decline`](#decline) is a
+move that declares `archives`, and keeps the file.
 
-**A transition declares where the item goes, or that it goes nowhere.** `to`
-is required unless `dissolves = true`, and refused when it is. So is
+**A close or a merge names no `to`**, and a `to` beside one refuses. So does
 everything else that would put something on the file afterwards. `sets` and
-`drops` are what its head would carry. `mints` is what its body would carry.
-And `claims` is a record about a file that will not be there. All five refuse
-**at load**. What stays is what grades or records. `requires` and `refuses`
-read the head before it goes, and `archives` has as its whole job that
-something outlives the file.
+`drops` are what its head would carry, and `claims` is a record about a file
+that will not be there. None of them is a field either kind takes. What stays
+is what grades or records. `requires` and `refuses` read the head before it
+goes, and `archives` has as its whole job that something outlives the file.
 
-**`dissolves` stands alone.** A transition that dissolves an item out of an
-*unnumbered* state can archive nothing, since there is no number to name an
-entry by. And `merge`, which absorbs a [`someday-maybe`](#someday-maybe) item
-into another, is exactly that shape. So no refusal ties the two flags
-together.
+**A close need not archive.** A close out of an *unnumbered* state can
+archive nothing, since there is no number to name an entry by. And
+[`merge`](#merge), which takes a [`someday-maybe`](#someday-maybe) item into
+another, is exactly that shape.
 
 **The order is delete, file, clear, free**, and every refusal is computed
 before any of it. So a refused run leaves the item, the archive and every
@@ -1988,32 +2058,27 @@ such line, because the check says what the run would do.
 The stderr lines come in the order the run works. The archive entry comes
 first, then the edges, then the prose, then one line per item removed.
 
-**`absorbs = true` points an item's edges at a survivor instead of removing
-them.** `absorbs` is the second declared half of dissolving, and
-[`merge`](#merge) is this workflow's transition of the shape:
+**A merge points an item's edges at a survivor instead of removing them.**
+[`merge`](#merge) is this workflow's transition of that kind:
 
 ```toml
 [transitions.merge]
-from      = "someday-maybe"
-dissolves = true
-absorbs   = true
+kind = "merge"
+from = "someday-maybe"
 ```
 
-A transition that declares `absorbs` takes **`--into ITEM`, required**. An
-absorbing run with no survivor has nothing to point the edges at. The handle
+A merge takes **`--into ITEM`, required**. A merge with no survivor has
+nothing to point the edges at. The handle
 resolves **tree-wide**, like every other. So `merge some-idea --into
 a-plan-section` is a legitimate run. An idea continues as a queued section,
-and the tool owns no judgment about where work continues. The survivor is
-neither graded nor edited. Nothing is written to the survivor, so its claim is
-irrelevant and its state is unconstrained. The one exception is
-[`--carry`](#merge), which writes the absorbed bodies into the survivor's
-body. A carry grades the body it composes, and it refuses a survivor another
-session holds. The survivor carries **no record of
-what it absorbed** (John, 2026-09-04). The only residue of a merge is that
-every reference now points at the survivor. Two refusals, both computed
-before any write: a handle naming nothing, and a survivor that *is* the item.
-Merging an item into itself would
-delete it and leave every edge pointing at something gone.
+and the tool owns no judgment about where work continues. The survivor's head
+is neither graded nor edited, so its state is unconstrained. Its body gains
+the absorbed bodies ([merge](#merge)), so the run grades the body it composes
+and refuses a survivor another session holds. The survivor's head carries
+**no record of what it absorbed** (John, 2026-09-04): every reference now
+points at the survivor. Two more refusals, both computed before any write: a
+handle naming nothing, and a survivor that *is* the item. Merging an item
+into itself would delete it and leave every edge pointing at something gone.
 
 The same walk and the same three rules apply, and what the head actually got
 is what the notice says:
@@ -2034,19 +2099,12 @@ the drop empties loses the key, `without`'s rule unchanged. And a referent
 that already named the survivor keeps one entry rather than two, because an
 edge is named once.
 
-**`absorbs` is a rider on `dissolves`.** `dissolves` stands alone, because a
-transition dissolving an item out of an unnumbered state can archive nothing.
-`absorbs` cannot stand alone. Pointing every edge at a survivor while the item
-is **still filed** would leave two items where the workflow says one. The
-edges to the first would then read as satisfied against an item still standing
-there. That is the read-as-satisfied silence [dependencies](#dependencies)
-exists to remove, so `absorbs` alone refuses at load:
-
-```
-transitions.merge.absorbs is true, and merge does not dissolve the item.
-Pointing every edge at the survivor while the item is still filed would leave
-two items, not one. Add the dissolves, or drop the absorbs
-```
+**A merge always takes the item away.** Pointing every edge at a survivor
+while the item is **still filed** would leave two items where the workflow
+says one. The edges to the first would then read as satisfied against an item
+still standing there. That is the read-as-satisfied silence
+[dependencies](#dependencies) exists to remove, and it is why repointing and
+deleting are one kind rather than two settings.
 
 **A referent another session holds is edited anyway.** Refusing would let an
 unrelated claim on an unrelated item block a close-out. Skipping would leave
@@ -2056,8 +2114,8 @@ value, so it cannot introduce a defect. Grading would let a stranger's
 pre-existing defect refuse a close-out that has nothing to do with it. The
 listing is still where that defect shows.
 
-**The prose comes in with the run.** A transition that both archives and
-dissolves takes `--record`, and it is **required**:
+**The prose comes in with the run.** A close that archives takes `--record`,
+and it is **required**:
 
 ```
 fileplan archive-plan exits-archive --record - <<'END'
@@ -2071,13 +2129,15 @@ because [mint-then-fill](#decompose) cannot work here. The body the record is
 written from is deleted by the same run. A minted heading with nothing under
 it, plus a deleted item, is the lost close-out
 [the register](#the-register) exists to prevent. A forgotten record has to
-fail at the one moment it can still be supplied. [`decline`](#decline) gains
+fail at the one moment it can still be supplied. The refusal is click's,
+followed by one line saying what a record is: the entry filed under the
+item's number in the archive, what it decided and what it shipped. [`decline`](#decline) gains
 no such option and still mints an empty heading, because its item survives in
 [`abandoned`](#abandoned) to be written from.
 
 **What the run prints.** stdout is the **archive document** when the
 transition archives. The run returns the file it wrote, and the item's own
-path names something that is not there any more. A dissolve that archives
+path names something that is not there any more. A close that archives
 nothing has only the path it removed to report. A merge is included in that,
 because what it writes is *referents*, and the survivor is not something the
 run wrote.
@@ -2096,12 +2156,13 @@ dropped on the way out, automatically. A second spelling of that rule could
 disagree with the first. An item carrying a `position` in a state that
 is not queued refuses by name.
 
-**A queued state must declare `sort`**, or the load refuses by name and says
-to add `sort = "position"`. The `queued` capability holds places, and the
-state's `sort` is what lists items by them. A queued state that forgot `sort`
-would list its items by slug, and nothing would say the order had gone. So
-the missing line is refused at load, where one line fixes it. Any key the
-state carries may be the sort. `position` is the usual one.
+**A queued state sorts by `position` unless it says otherwise.** The
+`queued` capability holds places, and the state's `sort` is what lists items
+by them, so `position` is the one sensible default. Earlier releases refused
+a queued state with no `sort` and said to add the line; a default does the
+same job without the refusal, and the bare `fileplan` overview prints
+`sorted by position` beside the state, so the choice is never hidden. Any key
+the state carries may be the sort.
 
 **Places are 100 apart**, so there is room between any two. A new place is
 the midpoint of its two neighbours. So filing something between two items
@@ -2112,14 +2173,13 @@ and is also the tool for respacing. A place another item holds refuses, naming
 that item. Two items at one place would be ordered by the tiebreak rather than
 by the operator.
 
-**Which commands take those three options** is derived from what a transition
-declares, in two arms. A transition the item **arrives** on takes them. The
-item has no place in the state yet, and the run gives it one.
-[`queue`](#queue) is the shape. So does a transition that stays in the state
-and **does nothing else**. Such a transition writes no key, drops none and
-declares no half. So where the item goes in the order is the whole of what the
-transition has to say. [`requeue`](#requeue) is the shape, and it is the only
-one this repo declares. Every other same-state transition takes none of them.
+**Which commands take those three options** is derived from the
+transition's [kind](#kinds). A `create` or a `move` the item **arrives** on
+takes them. The item has no place in the state yet, and the run gives it one.
+[`queue`](#queue) is the shape. So does a `reorder`, which stays in the state
+and **does nothing else**. Where the item goes in the order is the whole of
+what a reorder has to say. [`requeue`](#requeue) is the shape, and it is the
+only one this repo declares. Every other kind takes none of them.
 [`work`](#work) says which sub-phase a session is on, and
 [`finish`](#finish) marks a bullet. Neither is about the order. A command that
 offered three options about the item's place while writing something else was
@@ -2415,8 +2475,8 @@ rows rather than among them, and no filter narrows it.
 ### bulleted
 
 [sub-phases](#sub-phases) are counted and [the cursor](#the-cursor) points at
-one. **`bulleted` is the capability that writes them.** A state opts in, and a
-transition says `mints = true`:
+one. **`bulleted` is the capability that writes them.** A state opts in, and an
+`add-bullet` transition writes them:
 
 ```toml
 [states.plan]
@@ -2426,9 +2486,8 @@ sub-phase-pending = "**pending — Decompose the rest of this section.**"
 sub-phase-name    = "{number}-{ordinal}"
 
 [transitions.decompose]
-from  = "plan"
-to    = "plan"
-mints = true
+kind = "add-bullet"
+from = "plan"
 ```
 
 A state says its items' bodies *may* be written. A transition says *this* is
@@ -2541,14 +2600,14 @@ declare and nothing to redeclare.
 
 ### marking
 
-[bulleted](#bulleted) writes a bullet. **`marks` disposes of one.** A
-transition says which word it writes, and its subject is the bullet rather
-than the item:
+[bulleted](#bulleted) writes a bullet. **A `mark-bullet` disposes of one.**
+The transition says which word it writes in `marks`, and its subject is the
+bullet rather than the item:
 
 ```toml
 [transitions.fix-it]
+kind  = "mark-bullet"
 from  = "carrier"
-to    = "carrier"
 marks = "fixed"
 ```
 
@@ -2602,23 +2661,19 @@ the transitions marking into it declare between them. There is no third field
 listing it. A list beside the transitions is a second spelling that can
 disagree with the first.
 
-The absence of `marks` is meaningful, like [`policy`](#the-interpreter)'s. A
-transition with no `marks` carries no second positional, and appears in the
-offer as a read of items like every other transition.
+A transition of any other kind carries no second positional.
 
 Each of these refuses **by name** at load:
 
-- `marks` into a state that is not [`bulleted`](#bulleted) — there is no
-  bullet for the word to go on;
-- `marks` **and** `mints` on one transition. A mint's subject is the item and
-  a mark's is one of its bullets, so one positional would mean two things;
+- a mark-bullet into a state that is not [`bulleted`](#bulleted) — there is
+  no bullet for the word to go on;
 - two transitions marking one state with the **same word**. That is one rule
   with two spellings, and the bullet afterwards could not say which ran;
 - a word that is empty, carries a newline, or carries `**`. Each breaks the
   form the writer exists to write, graded through the reader that has to find
   it again.
 
-**A `bulleted` state nothing *mints* into refuses**, because the capability
+**A `bulleted` state no add-bullet writes into refuses**, because the capability
 could then never do anything. **A `bulleted` state nothing *marks* into loads
 clean**, because it is a real shape. [The register](#the-register) records the
 same asymmetry for `archives`. Refusing a legitimate declaration is the worse
@@ -2687,8 +2742,8 @@ where it came from, in a table:
 
 ```toml
 [transitions.file-it]
+kind  = "mark-bullet"
 from  = "carrier"
-to    = "carrier"
 marks = "filed"
 
 [transitions.file-it.files]
@@ -2710,7 +2765,7 @@ read, and so is "which of its findings are still open".
 **Three roles, and each wants a name.** `state` is where the filed item goes.
 `item` is the declared key that records the carrier's slug, and `name` the one
 that records the bullet's. Those are the tool's own two words, because they
-are already what [a bullet's row](#the-next-read) calls them. So a filing
+are already what [a bullet's row](#commands) calls them. So a filing
 writes down the two halves of the row it acted on. An unknown role refuses by
 name, and so does a missing one. The roster is fixed, so both directions are
 checkable.
@@ -2723,12 +2778,11 @@ way.
 `--has carried-from=<slug>` is the ordinary filter over a declared key. Only
 the **writer** needs to know, so the writer declares it.
 
-**`files` is a rider on `marks`**, the way `absorbs` is on
-[`dissolves`](#dissolving). The item is written *from* a bullet. So a
-transition that filed without disposing of the bullet would have nothing
+**Only a `mark-bullet` takes `files`.** The item is written *from* a bullet.
+So a transition that filed without disposing of the bullet would have nothing
 saying the finding had been dealt with. The transition would file the finding
 again on the next run, which is [marking](#marking)'s "disposed of once"
-undone. `files` without `marks` refuses at load, by name.
+undone. `files` on any other kind refuses at load, by name.
 
 **A filed item is filed, not placed.** A `files.state` naming a state that
 declares `queued`, `numbered` or `claimed` refuses **by name**, saying which
@@ -2779,8 +2833,8 @@ own `sets` is written onto the item the run moves, and for a filing
 transition that item is the carrier. A workflow writing `sets = ["defect"]`
 there almost always meant the filed item. Before the refusal, the run put the
 key on the carrier and said nothing. So the refusal names `files.sets` as the
-place to write the key. A transition that [dissolves](#dissolving) refuses
-`sets` for the same reason: the transition's own halves make the field wrong.
+place to write the key. A [close or a merge](#dissolving) takes no `sets` for
+the same reason: the transition's own kind makes the field wrong.
 `files.sets` also refuses the two provenance keys, because the tool writes
 both of them itself.
 
@@ -2790,111 +2844,14 @@ writes the key onto the item where it stands:
 
 ```toml
 [transitions.tag-defect]
+kind = "edit"
 from = "someday-maybe"
-to   = "someday-maybe"
 sets = ["defect"]
 ```
 
-The transition also needs the `doc` and `help` every transition carries.
+The transition also needs the `help` every transition carries.
 `fileplan tag-defect cache-misses --defect NAME` then rewrites the item in
 place.
-
-### templates
-
-Some work recurs and arrives already understood, such as "simplify what we
-just wrote". The prose that says what it means gets retyped from memory every
-time somebody remembers to file it. A **template** is that prose, written once
-and declared:
-
-```toml
-[templates.simplify]
-doc = "docs/templates/simplify-code.md"
-```
-
-That is this repo's own declaration. `simplify-code.md` sits under a
-`templates/` directory of its own. It is the prose a simplification pass is
-filed from.
-
-A transition that [`seeds`](#seeds) files a new item whose body is that
-document, copied entire. What comes out is an **ordinary item**: a head, a
-title, a state. So every transition and every read already works on it. A
-templated item is an item in its own right, where a [sub-phase](#sub-phases)
-is a bullet in a section's body.
-
-**A template's `doc` is a whole document, and names no anchor.**
-[The register](#the-register)'s `archive` already has that shape, the pointer
-graded by existence rather than by heading. Here the whole document is what a
-template *is*: the body is the file's prose, entire. A `doc` carrying a `#`
-refuses **by name** at load, saying to drop the anchor. The same word means "a
-section of a document" in the other three tables. The shared word is what
-makes the wrong shape a real hazard rather than a typo. A template that
-quietly took the whole file would include exactly the part the anchor was
-written to leave out. An **empty** file refuses too, and that is the one place
-this pointer is stricter than the archive's. An empty archive is the
-legitimate bootstrap of a repo that has closed nothing. An empty template
-files an item with no body at all.
-
-**`doc` is the only field.** Every other table of entries carries a `help`
-beside it. A template's document *is* its description.
-
-**The copy is verbatim.** No substitution, no placeholders, no key recording
-which template an item came from, and no notion of *when* to file one. The
-trigger for recurring work is a quantity accumulating outside the tool, and
-nothing runs between invocations. So filing is a command somebody runs, and
-when to run it is policy. The policy lives in prose a session reads, not in
-the tool. What all of that is against is a template system that grows
-placeholders, then conditionals, then a scheduler.
-
-The templates are the **consumer's**, like the states and the transitions. The
-tool ships none of its own. A declaration holding a template no transition
-seeds from yet loads clean, the way one holding a state nothing files into
-does.
-
-### seeds
-
-The opt-in that says a transition may body the item it creates from a
-template. A creating transition declares it:
-
-```toml
-[transitions.idea]
-to    = "someday-maybe"
-seeds = true
-```
-
-A transition that declares it takes **`--from NAME`**, and no other command
-has the option at all:
-
-```
-fileplan idea "Simplify the code, after section 9" --from simplify
-```
-
-files an ordinary item whose body is the named document, copied entire. The
-option is not required. A seeding command still takes `--body`, because
-`seeds` says a transition *may* be bodied from a template rather than that it
-must be. The option's help names the templates the declaration holds. So the
-names are reachable from [the contract](#the-contract) rather than out of
-`plan.toml`.
-
-**`--from` given with `--body` refuses, naming both**, rather than either one
-quietly winning. `--from` naming a template the declaration does not hold
-refuses **by name**, saying what is declared. And a run given neither refuses
-in the words a creating command already refuses a missing body in. That the
-document exists, and is not empty, is graded where every other pointer is: at
-load, at every invocation. So the run itself checks it nowhere.
-
-`seeds` is the only field in the declaration that **refuses** a `from`. Every
-other half a transition can declare — `requires`, `refuses`, `drops`,
-`mints`, `marks`, `files`, `archives`, `dissolves`, `absorbs`, `carries`,
-`retitles` — **needs** one.
-A transition that creates an item has no item to read. A transition that moves
-an item has an item already, and nothing to seed. Declared beside a `from`,
-`seeds` refuses by name at load, in the inverse of the words that arm already
-uses.
-
-`seeds` is opt-in rather than universal, as [`bulleted`](#bulleted) is.
-Without the opt-in every creating command would offer to file from a template
-whatever its business. What a command offers is what its declaration says it
-does.
 
 ### the handle
 
@@ -2966,8 +2923,8 @@ refuses = { decision = true, size = ["XL"] }
 
 A key present but empty carries nothing, so it passes either form. `false`
 refuses at load, because it would say nothing: write `true`, or a list. Both
-forms are checked by the same function the [offer](#the-next-read) uses, so
-`next` and the run agree.
+forms are checked by the same function a row's [`commands`](#commands) uses,
+so the row and the run agree.
 
 ### idea
 
@@ -2983,9 +2940,18 @@ fileplan idea "A worked example" --body - < notes.md
 The second line takes the body from a file. A redirect needs no heredoc, so
 a hook that inspects command text has nothing to trip over.
 
-**Both are required.** An item is a [title](#title) and a description, and a
-creating transition refuses without prose. The one way out is a template, and
-that is what `idea` declaring [`seeds`](#seeds) offers.
+**Both are required.** An item is a [title](#title) and a description: one
+with no prose is intent that somebody pays to re-derive later. Prose kept in
+a document of its own comes in the same way: `--body - < docs/templates/simplify-code.md`
+files an item bodied from that document.
+
+**At a terminal, a missing body opens `$EDITOR`.** Where stdin and stdout are
+both a terminal, a create given no `--body` opens the editor on a short
+template whose `#` lines are left out of the item. Closing it with nothing
+written files nothing. Anywhere else — a script, a pipe, an agent's session
+— the run refuses in one line, `capture needs a body: pass --body TEXT, or
+--body - to read it from stdin`, exactly as before the editor existed. The
+reason an item needs prose lives here rather than in the refusal.
 
 ### queue
 
@@ -3036,16 +3002,13 @@ fileplan retitle a-worked-example "A better name"
 ```
 
 `retitle` stays in [`plan`](#plan), and
-[`retitle-idea`](#retitle-idea) is the same thing for an idea. A transition
-renames by declaring
-`retitles = true`. It is a half rather than a plain move, because the tool
-has to know that the run renames. The half needs a `from`. It refuses beside
-`dissolves`, which leaves no file to rename, and beside `marks`, which takes
-the same positional. `to` may differ from `from`.
+[`retitle-idea`](#retitle-idea) is the same thing for an idea. Both are of
+the [kind](#kinds) `rename`, which stays in its state. A rename is its own
+kind rather than an edit, because the tool has to know that the run renames.
 
-The title is a positional rather than `--title`. A transition that
-[mints](#bulleted) or [files](#filing) already takes `--title`, where it
-names something new.
+The title is a positional rather than `--title`. An
+[add-bullet](#bulleted) or a [filing](#filing) already takes `--title`, where
+it names something new.
 
 **What gets repointed** is every head value the tool reads as a slug:
 
@@ -3112,6 +3075,9 @@ names the held item](#the-claimed-state), rather than at a sibling's listing.
 Two sessions running the pick read — `list --state plan --lacks claimed-by` — get
 disjoint items.
 
+What a session does around a run of `work` is [planning and working a
+sub-phase](procedures.md#planning-and-working-a-sub-phase).
+
 ### decompose
 
 Write the next sub-phase into a section, or close the decomposition. The same
@@ -3125,15 +3091,18 @@ fileplan decompose sub-phases --title "Close-out" --last
 fileplan decompose sub-phases --last
 ```
 
-It declares `mints = true`. That is what gives it `--title` and `--last`, and
-what keeps them off [`queue`](#queue), [`requeue`](#requeue) and
-[`work`](#work). See [bulleted](#bulleted) for the naming, the ordinal, the
+It is an `add-bullet`. That [kind](#kinds) is what gives it `--title` and
+`--last`, and what keeps them off [`queue`](#queue), [`requeue`](#requeue)
+and [`work`](#work). See [bulleted](#bulleted) for the naming, the ordinal, the
 pending bullet and the re-open.
 
 It takes **no claim**. Deciding how a section divides is reading and writing
 the section, not picking it up. [`work`](#work) is what claims, and its
 ownership check still runs here: a section somebody else holds refuses before
 anything is written.
+
+What a session does around a run of `decompose` is [decomposing a
+section](procedures.md#decomposing-a-section).
 
 ### finish
 
@@ -3143,7 +3112,7 @@ Say a sub-phase is finished, writing `done` onto its bullet. A
 name as a second positional.
 
 ```
-fileplan next finish                    # which sub-phases it could take
+fileplan show out-of-order              # next-sub-phase names the one to take
 fileplan finish out-of-order 12-1       # take one
 fileplan finish out-of-order 12-1 --note "The premise held."
 ```
@@ -3223,8 +3192,8 @@ Discard an idea: we are not going to do it. It moves the item out of
 fileplan discard a-worked-example
 ```
 
-It declares **no halves at all**, and that is its whole difference from
-[`decline`](#decline). The difference comes from the state rather than from
+It is a `move` that declares nothing else, and that is its whole difference
+from [`decline`](#decline). The difference comes from the state rather than from
 the decision. `decline` leaves a [numbered](#the-register) state, so the
 number it held has to be released, and filing the entry is what releases it.
 `someday-maybe` numbers nothing. There is no entry to file, so the run is a
@@ -3254,8 +3223,8 @@ which is what [`queue`](#queue) is too.
 ### archive-plan
 
 Close a section out: file its [archive entry](#the-register) and remove the
-item. Both halves of [dissolving](#dissolving) — `archives = true` records it,
-and `dissolves = true` takes the file away. The prose comes in with the run.
+item. It is a [`close`](#dissolving), which takes the file away, and it
+declares `archives = true`, which records it. The prose comes in with the run.
 The body it is written from goes away with it:
 
 ```
@@ -3269,12 +3238,13 @@ the section was picked up:
 requires = ["sub-phase"]
 ```
 
-The declared half is on this transition. There it grades one way out of
-`plan`, and leaves [`decline`](#decline) alone. The half a `requires`
-**cannot** express lives in [the close check](#the-close-check) instead.
-`fileplan next archive-plan` is the listing of sections that could close right
-now. That is the old tool's `--closeable`, [named by the
-command](#the-next-read) rather than by a flag, and it narrows through both.
+The `requires` is on this transition. There it grades one way out of `plan`,
+and leaves [`decline`](#decline) alone. What a `requires` **cannot** express
+lives in [the close check](#the-close-check) instead.
+`fileplan list --has commands=archive-plan` is the listing of sections that
+could close right now. That is the old tool's `--closeable`, read off
+[`commands`](#commands) rather than a flag of its own, and it narrows through
+both.
 
 `requires` is the floor a head can carry, and it is what stops a queued,
 never-decomposed item closing clean. "Every named bullet is marked" is
@@ -3294,6 +3264,9 @@ Any state may declare a transition of this shape. `archive-plan` is out of
 lives. The tool knows the transition only as "leaves a
 [numbered](#the-register) state, files an entry and takes the file away".
 
+What a session does around a run of `archive-plan` is [closing a section
+out](procedures.md#closing-a-section-out).
+
 ### merge
 
 Absorb an idea into another: the work continues as that one. It is the way out
@@ -3304,9 +3277,8 @@ also the fourth way an item leaves.
 fileplan merge a-second-take-on-drafts --into workflow-as-data
 ```
 
-Both halves of [dissolving](#dissolving) again, but the *other* pair.
-`dissolves = true` takes the idea's file away. `absorbs = true` points every
-edge naming it at the survivor, rather than removing it. `--into` is
+It is a [`merge`](#dissolving): the run takes the idea's file away, and points
+every edge naming it at the survivor, rather than removing it. `--into` is
 **required**, and it resolves tree-wide. The work may continue as an item in
 any state.
 
@@ -3322,69 +3294,45 @@ failing idea, one per line. `--check` prints one line per idea, saying what
 the run would do to that idea. A real run prints each removed path on
 stdout, one per line.
 
-Only a transition declaring `absorbs` takes several items. A transition that
-also declares `archives` refuses several items by name. One `--record` is one
-archive entry, so one run can record only one item.
+Only a merge takes several items.
 
 **It archives nothing**. `someday-maybe` mints no [number](#the-register), so
 there is no entry to name and nothing to write. That is exactly what makes
 deleting the original safe here. A deletion in an unnumbered state punches no
-hole in the register. `dissolves` standing alone, rather than riding on
-`archives`, is what lets this transition be declared at all.
+hole in the register. Taking the file away without archiving is what lets
+this transition be declared at all.
 
-**Nothing records what was absorbed** (John, 2026-09-04: "probably merge,
-update any references, and delete the original"). The survivor's file is not
-touched: this transition declares no `sets`, and could not. So the only
-residue of a merge is that every reference now points at the survivor. A
-record on the survivor would be a second place the same fact lives, and the
-edges already say it.
-
-**`--carry` keeps the absorbed text.** Sometimes the absorbed ideas *are* the
-specification, as when several small fixes become one section. Then the text
-is the work, and losing it means composing the survivor's body by hand before
-the merge. Sections 26 and 27 were both made that way. So `merge` declares
-`carries = true`, which gives it a `--carry` flag:
-
-```
-fileplan merge a-idea b-idea --into a-section --carry
-```
-
-Each absorbed body is appended to the end of the survivor's body, in the
-order the ideas were named. Each goes under a `### <its title>` heading,
-with blank lines trimmed from either end. The survivor's head is not touched.
+**A merge keeps the absorbed text.** Each absorbed body is appended to the
+end of the survivor's body, in the order the ideas were named. Each goes
+under a `### <its title>` heading, with blank lines trimmed from either end.
+The survivor's head is not touched, and nothing else records what was
+absorbed: every reference now points at the survivor, and the text is in its
+body. Absorbed ideas are often the specification, as when several small
+fixes become one section, and losing their text would mean composing the
+survivor's body by hand first.
 
 **This is not a second copy.** The absorbed file is deleted in the same run,
 so only one copy of the text remains. The fact has moved house rather than
-been duplicated. Without `--carry` the survivor is byte-identical, which is
-the 2026-09-04 ruling unchanged (John, 2026-09-29).
+been duplicated. Earlier releases kept the survivor byte-identical unless the
+run passed `--carry`. Nobody merged without it, so the carry is now what a
+merge does, and a plan.toml still declaring `carries` refuses by name.
 
-A carry has two refusals of its own, and both come before any write. The
-first is a composed body that its state's [sub-phase](#sub-phases) check
-refuses. Carrying a second `Sub-phases` heading into a section would
-otherwise break the next listing. The second is a survivor another session
-holds. Editing a referent's head is mechanical, but a carry writes prose into
-a body that session may be rewriting. Drop `--carry`, or have the claim
-released, to get past it.
-
-`carries` is a rider on `absorbs`, because without a survivor there is
-nowhere to carry a body. Declared alone, it refuses at load:
-
-```
-transitions.merge.carries is true, and merge does not absorb the item into a
-survivor, so there is nowhere to carry its body. Add the absorbs, or drop the
-carries
-```
+A merge has two refusals of its own beside the ones every run has, and both
+come before any write. The first is a composed body that its state's
+[sub-phase](#sub-phases) check refuses. Carrying a second `Sub-phases`
+heading into a section would otherwise break the next listing. The second is
+a survivor another session holds, because a merge writes prose into a body
+that session may be rewriting. Have the claim released to get past it.
 
 It takes **no claim**, like [`decline`](#decline) and
-[`archive-plan`](#archive-plan). The ownership check still runs on the idea
-being absorbed. The survivor's claim is not consulted, because nothing is
-written to it, unless the run carries.
+[`archive-plan`](#archive-plan). The ownership check runs on the idea being
+absorbed, and on the survivor, which the run writes to.
 
 Any state may declare a transition of this shape. `merge` is out of
 [`someday-maybe`](#someday-maybe) here for two reasons. That is where this
 workflow's uncommitted ideas live, and it is the state that is safe to delete
 from. The tool knows the transition only as "leaves its state, takes the file
-away, points the edges at a survivor, and may carry the body there".
+away, points the edges at a survivor, and carries the body there".
 
 ### investigate
 
@@ -3396,11 +3344,11 @@ Open a carrier for an investigation. It creates rather than moves, like
 fileplan investigate "Why the listing is slow" --body "..."
 ```
 
-It declares no halves at all. Creating the item is the whole of it, and the
-findings arrive afterwards, one [`note`](#note) at a time. It *could* not
-declare `mints`. A creating transition's body comes from `--body` — or, where
-it declares [`seeds`](#seeds), from a template. Minting reads a body first,
-and [`bulleted`](#bulleted) says what it reads it for.
+It is a `create` that declares nothing else. Creating the item is the whole
+of it, and the findings arrive afterwards, one [`note`](#note) at a time. A
+create's body comes from `--body`. Writing a bullet reads a body first, which is why that is
+an `add-bullet` of its own, and [`bulleted`](#bulleted) says what it reads it
+for.
 
 ### note
 
@@ -3413,7 +3361,7 @@ fileplan note listing-is-slow --title "The index is rebuilt per call"
 fileplan note listing-is-slow --title "…and never cached" --last
 ```
 
-It declares `mints = true`, which is what gives it `--title` and `--last`. The
+It is an `add-bullet`, which is what gives it `--title` and `--last`. The
 bullets it writes are named `f1`, `f2`, … — the form [`carrier`](#carrier)
 declares. Everything else is [bulleted](#bulleted)'s: the three steps, the
 ordinal, the pending bullet and the re-open, exactly as they are for
@@ -3426,7 +3374,7 @@ Say a finding is fixed. A [disposition](#marking): its subject is one bullet of
 the carrier, and it writes `fixed` onto it.
 
 ```
-fileplan next fix-it                    # which findings it could take
+fileplan show listing-is-slow           # next-sub-phase names the first open one
 fileplan fix-it listing-is-slow f1      # take one
 ```
 
@@ -3444,9 +3392,7 @@ where it stands.
 ### dismiss
 
 Say a finding is not worth acting on, writing `dismissed` onto its bullet.
-[`fix-it`](#fix-it)'s shape with the other word, and the second half of what
-makes the read useful. With one disposition declared, there would be nothing
-for an offer to narrow *between*.
+[`fix-it`](#fix-it)'s shape with the other word.
 
 A finding is disposed of once, so a bullet already carrying either word refuses
 [by name](#marking). Which of the two a session reaches for is a judgment

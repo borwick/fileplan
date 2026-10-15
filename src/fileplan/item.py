@@ -33,6 +33,7 @@ from fileplan import numbered, queued
 from fileplan.declaration import (
     CAPABILITY_KEYS,
     INTRINSIC_KEYS,
+    SUFFIX,
     Declaration,
     Refusal,
     State,
@@ -44,10 +45,9 @@ from fileplan.declaration import (
 #: as a Markdown thematic break.
 FENCE = "+++"
 
-#: What an item file is called: its slug, then this. Here beside `slug`,
-#: because what an item file is called is one fact, read by the executor that
-#: writes one and the traversal that finds one.
-SUFFIX = ".md"
+#: What an item file is called: its slug, then `SUFFIX`. The suffix is
+#: declared beside `[fileplan].ignore`'s check and read here, by the executor
+#: that writes an item and the traversal that finds one, as `item.SUFFIX`.
 
 
 @dataclass(frozen=True)
@@ -247,7 +247,7 @@ def head_errors(
     """Every head key `declaration` does not declare. The typo detector.
 
     `sizee = "M"` is caught here rather than read as an unset `size`. A value
-    outside a key's declared `values` is deliberately not checked: that is
+    outside a key's declared `values` is not checked here: that is
     grading, and it belongs to a transition's `refuses` and to the reads,
     since one bad value at read time would break a whole listing.
 
@@ -299,8 +299,7 @@ def slug(title: str) -> str:
     are trimmed, so case, punctuation and accents never reach a filename. The
     stem is the item's one handle for the rest of its life.
 
-    Deliberately not truncated (John, 2026-09-02): the tool resolves a unique
-    prefix instead, so length at the prompt is not what a slug has to solve,
+    Not truncated: the tool resolves a unique prefix instead, so length at the prompt is not what a slug has to solve,
     and a full slug says more in an edge and in a listing.
 
     A slug is unique across every state plus the archive, not just within one
