@@ -1,0 +1,71 @@
+# A decision-record workflow for fileplan.
+#
+# A record starts as a draft. Drafts can be compacted together while the
+# question is still open. Finalising a draft moves it into `decisions`,
+# where it gets the next number and a date, and from then on it only ever
+# changes status. A record is never taken out of `decisions`: one that
+# stops applying is deprecated, or superseded by a newer record that says
+# so in its own `supersedes`.
+
+# Records still being written. `supersedes` names the records a draft will
+# replace, and each of those is read back as `superseded-by`, derived on
+# every read and never stored.
+[states.drafts]
+path       = "drafts"
+references = { supersedes = { inverse = "superseded-by" } }
+
+# Records that were decided. Numbered in the order they were finalised, with
+# the closed half of the register in `decisions-archive.md`. Nothing leaves
+# this state, so the archive stays empty and every number stays on its file.
+# Create `decisions-archive.md` empty, beside this file, before the first run.
+# Left out of a plain `fileplan list`, which says how many it left out;
+# `fileplan list --state decisions` lists them.
+[states.decisions]
+path         = "decisions"
+capabilities = ["numbered"]
+archive      = "decisions-archive.md"
+references   = { supersedes = { inverse = "superseded-by" } }
+listed       = false
+
+# Where a decided record stands. Superseded is not a status: it is read off
+# the newer record's `supersedes`, so the fact is written down once.
+[keys.status]
+help   = "Where the decision stands."
+values = ["accepted", "deprecated"]
+
+[keys.decided]
+help = "The day the decision was made, as YYYY-MM-DD."
+
+[keys.supersedes]
+help        = "Slugs of the records this one replaces."
+list-valued = true
+
+[transitions.propose]
+kind = "create"
+help = "Start a draft decision record."
+to   = "drafts"
+sets = ["supersedes"]
+
+# Two drafts about one question become one. The absorbed draft's text is
+# appended to the survivor's, and every reference to it is pointed at the
+# survivor.
+[transitions.compact]
+kind = "merge"
+help = "Fold a draft into another draft."
+from = "drafts"
+
+# `decided` is both required and set, so `--decided` is a required option.
+# `status` is a fixed value: every finalised record starts out accepted.
+[transitions.finalise]
+kind     = "move"
+help     = "Decide a draft: number it, date it, and accept it."
+from     = "drafts"
+to       = "decisions"
+requires = ["decided"]
+sets     = { decided = true, status = "accepted" }
+
+[transitions.deprecate]
+kind = "edit"
+help = "Mark a decided record as no longer applying."
+from = "decisions"
+sets = { status = "deprecated" }

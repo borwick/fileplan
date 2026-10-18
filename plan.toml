@@ -35,8 +35,10 @@ dependencies      = "after"
 
 # Sections we chose not to do.
 [states.abandoned]
-path = "abandoned"
-doc  = "docs/method.md#abandoned"
+path   = "abandoned"
+doc    = "docs/method.md#abandoned"
+# Left out of a plain `fileplan list`; `--state abandoned` lists it.
+listed = false
 
 # Open investigations. Each holds findings as bullets named f1, f2, ...
 # `opened-for` names the key holding the section it was opened for, which is

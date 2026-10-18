@@ -394,7 +394,7 @@ def test_an_undeclared_head_key_refuses_naming_it(declaration: Declaration) -> N
     assert errors == [
         '"cultivarr" is not a declared key '
         "(declared: cultivar, rootstock, tag, notebook, pest, planted, after, "
-        "batch, "
+        "replaces, batch, "
         "cutting, for-tree, for-step, graft, "
         "graft-status; intrinsic: title)"
     ]

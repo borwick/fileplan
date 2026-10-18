@@ -884,7 +884,7 @@ def test_the_toc_indexes_the_kind_each_transition_declares(
     assert declared(out) == {
         "transplant": "move",
         "sprout": "create",
-        "harvest": "move",
+        "harvest": "move, archives",
         "pot-up": "create, claims",
         "bench": "move",
         "tend": "edit, claims",
@@ -952,7 +952,12 @@ def test_the_declaration_renders_as_one_json_object(
     assert payload["kind"] == "declaration"
     assert payload["source"] == str(tree / "plan.toml")
     assert payload["states"] == [
-        {"name": state.name, "path": state.path, "sort": state.sort}
+        {
+            "name": state.name,
+            "path": state.path,
+            "sort": state.sort,
+            "listed": state.listed,
+        }
         for state in declaration.states.values()
     ]
 
@@ -1010,6 +1015,59 @@ def test_an_option_says_what_it_takes(
     assert set(options["--at"]) == {
         "name", "takes", "required", "multiple", "values", "help"
     }
+
+
+def stamped_transplant(tree: Path) -> None:
+    """The fixture's `transplant` requiring its own `rootstock` option and
+    stamping `planted`: both halves of the table form of `sets`."""
+    source = tree / "plan.toml"
+    text = source.read_text()
+    for old, new in (
+        ('requires = ["cultivar"]', 'requires = ["cultivar", "rootstock"]'),
+        (
+            'sets     = ["rootstock", "pest", "after"]',
+            'sets     = { rootstock = true, pest = true, after = true, '
+            'planted = "{today}" }',
+        ),
+    ):
+        assert text.count(old) == 1
+        text = text.replace(old, new)
+    source.write_text(text)
+
+
+def test_a_required_option_and_a_fixed_value_are_in_the_help(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Click marks the option `[required]`, and the `Writes` block follows
+    `Drops`, the value written as declared."""
+    stamped_transplant(tree)
+    out = helped("transplant", capsys)
+    rootstock = next(line for line in out.splitlines() if "--rootstock" in line)
+    assert "[required]" in rootstock
+    assert '  Drops\n    tag\n\n  Writes\n    planted = "{today}"\n' in out
+
+
+def test_a_required_option_and_a_fixed_value_are_in_the_contract(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`sets` keeps its meaning, the options, and `writes` is a field added,
+    which is never a version bump."""
+    stamped_transplant(tree)
+    row = contract_json("transplant", capsys)
+    assert row["sets"] == ["rootstock", "pest", "after"]
+    assert row["writes"] == {"planted": "{today}"}
+    options = {option["name"]: option for option in row["options"]}
+    assert options["--rootstock"]["required"] is True
+    assert options["--pest"]["required"] is False
+
+
+def test_a_required_option_not_given_refuses_at_the_command_line(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stamped_transplant(tree)
+    assert main(["sprout", "A seedling", "--body", "Prose.", "--cultivar", "heirloom"]) == 0
+    assert main(["transplant", "a-seedling"]) != 0
+    assert "--rootstock" in capsys.readouterr().err
 
 
 def test_the_tools_own_commands_are_not_rows(
@@ -1101,10 +1159,11 @@ def test_a_verb_declaring_nothing_carries_the_empty_keys_anyway(
     verbs a declaration happens to declare. The text form goes on omitting an
     empty block, because a person reading help wants the blocks that say
     something. `Declares` is never empty, because every verb has a kind."""
-    row = contract_json("harvest", capsys)
+    row = contract_json("bed-out", capsys)
     assert row["declares"] == []
     assert row["requires"] == [] and row["drops"] == [] and row["sets"] == []
-    assert declared_by(helped("harvest", capsys)) == ["move"]
+    assert row["writes"] == {}
+    assert declared_by(helped("bed-out", capsys)) == ["move"]
 
 
 def test_the_reading_block_answers_the_shared_half_question(
@@ -2075,6 +2134,39 @@ def test_an_edge_pointing_later_in_the_order_is_named_by_the_default_read(
         "second-tree at place 200. An item cannot wait on something later "
         "in the order"
     ) in capsys.readouterr().err
+
+
+def test_a_reference_naming_nothing_is_named_by_the_default_read(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`unknown`'s line for a reference, behind no flag, on stderr."""
+    orchard(tree, "First tree")
+    path = tree / "orchard" / "first-tree.md"
+    path.write_text(path.read_text().replace("+++", '+++\nreplaces = ["gone-tree"]', 1))
+    capsys.readouterr()
+
+    assert main(["list"]) == 0
+    printed = capsys.readouterr()
+    assert (
+        'unresolved reference: first-tree names "gone-tree" in replaces, and '
+        "no item carries that slug"
+    ) in printed.err
+    assert "unresolved reference" not in printed.out
+    assert "unknown dependency" not in printed.err
+
+
+def test_a_referent_is_found_by_its_inverse(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The inverse is a derived row field, so `--has` reaches it like any."""
+    orchard(tree, "First tree")
+    assert main(
+        ["sprout", "Second seedling", "--body", "Prose.", "--replaces", "first-tree"]
+    ) == 0
+    assert [
+        (row["slug"], row["replaced-by"])
+        for row in rows(capsys, "--has", "replaced-by=second-seedling")
+    ] == [("first-tree", ["second-seedling"])]
 
 
 def test_the_listing_s_order_is_unchanged_by_any_edge(
@@ -4918,7 +5010,7 @@ def test_every_derived_key_is_reachable_by_a_filter(
     mutation below says it is not vacuous."""
     declared = load(tree / "plan.toml")
     assert declared.derived, "the fixture derives nothing, so this proves nothing"
-    assert set(declared.derived) <= set(DERIVABLE_KEYS)
+    assert set(declared.derived) <= {*DERIVABLE_KEYS, *declared.inverses}
     assert main(["list", "--help"]) == 0
     roster = re.sub(r"-\n\s+", "-", capsys.readouterr().out)
     for key in declared.derived:
@@ -6315,7 +6407,9 @@ def test_a_transition_with_no_doc_prints_no_reading_block(
     plan.write_text(
         re.sub(
             r'(?m)^doc\s*=\s*"method.md#sprout"\n', "", plan.read_text()
-        ).replace('[keys.cultivar]\ndoc    = "method.md#cultivar"\n', "[keys.cultivar]\n")
+        )
+        .replace('[keys.cultivar]\ndoc    = "method.md#cultivar"\n', "[keys.cultivar]\n")
+        .replace('doc         = "method.md#replaces"\n', "")
     )
     assert load(plan).transitions["sprout"].doc is None
     out = helped("sprout", capsys)
@@ -6528,3 +6622,120 @@ def test_a_row_leaves_out_what_the_run_would_refuse_about_the_item(
     assert "grub-out" not in held and "fell" not in held
     assert main(["grub-out", "first-tree"]) == 2
     assert "carries no number" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# `listed`: a state a `list` given no `--state` leaves out, and says so
+# --------------------------------------------------------------------------
+
+
+def felled(tree: Path) -> None:
+    """One item in each of `greenhouse` and the unlisted `firewood`."""
+    orchard(tree, "Old tree")
+    assert main(["grub-out", "old-tree"]) == 0
+    assert main(["sprout", "New seedling", "--body", "Prose.", "--cultivar", "hybrid"]) == 0
+
+
+def listed_slugs(capsys: pytest.CaptureFixture[str], *given: str) -> tuple[list[str], str]:
+    capsys.readouterr()
+    assert main(["list", "--json", *given]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert main(["list", *given]) == 0
+    return [row["slug"] for row in payload["rows"]], capsys.readouterr().err
+
+
+def test_a_plain_list_leaves_an_unlisted_state_out_and_says_so(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    felled(tree)
+    slugs, err = listed_slugs(capsys)
+    assert slugs == ["new-seedling"]
+    assert "showing 1 of 2 items" in err
+    assert "not listed: firewood (1). --state firewood lists them" in err
+
+
+@pytest.mark.parametrize("given", ["firewood", "!=greenhouse", ":firewood,orchard"])
+def test_any_state_comparison_lists_an_unlisted_state(
+    tree: Path, capsys: pytest.CaptureFixture[str], given: str
+) -> None:
+    felled(tree)
+    slugs, err = listed_slugs(capsys, "--state", given)
+    assert slugs == ["old-tree"]
+    assert "not listed" not in err
+
+
+def test_show_finds_an_item_in_an_unlisted_state(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    felled(tree)
+    capsys.readouterr()
+    assert main(["show", "old-tree", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [row["state"] for row in payload["rows"]] == ["firewood"]
+    assert "unlisted" not in payload
+
+
+def test_the_json_listing_leaves_out_the_same_rows_and_says_what(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    felled(tree)
+    capsys.readouterr()
+    assert main(["list", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [row["slug"] for row in payload["rows"]] == ["new-seedling"]
+    assert payload["unlisted"] == [{"state": "firewood", "count": 1}]
+    assert (payload["matched"], payload["read"]) == (1, 2)
+
+    assert main(["list", "--json", "--state", "firewood"]) == 0
+    assert json.loads(capsys.readouterr().out)["unlisted"] == []
+
+
+def test_the_left_out_count_is_taken_after_the_filters(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A filter the hidden item matches counts it, which is what makes the
+    miss loud. One it does not match leaves no line at all."""
+    felled(tree)
+    slugs, err = listed_slugs(capsys, "--has", "cultivar=heirloom")
+    assert slugs == []
+    assert "not listed: firewood (1)" in err
+    slugs, err = listed_slugs(capsys, "--has", "cultivar=hybrid")
+    assert slugs == ["new-seedling"]
+    assert "not listed" not in err
+
+
+def test_a_declaration_listing_every_state_carries_no_unlisted_field(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = tree / "plan.toml"
+    plan.write_text(plan.read_text().replace("listed = false\n", ""))
+    felled(tree)
+    slugs, err = listed_slugs(capsys)
+    assert slugs == ["new-seedling", "old-tree"]
+    assert "not listed" not in err
+    assert main(["list", "--json"]) == 0
+    assert "unlisted" not in json.loads(capsys.readouterr().out)
+
+
+def test_the_exception_reports_still_name_an_item_in_an_unlisted_state(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    felled(tree)
+    path = tree / "firewood" / "old-tree.md"
+    path.write_text(path.read_text().replace('"heirloom"', '"bramley"'))
+    capsys.readouterr()
+    assert main(["list"]) == 0
+    assert 'undeclared value: old-tree carries "bramley" in cultivar' in (
+        capsys.readouterr().err
+    )
+
+
+def test_the_overview_and_the_contract_read_listed_back(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    capsys.readouterr()
+    assert main([]) == 0
+    assert re.search(r"(?m)^  firewood +firewood/ +not listed$", capsys.readouterr().out)
+    states = {one["name"]: one for one in declaration_json(capsys)["states"]}
+    assert states["firewood"]["listed"] is False
+    assert states["greenhouse"]["listed"] is True

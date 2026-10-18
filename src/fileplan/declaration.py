@@ -106,9 +106,21 @@ FIRST = 1
 #: opened for. See docs/method.md#the-dangle-check
 OPENED_FOR = "opened-for"
 
+#: The state field naming the keys an item here holds references in, each a
+#: table whose one field names the row field the edge is read back as on the
+#: item it names. A reference is an edge that blocks nothing.
+#: See docs/method.md#references
+REFERENCES = "references"
+INVERSE = "inverse"
+
 #: The state field naming the order its items list in when no `--sort` is
 #: given: one key, in `--sort`'s spelling. See docs/method.md#the-listing
 SORT = "sort"
+
+#: The state field that, set false, leaves the state's rows out of a `list`
+#: given no `--state`. Absent means listed, so a forgotten field hides
+#: nothing. See docs/method.md#listed
+LISTED = "listed"
 
 #: The key field saying a head value is several.
 #: See docs/method.md#list-valued
@@ -127,6 +139,7 @@ STATE_FIELDS = frozenset(
         ARCHIVE,
         FIRST_NUMBER,
         depends.FIELD,
+        REFERENCES,
         subphase.NAME,
         subphase.CURSOR,
         subphase.STATUS,
@@ -134,6 +147,7 @@ STATE_FIELDS = frozenset(
         subphase.FORM,
         OPENED_FOR,
         SORT,
+        LISTED,
     }
 )
 KEY_FIELDS = frozenset({"doc", "help", "values", LIST_VALUED})
@@ -156,6 +170,12 @@ CLOSE, MERGE, ADD_BULLET, MARK_BULLET = "close", "merge", "add-bullet", "mark-bu
 #: naming none writes nothing. Read by the kind table, by the edit's refusal
 #: and by `_suggested_kind`. See docs/method.md#kinds
 EDIT_WRITES = ("sets", "drops", "claims")
+
+#: The one substitution a fixed value in `sets` takes: the run's local date,
+#: in the `YYYY-MM-DD` shape a date given as an option is written in. Any other brace in a fixed
+#: value refuses at load, so there is no escape syntax. See
+#: docs/method.md#transitions
+TODAY = "{today}"
 
 KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
     {
@@ -430,6 +450,10 @@ class State:
     #: where this state names none. On the state rather than on a transition,
     #: because the reader is what needs it.
     opened_for: str | None = None
+    #: The keys holding references, each mapped to its inverse, in declared
+    #: order. Empty where this state declares none.
+    #: See docs/method.md#references
+    references: Mapping[str, str] = MappingProxyType({})
     #: The document this state's closed items are recorded in, or `None` where it
     #: holds none. The second source of the `numbered` register, and on the state
     #: rather than on the verb that archives, because the register needs it
@@ -444,6 +468,9 @@ class State:
     #: `--sort`'s spelling, or `None` where they list by slug. A `queued` state
     #: must declare one. See docs/method.md#the-listing
     sort: str | None = None
+    #: Whether a `list` given no `--state` shows this state's rows. Absent in
+    #: the declaration means it does. See docs/method.md#listed
+    listed: bool = True
     #: The words the declared verbs mark into this state, or `None` where
     #: none does. A second bold run holding any other word is not a mark.
     #: Derived from the transitions at load. See docs/method.md#marking
@@ -509,7 +536,13 @@ class Transition:
     #: table: an item carrying any value of one is refused. How a verb that
     #: stays in its state says it runs once. See docs/method.md#commands
     refuses_any: tuple[str, ...] = ()
+    #: The keys the run takes as options, in declared order: every name in the
+    #: list form of `sets`, and each key written `true` in the table form.
     sets: tuple[str, ...] = ()
+    #: The values the run writes of its own, from the table form of `sets`:
+    #: `{today}` not yet substituted, which `execute` does. Never an option,
+    #: and never a default a run could override. See docs/method.md#transitions
+    fixed: Mapping[str, Any] = MappingProxyType({})
     drops: tuple[str, ...] = ()
     #: Whether running this verb picks the item up: the transition half of
     #: `CLAIMED`. A state says items here are claimable; a verb says this is the
@@ -537,6 +570,13 @@ class Transition:
     #: both. Default `False`. Only a move or a close takes it, and its source
     #: must be `NUMBERED`. See docs/method.md#the-register
     archives: bool = False
+
+    @property
+    def lands(self) -> tuple[str, ...]:
+        """Every key the run writes onto the item: its options, then its fixed
+        values. What lands on the head, where `sets` is what a caller gives."""
+        return (*self.sets, *self.fixed)
+
     @property
     def records(self) -> bool:
         """Whether this run files a record and takes the file away: a close
@@ -611,8 +651,14 @@ class Declaration:
         filters the CLI generates and the parse of what they were given cannot
         disagree. Corpus-independent like every other shape question.
         """
-        return tuple(
-            name for group in DERIVED_KEYS if group.gate(self) for name in group.names
+        return (
+            *(
+                name
+                for group in DERIVED_KEYS
+                if group.gate(self)
+                for name in group.names
+            ),
+            *self.inverses,
         )
 
     @property
@@ -638,6 +684,36 @@ class Declaration:
         `counts_sub_phases`' shape, and for its reason. Corpus-independent.
         """
         return any(state.dependencies for state in self.states.values())
+
+    @property
+    def has_references(self) -> bool:
+        """Whether any declared state declares references at all.
+
+        `has_dependencies`' shape, and for its reason. Corpus-independent.
+        """
+        return any(state.references for state in self.states.values())
+
+    @property
+    def unlisted(self) -> tuple[str, ...]:
+        """The states a `list` given no `--state` leaves out, in declared
+        order. Corpus-independent. See docs/method.md#listed"""
+        return tuple(name for name, state in self.states.items() if not state.listed)
+
+    @property
+    def inverses(self) -> tuple[str, ...]:
+        """Every inverse the states declare, once each, in declared order.
+
+        The roster in `DERIVED_KEYS` holds fixed names, and an inverse is the
+        workflow's, so `derived` appends these after it. They are no sort
+        key: a list of slugs orders nothing. See docs/method.md#references
+        """
+        return tuple(
+            dict.fromkeys(
+                inverse
+                for state in self.states.values()
+                for inverse in state.references.values()
+            )
+        )
 
     @property
     def files(self) -> tuple[Mapping[str, str], ...]:
@@ -703,19 +779,21 @@ class _Corpus:
     keys: set[str]
     #: The values each key closes over, from `_key_errors`.
     closed_values: Mapping[str, tuple[str, ...]]
+    #: The keys that hold several values, from `_list_valued`.
+    list_valued: set[str]
     #: Whether the document declares an `[identity]` table at all.
     identified: bool
 
     def at(self, where: str, entry: Mapping[str, Any]) -> "_Entry":
         """This vocabulary, pointed at one entry of one table."""
-        return _Entry(where, entry, self.keys, self.closed_values)
+        return _Entry(where, entry, self.keys, self.closed_values, self.list_valued)
 
 
 @dataclass(frozen=True)
 class _Entry:
     """One entry, and what its references are graded against.
 
-    `keys` and `closed_values` are `_Corpus`', unchanged.
+    `keys`, `closed_values` and `list_valued` are `_Corpus`', unchanged.
     """
 
     #: Where a complaint points: `states.doing`, `transitions.file-it`.
@@ -726,6 +804,8 @@ class _Entry:
     keys: set[str]
     #: `_Corpus.closed_values`.
     closed_values: Mapping[str, tuple[str, ...]]
+    #: `_Corpus.list_valued`.
+    list_valued: set[str]
 
 
 def shape_errors(document: Mapping[str, Any]) -> list[str]:
@@ -770,6 +850,7 @@ def shape_errors(document: Mapping[str, Any]) -> list[str]:
         transitions=tables["transitions"],
         keys=set(tables["keys"]),
         closed_values=closed_values,
+        list_valued=_list_valued(tables["keys"]),
         identified=IDENTITY in document,
     )
     errors += _state_errors(corpus)
@@ -788,9 +869,10 @@ def shape_errors(document: Mapping[str, Any]) -> list[str]:
         errors += _filing_errors(corpus)
         errors += _archiving_errors(tables["states"], landed)
     errors += _single_value_errors(
-        tables["states"], tables["transitions"], _list_valued(tables["keys"])
+        tables["states"], tables["transitions"], corpus.list_valued
     )
     errors += _reading_errors(tables["transitions"])
+    errors += _inverse_errors(tables["states"])
     errors += _identity_errors(document.get(IDENTITY))
     errors += _tool_errors(document.get(TOOL))
     return errors
@@ -1044,31 +1126,56 @@ def _filing_errors(corpus: _Corpus) -> list[str]:
 def _archiving_errors(
     states: Mapping[str, Any], transitions: Mapping[str, Any]
 ) -> list[str]:
-    """`archives` graded against the state it files an item out of: out of a
-    state that does not name `NUMBERED` it refuses by name, because an entry's
-    heading is `## <number>. <title>`. Only a move or a close takes
-    `archives`, and both leave, so the number is never left behind.
+    """`archives` graded against the state an item leaves, in both
+    directions, each refused by name.
 
-    A `numbered` state nothing archives out of has no inert-half rule: the
+    Out of a state that does not name `NUMBERED`, `archives` refuses, because
+    an entry's heading is `## <number>. <title>`. Out of one that does, every
+    way out must archive: a move or a close without `archives` would drop the
+    number with no entry, and the next mint refuses on the gap, or reuses the
+    number when it was the highest. A merge cannot archive, so a merge out of
+    a numbered state refuses outright. See docs/method.md#the-register
+
+    A `numbered` state nothing leaves at all has no inert-half rule: the
     `archive` field has a second reader in the register itself, so the state
     is a legitimate declaration.
     """
     errors: list[str] = []
     for name, entry in transitions.items():
-        if not isinstance(entry, dict) or entry.get("archives") is not True:
-            # One complaint per defect: a non-boolean `archives`, and a `from` or
-            # `to` naming no declared state, are already made.
+        # One complaint per defect: a non-boolean `archives`, and a `from`
+        # naming no declared state, are already made.
+        if not isinstance(entry, dict) or not isinstance(
+            entry.get("archives", False), bool
+        ):
             continue
         source = entry.get("from")
         if not isinstance(source, str) or source not in states:
             continue
-        if NUMBERED not in _declared_capabilities(states[source]):
+        numbers = NUMBERED in _declared_capabilities(states[source])
+        if entry.get("archives") is True:
+            if not numbers:
+                errors.append(
+                    f"transitions.{name}.archives is true, and states.{source} "
+                    f'does not name "{NUMBERED}" in its capabilities. An archive '
+                    f"entry is `## <number>. <title>`, and an item leaving "
+                    f'{source} carries no number. Name "{NUMBERED}" in '
+                    f"states.{source}.capabilities, or drop the archives"
+                )
+        elif numbers and entry.get("kind") == MERGE:
             errors.append(
-                f"transitions.{name}.archives is true, and states.{source} "
-                f'does not name "{NUMBERED}" in its capabilities. An archive '
-                f"entry is `## <number>. <title>`, and an item leaving "
-                f'{source} carries no number. Name "{NUMBERED}" in '
-                f"states.{source}.capabilities, or drop the archives"
+                f"transitions.{name} merges items out of states.{source}, which "
+                f"is {NUMBERED}, and a merge cannot archive. The numbers the "
+                "absorbed items carry would be dropped with no entry, and the "
+                "next mint would refuse on the gap. Write kind = "
+                f'"{CLOSE}" with archives = true, or merge out of a state that '
+                "numbers nothing"
+            )
+        elif numbers and entry.get("kind") in (MOVE, CLOSE):
+            errors.append(
+                f"transitions.{name} leaves states.{source}, which is "
+                f"{NUMBERED}, and does not archive. The number it carries would "
+                "be dropped with no entry, and the next mint would refuse on the "
+                f"gap. Write archives = true in transitions.{name}"
             )
     return errors
 
@@ -1180,7 +1287,7 @@ def _reading_errors(transitions: Mapping[str, Any]) -> list[str]:
         # Both lists, because `Reading` names the doc of every key the caller
         # supplies, whichever head it lands on.
         for field, sets in (
-            ("sets", entry.get("sets", [])),
+            ("sets", list(_option_keys(entry))),
             ("files.sets", filing.get("sets", []) if isinstance(filing, dict) else []),
         ):
             if _is_string_list(sets) and name in sets:
@@ -1343,7 +1450,10 @@ def _state_errors(corpus: _Corpus) -> list[str]:
         errors += _first_number_errors(where, entry)
         errors += _bulleted_errors(at)
         errors += _key_field_errors(at, OPENED_FOR)
+        errors += _references_errors(at)
         errors += _sort_errors(at)
+        if LISTED in entry and not isinstance(entry[LISTED], bool):
+            errors.append(f"{where}.{LISTED} must be true or false")
     return errors
 
 
@@ -1628,6 +1738,126 @@ def _key_field_errors(at: _Entry, field: str) -> list[str]:
     return []
 
 
+def _references_errors(at: _Entry) -> list[str]:
+    """One state's `references`, entry by entry. See docs/method.md#references
+
+    Each key is graded as a reference, like `dependencies`, and may not be a
+    key this state already reads slugs out of: one key, one meaning. Each
+    value is a table holding one `inverse`, the row field the edge is read
+    back under. The rules that read across states are `_inverse_errors`'.
+    """
+    where, entry = at.where, at.entry
+    if REFERENCES not in entry:
+        return []
+    declared = entry[REFERENCES]
+    field = f"{where}.{REFERENCES}"
+    shape = f'KEY = {{ {INVERSE} = "NAME" }}'
+    if not isinstance(declared, dict):
+        return [f"{field} must be a table of {shape}"]
+    read_by = {
+        entry[one]: one
+        for one in (depends.FIELD, OPENED_FOR)
+        if isinstance(entry.get(one), str)
+    }
+    errors: list[str] = []
+    for key, value in declared.items():
+        at_key = f"{field}.{key}"
+        if reference := _key_reference_error(where, REFERENCES, key, at.keys):
+            errors.append(reference)
+        elif key in read_by:
+            errors.append(
+                f'{field} names "{key}", which {where}.{read_by[key]} already '
+                "reads slugs out of. One key holds one kind of edge, or what "
+                f'the tool does with it depends on which field you read. Name '
+                f"another key in {field}"
+            )
+        if not isinstance(value, dict):
+            errors.append(f"{at_key} must be a table: {shape}")
+            continue
+        errors += _unknown_fields(at_key, value, frozenset({INVERSE}), "reference")
+        if INVERSE not in value:
+            errors.append(
+                f"{at_key} declares no {INVERSE}. A reference is read back on "
+                "the item it names, and the inverse is the row field it is "
+                f"read under. Declare {at_key}.{INVERSE}"
+            )
+            continue
+        inverse = value[INVERSE]
+        if not isinstance(inverse, str):
+            errors.append(f"{at_key}.{INVERSE} must be a string")
+            continue
+        if not NAME_RE.match(inverse):
+            errors.append(
+                f'{at_key}.{INVERSE} names "{inverse}", which is not a usable '
+                "name (lowercase letters, digits and hyphens, starting with a "
+                "letter)"
+            )
+        elif inverse in at.keys:
+            errors.append(
+                f'keys.{inverse} redeclares "{inverse}", which {where} derives '
+                f"as the inverse of {key}. The inverse is read off the tree on "
+                "every listing, so a key beside it would be a second answer "
+                f"that can disagree. Drop keys.{inverse}, or name the inverse "
+                "something else"
+            )
+        elif inverse in (
+            *INTRINSIC_KEYS,
+            *RESERVED_KEYS,
+            *DERIVABLE,
+            *CAPABILITY_KEYS.values(),
+            *CLAIM_KEYS,
+        ):
+            errors.append(
+                f'{at_key}.{INVERSE} names "{inverse}", which a row already '
+                "carries for a reason of its own. Name the inverse something "
+                "else"
+            )
+    return errors
+
+
+def _inverse_errors(states: Mapping[str, Any]) -> list[str]:
+    """The `references` rules that read across states.
+
+    One key reads back under one inverse, and one inverse reads back one key,
+    or a row field would mean two things. The same pair declared on several
+    states is one reference, and is legal. An inverse naming a reference key
+    needs no rule here: a reference key is a declared key, and
+    `_references_errors` already refuses an inverse that is one. Entries it
+    refuses for their shape are skipped. See docs/method.md#references
+    """
+    declared: list[tuple[str, str, str]] = []
+    for name, entry in states.items():
+        table = entry.get(REFERENCES) if isinstance(entry, dict) else None
+        if not isinstance(table, dict):
+            continue
+        for key, value in table.items():
+            if isinstance(value, dict) and isinstance(value.get(INVERSE), str):
+                declared.append((name, key, value[INVERSE]))
+    errors: list[str] = []
+    by_key: dict[str, tuple[str, str]] = {}
+    by_inverse: dict[str, tuple[str, str]] = {}
+    for name, key, inverse in declared:
+        where = f"states.{name}.{REFERENCES}.{key}"
+        if key in by_key and by_key[key][1] != inverse:
+            first, said = by_key[key]
+            errors.append(
+                f'{where}.{INVERSE} names "{inverse}", and '
+                f'states.{first}.{REFERENCES}.{key} names "{said}". One key '
+                "reads back under one inverse. Name the same one on both"
+            )
+        by_key.setdefault(key, (name, inverse))
+        if inverse in by_inverse and by_inverse[inverse][1] != key:
+            first, other = by_inverse[inverse]
+            errors.append(
+                f'{where}.{INVERSE} names "{inverse}", which '
+                f"states.{first}.{REFERENCES}.{other} already reads back. "
+                "One inverse reads back one key, or the row could not say "
+                "which edge it came from. Name another inverse"
+            )
+        by_inverse.setdefault(inverse, (name, key))
+    return errors
+
+
 def _capability_errors(
     where: str, entry: Mapping[str, Any], *, identified: bool
 ) -> list[str]:
@@ -1872,8 +2102,16 @@ def _transition_errors(corpus: _Corpus) -> list[str]:
         for field in ("requires", "sets", "drops"):
             if field not in entry:
                 continue
+            if field == "sets" and isinstance(entry[field], dict):
+                errors += _fixed_errors(corpus.at(where, entry))
+                continue
             if not _is_string_list(entry[field]):
-                errors.append(f"{where}.{field} must be a list of strings")
+                errors.append(
+                    f"{where}.sets must be a list of strings, or a table of "
+                    "key = true or key = the value to write"
+                    if field == "sets"
+                    else f"{where}.{field} must be a list of strings"
+                )
                 continue
             errors += [
                 error
@@ -1978,6 +2216,88 @@ def _landed(transitions: Mapping[str, Any]) -> dict[str, Any]:
         )
         for name, entry in transitions.items()
     }
+
+
+def _option_keys(entry: Mapping[str, Any]) -> tuple[str, ...]:
+    """The keys a transition entry takes as options, in declared order: every
+    name in the list form of `sets`, and each key `true` in the table form.
+
+    Total over junk, which `_transition_errors` complains about once, so every
+    pass that reads `sets` reads it through here.
+    """
+    sets = entry.get("sets", ())
+    if isinstance(sets, dict):
+        return tuple(key for key, value in sets.items() if value is True)
+    return tuple(sets) if _is_string_list(sets) else ()
+
+
+def _fixed_values(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """The values a transition entry writes of its own: each key in the table
+    form of `sets` that is not `true`, as declared. Total over junk, like
+    `_option_keys`."""
+    sets = entry.get("sets")
+    if not isinstance(sets, dict):
+        return {}
+    return {
+        key: value
+        for key, value in sets.items()
+        if isinstance(value, str) or (isinstance(value, list) and _is_string_list(value))
+    }
+
+
+def _fixed_errors(at: _Entry) -> list[str]:
+    """`sets` written as a table, graded one key at a time.
+
+    `true` takes the key as an option, as `refuses` reads `true` as any value.
+    Anything else is the value the run writes: a non-empty string for a key
+    that holds one, a non-empty list of them for a list-valued key, each in
+    the key's `values` where it declares some, and no brace but `TODAY`.
+    See docs/method.md#transitions
+    """
+    where, table = at.where, at.entry["sets"]
+    errors: list[str] = []
+    for key, value in table.items():
+        if error := _key_reference_error(where, "sets", key, at.keys):
+            errors.append(error)
+            continue
+        if value is True:
+            continue
+        if value is False:
+            errors.append(
+                f"{where}.sets.{key} is false, which writes nothing. Write "
+                "true for an option, or the value to write"
+            )
+            continue
+        if key in at.list_valued:
+            if not (_is_string_list(value) and value and all(value)):
+                errors.append(
+                    f"{where}.sets.{key} must be true, or a non-empty list of "
+                    f"non-empty strings, because keys.{key} is list-valued"
+                )
+                continue
+            written = value
+        elif isinstance(value, str) and value:
+            written = [value]
+        else:
+            errors.append(
+                f"{where}.sets.{key} must be true, or a non-empty string, "
+                f"because keys.{key} holds one value"
+            )
+            continue
+        errors += [
+            f'{where}.sets.{key} is "{one}", and {TODAY} is the one '
+            "substitution a fixed value takes. Drop the other braces"
+            for one in written
+            if any(brace in one.replace(TODAY, "") for brace in "{}")
+        ]
+        if key in at.closed_values:
+            errors += [
+                f'{where}.sets.{key} names "{one}", '
+                f"which is not a declared value of keys.{key}"
+                for one in written
+                if one not in at.closed_values[key]
+            ]
+    return errors
 
 
 def _refuses_errors(at: _Entry) -> list[str]:
@@ -2314,9 +2634,16 @@ def _states(
             sub_phase_name=entry.get(subphase.FORM),
             dependencies=entry.get(depends.FIELD),
             opened_for=entry.get(OPENED_FOR),
+            references=MappingProxyType(
+                {
+                    key: value[INVERSE]
+                    for key, value in entry.get(REFERENCES, {}).items()
+                }
+            ),
             archive=entry.get(ARCHIVE),
             first_number=entry.get(FIRST_NUMBER, FIRST),
             sort=_sorted(entry),
+            listed=entry.get(LISTED, True),
             marks=frozenset(marks[name]) if name in marks else None,
         )
         for name, entry in entries.items()
@@ -2371,7 +2698,8 @@ def _transitions(entries: Mapping[str, Any]) -> dict[str, Transition]:
             refuses_any=tuple(
                 key for key, values in entry.get("refuses", {}).items() if values is True
             ),
-            sets=tuple(entry.get("sets", ())),
+            sets=_option_keys(entry),
+            fixed=MappingProxyType(_fixed_values(entry)),
             drops=tuple(entry.get("drops", ())),
             claims=bool(entry.get("claims", False)),
             marks=entry.get("marks"),

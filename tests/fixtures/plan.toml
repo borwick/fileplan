@@ -13,6 +13,10 @@
 [states.greenhouse]
 path = "greenhouse"
 doc  = "method.md#greenhouse"
+# The key holding the seedlings this one replaces, read back on each of them
+# as `replaced-by`. The same pair on `orchard`, so an edge resolves across
+# states.
+references = { replaces = { inverse = "replaced-by" } }
 
 # Trees in training. Ordered, numbered, cut into steps, and carrying a cursor
 # over them. `orchard-archive.md` holds the closed half of the register.
@@ -31,6 +35,7 @@ sub-phase-status  = "graft-status"
 # reads. `orchard` is the queued state, so the misordered report has places
 # to compare.
 dependencies      = "after"
+references        = { replaces = { inverse = "replaced-by" } }
 
 # A state with a path that shares neither its own name nor its last segment:
 # an item in `beds/hardening-off/` reporting state `cold-frame` is only
@@ -49,8 +54,10 @@ capabilities = ["claimed"]
 # Where a tree goes when it is given up on. No capabilities: nothing about a
 # tree nobody is growing any more is ordered, numbered or claimed.
 [states.firewood]
-path = "firewood"
-doc  = "method.md#firewood"
+path   = "firewood"
+doc    = "method.md#firewood"
+# Left out of a plain `list`, which says so. See method.md#firewood
+listed = false
 
 # The second bulleted state, and deliberately not numbered: its cuttings are
 # called `c1`, `c2`, … — no register, no hyphen, a prefix that is a bare
@@ -98,6 +105,12 @@ help = "The day the seed went in."
 doc  = "method.md#after"
 help = "Slugs this seedling waits on."
 
+# A reference: slugs like `after`, read back on the other end, blocking nothing.
+[keys.replaces]
+doc         = "method.md#replaces"
+help        = "Slugs of the seedlings this one replaces."
+list-valued = true
+
 # The provenance pair `line-out` writes.
 [keys.batch]
 doc  = "method.md#batch"
@@ -141,18 +154,19 @@ kind = "create"
 doc  = "method.md#sprout"
 help = "Start a seedling in the greenhouse."
 to   = "greenhouse"
-sets = ["cultivar"]
+sets = ["cultivar", "replaces"]
 
 # Leaves the queued state, so the drop-on-exit has a declared path. Its
 # `refuses` reads a list-valued head: a tree with canker does not come in,
 # however many other pests it carries.
 [transitions.harvest]
-kind    = "move"
-doc     = "method.md#harvest"
-help    = "Bring a tree in from the orchard."
-from    = "orchard"
-to      = "cold-frame"
-refuses = { pest = ["canker"] }
+kind     = "move"
+doc      = "method.md#harvest"
+help     = "Bring a tree in from the orchard."
+from     = "orchard"
+to       = "cold-frame"
+refuses  = { pest = ["canker"] }
+archives = true
 
 # One verb per arm of the claim table. `claims = true` is what takes a claim,
 # never arriving: `pot-up` creates into the claimed state and claims; `bench`

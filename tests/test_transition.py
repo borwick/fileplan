@@ -17,16 +17,18 @@ over a head and a transition, the same split `fileplan.declaration` and
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 import os
 import socket
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import pytest
 
 from conftest import FIXTURE_FILES
 
-from fileplan import claim, lock, numbered, subphase
+from fileplan import claim, lock, numbered, subphase, transition
 from fileplan.claim import Identity
 from fileplan.declaration import (
     Declaration,
@@ -39,9 +41,11 @@ from fileplan.read import items as read_items
 from fileplan.read import listing as read_listing
 from fileplan.read import rows as read_rows
 from fileplan.transition import (
+    commands,
     execute,
     offer_errors,
     dangle_errors,
+    referenced_errors,
     unmarked_errors,
     value_errors,
 )
@@ -434,6 +438,103 @@ def test_a_slug_held_in_two_states_refuses_naming_both_files(
     assert str(source.relative_to(tree.root)) in str(refusal.value)
     assert str(blocker.relative_to(tree.root)) in str(refusal.value)
     assert source.exists()
+
+
+# --------------------------------------------------------------------------
+# Fixed values and required options: the table form of `sets`
+# --------------------------------------------------------------------------
+#
+# The fixture's `transplant`, given a table by `dataclasses.replace` rather
+# than by a second fixture verb: what is pinned is the executor and the row,
+# and the loader's half is `test_declaration.py`'s.
+
+
+def stamping(transplant: Transition, **fixed: Any) -> Transition:
+    """`transplant` writing `fixed` of its own, beside its `rootstock` option."""
+    return dataclasses.replace(
+        transplant, sets=("rootstock",), fixed=MappingProxyType(fixed)
+    )
+
+
+def test_a_fixed_value_lands_on_the_head(tree: Declaration) -> None:
+    """`deprecate`'s shape: a value the run writes of its own, with no option
+    to give it."""
+    seedling(tree, "a-seedling", READY)
+    stamped = stamping(tree.transitions["transplant"], pest=["scab"])
+    path = execute(tree, stamped, name="a-seedling")
+    assert read(path, tree)["pest"] == ["scab"]
+
+
+def test_today_lands_as_the_runs_local_date(
+    tree: Declaration, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same shape a date given as an option writes, so the two read
+    alike."""
+    monkeypatch.setattr(transition, "_today", lambda: dt.date(2026, 10, 18))
+    seedling(tree, "a-seedling", READY)
+    stamped = stamping(
+        tree.transitions["transplant"], planted="{today}", pest=["scab"]
+    )
+    path = execute(tree, stamped, name="a-seedling")
+    assert read(path, tree)["planted"] == "2026-10-18"
+
+
+def test_refuses_reads_the_head_before_the_run_stamps_it(tree: Declaration) -> None:
+    """A verb stamping a value it also refuses does not refuse itself: the
+    stamp is what the run writes, and `refuses` reads what the item held."""
+    seedling(tree, "a-seedling", READY)
+    stamped = dataclasses.replace(
+        stamping(tree.transitions["transplant"], cultivar="hybrid"),
+        refuses={"cultivar": ("hybrid",)},
+    )
+    path = execute(tree, stamped, name="a-seedling")
+    assert read(path, tree)["cultivar"] == "hybrid"
+
+
+@pytest.fixture
+def requiring(tree: Declaration) -> Declaration:
+    """The fixture with `transplant` requiring its own `rootstock` option."""
+    transplant = tree.transitions["transplant"]
+    required = dataclasses.replace(
+        transplant, requires=(*transplant.requires, "rootstock")
+    )
+    return dataclasses.replace(
+        tree, transitions={**tree.transitions, "transplant": required}
+    )
+
+
+def test_a_required_option_is_met_at_the_row(requiring: Declaration) -> None:
+    """The item carries no `rootstock`, and the row still names the command,
+    because the run supplies it. The row and the run agree."""
+    seedling(requiring, "a-seedling", READY)
+    (one,) = read_items(requiring)
+    assert "rootstock" not in one.head
+    assert "transplant" in commands(requiring, one, [one])
+
+
+def test_a_required_option_given_lands(requiring: Declaration) -> None:
+    seedling(requiring, "a-seedling", READY)
+    path = execute(
+        requiring,
+        requiring.transitions["transplant"],
+        name="a-seedling",
+        values={"rootstock": "M9"},
+    )
+    assert read(path, requiring)["rootstock"] == "M9"
+
+
+def test_a_required_option_not_given_refuses_before_writing(
+    requiring: Declaration,
+) -> None:
+    """Click refuses it at the command line. This is the executor's own
+    refusal, for a caller that is not the CLI."""
+    source = seedling(requiring, "a-seedling", READY)
+    with pytest.raises(Refusal) as refusal:
+        execute(requiring, requiring.transitions["transplant"], name="a-seedling")
+    assert 'transplant requires "rootstock", and this run was not given it' in str(
+        refusal.value
+    )
+    assert source.read_text(encoding="utf-8") == READY
 
 
 # --------------------------------------------------------------------------
@@ -866,12 +967,15 @@ def test_a_shed_number_with_no_archive_entry_is_the_gap_the_register_names(
     tree: Declaration,
 ) -> None:
     """The failure the archive heading exists to prevent, reproduced in
-    miniature: `harvest` takes a tree out and nothing records its number, so
-    the register has a hole and the next mint refuses rather than filling it."""
+    miniature: a tree's file is deleted by hand and nothing records its number,
+    so the register has a hole and the next mint refuses rather than filling
+    it. No declared way out leaves one, because a transition out of a
+    numbered state that does not archive refuses at load."""
+    planted = {}
     for name in ("a-seedling", "b-seedling"):
         seedling(tree, name, READY.replace("A seedling", name))
-        execute(tree, tree.transitions["transplant"], name=name)
-    execute(tree, tree.transitions["harvest"], name="a-seedling")
+        planted[name] = execute(tree, tree.transitions["transplant"], name=name)
+    planted["a-seedling"].unlink()
 
     seedling(tree, "c-seedling", READY.replace("A seedling", "C seedling"))
     with pytest.raises(Refusal, match=r"gap\(s\): 2"):
@@ -971,15 +1075,6 @@ def test_the_number_outlives_the_file(tree: Declaration) -> None:
     seedling(tree, "b-seedling", READY.replace("A seedling", "B seedling"))
     minted = execute(tree, tree.transitions["transplant"], name="b-seedling")
     assert read(minted, tree)["number"] == 3
-
-
-def test_a_verb_that_does_not_archive_writes_no_entry(tree: Declaration) -> None:
-    """The control. `harvest` leaves the same state and records nothing — the
-    entry comes from the verb's opt-in, not from leaving."""
-    before = filed(tree)
-    orchard(tree, "a-seedling")
-    execute(tree, tree.transitions["harvest"], name="a-seedling")
-    assert filed(tree) == before
 
 
 def test_the_run_says_what_it_minted_and_that_a_record_goes_under_it(
@@ -3405,6 +3500,108 @@ def prose(path: Path, tree: Declaration, body: str) -> Path:
     one = read(path, tree)
     write(Item(path=one.path, state=one.state, head=one.head, body=body))
     return path
+
+
+# --------------------------------------------------------------------------
+# References: checked at write, repointed on merge and rename, never cleared
+# --------------------------------------------------------------------------
+#
+# The fixture's `replaces` is a reference on `greenhouse` and `orchard`,
+# read back as `replaced-by`, and `sprout` sets it. A close refuses over one,
+# because a reference is a record; a merge and a retitle repoint it; a move
+# leaves it, the item still being filed.
+
+
+def replacing(tree: Declaration, name: str, *on: str) -> Path:
+    """A greenhouse seedling whose `replaces` names ``on``, by sprouting it."""
+    return execute(
+        tree,
+        tree.transitions["sprout"],
+        name=name,
+        body="Prose.",
+        values={"replaces": list(on)},
+    )
+
+
+def test_a_run_writing_a_reference_to_nothing_refuses_with_near_misses(
+    tree: Declaration,
+) -> None:
+    seedling(tree, "a-seedling", READY)
+    with pytest.raises(Refusal) as refusal:
+        replacing(tree, "B seedling", "a-seedlnig")
+    assert 'replaces names "a-seedlnig", and no item carries that slug' in str(
+        refusal.value
+    )
+    assert "nearest: a-seedling" in str(refusal.value)
+    assert not (tree.root / "greenhouse" / "b-seedling.md").exists()
+
+
+def test_a_close_of_a_referenced_item_refuses_naming_the_referent(
+    tree: Declaration,
+) -> None:
+    """The refusal writes nothing, and the row does not offer the close: one
+    pure function answers both."""
+    seedling(tree, "a-seedling", READY)
+    replacing(tree, "B seedling", "a-seedling")
+    with pytest.raises(Refusal) as refusal:
+        execute(tree, tree.transitions["compost"], name="a-seedling")
+    assert (
+        "greenhouse/b-seedling.md names it in replaces. A reference is a record"
+        in str(refusal.value)
+    )
+    assert (tree.root / "greenhouse" / "a-seedling.md").exists()
+    assert read(tree.root / "greenhouse" / "b-seedling.md", tree)["replaces"] == [
+        "a-seedling"
+    ]
+    walked = read_items(tree)
+    [one] = [one for one in walked if one.slug == "a-seedling"]
+    assert "compost" not in commands(tree, one, walked)
+
+
+def test_a_close_of_the_referent_itself_goes(tree: Declaration) -> None:
+    """The item holding the edge names something, and nothing names it."""
+    seedling(tree, "a-seedling", READY)
+    replacing(tree, "B seedling", "a-seedling")
+    walked = read_items(tree)
+    [one] = [one for one in walked if one.slug == "b-seedling"]
+    assert referenced_errors(one, tree.transitions["compost"], walked, tree.root) == []
+    assert "compost" in commands(tree, one, walked)
+    execute(tree, tree.transitions["compost"], name="b-seedling")
+    assert not (tree.root / "greenhouse" / "b-seedling.md").exists()
+
+
+def test_a_merge_repoints_a_reference_at_the_survivor(tree: Declaration) -> None:
+    seedling(tree, "a-seedling", READY)
+    seedling(tree, "b-seedling", READY)
+    replacing(tree, "C seedling", "a-seedling")
+    said: list[str] = []
+    inarched(tree, announce=said.append)
+    assert read(tree.root / "greenhouse" / "c-seedling.md", tree)["replaces"] == [
+        "b-seedling"
+    ]
+    assert (
+        'greenhouse/c-seedling.md: pointed "a-seedling" at "b-seedling" in replaces'
+        in said
+    )
+
+
+def test_a_retitle_repoints_a_reference(tree: Declaration) -> None:
+    orchard(tree, "a-seedling")
+    replacing(tree, "C seedling", "a-seedling")
+    relabelled(tree, "A pear tree")
+    assert read(tree.root / "greenhouse" / "c-seedling.md", tree)["replaces"] == [
+        "a-pear-tree"
+    ]
+
+
+def test_a_move_leaves_a_reference_where_it_is(tree: Declaration) -> None:
+    """The item is still filed, so the edge still names something."""
+    seedling(tree, "a-seedling", READY)
+    replacing(tree, "C seedling", "a-seedling")
+    execute(tree, tree.transitions["transplant"], name="a-seedling", asked={"at": None})
+    assert read(tree.root / "greenhouse" / "c-seedling.md", tree)["replaces"] == [
+        "a-seedling"
+    ]
 
 
 def test_two_items_merge_into_a_third_in_one_run(tree: Declaration) -> None:

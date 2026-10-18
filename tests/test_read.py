@@ -243,6 +243,8 @@ def test_a_rows_fields_are_in_a_fixed_order(tree: Declaration) -> None:
     fact derived from **git**. Present on every row, and `None` here because
     the tree is not in git. `commands` follows it, derived from the
     transitions, and `None` here because `rows` is handed no question.
+    `replaced-by` closes the derived run: the inverse a state's `references`
+    declares, read off the tree, and `None` because nothing names the item.
 
     The head-key capabilities come in `CAPABILITY_KEYS` order — `position`
     then `number` — because that is the one place the tool says which keys a
@@ -263,6 +265,7 @@ def test_a_rows_fields_are_in_a_fixed_order(tree: Declaration) -> None:
         depends.BLOCKS,
         stale.DAYS,
         read.COMMANDS,
+        "replaced-by",
         "title",
         *tree.keys,
         "path",
@@ -574,6 +577,76 @@ def test_a_row_carries_what_waits_on_it(tree: Declaration) -> None:
         row["slug"]
         for row in read.matching(found.rows, [read.filtering(tree, "blocks=c-tree")])
     ] == ["a-tree", "b-tree"]
+
+
+REPLACING = '''\
++++
+title = "A seedling"
+replaces = [{edges}]
++++
+
+Prose.
+'''
+
+
+def replacing(tree: Declaration, state: str, name: str, *edges: str) -> None:
+    """An item in ``state`` whose `replaces` names ``edges``."""
+    head = ", ".join(f'"{one}"' for one in edges)
+    file(tree, state, f"{name}.md", REPLACING.format(edges=head))
+
+
+def test_a_referent_carries_the_inverse_from_another_state(tree: Declaration) -> None:
+    """A reference is read back on the item it names, wherever that item
+    sits: `replaced-by` is written nowhere, and derived on each read."""
+    file(tree, "orchard", "a-tree.md")
+    replacing(tree, "greenhouse", "b-seedling", "a-tree")
+    replacing(tree, "orchard", "c-tree", "a-tree", "b-seedling")
+    found = read.listing(tree)
+    assert {row["slug"]: row["replaced-by"] for row in found.rows} == {
+        "a-tree": ["b-seedling", "c-tree"],
+        "b-seedling": ["c-tree"],
+        "c-tree": None,
+    }
+    assert found.unresolved == []
+    # It blocks nothing: a reference is a record, not a wait.
+    assert all(row[depends.BLOCKED] is None for row in found.rows)
+    assert [
+        row["slug"]
+        for row in read.matching(
+            found.rows, [read.filtering(tree, "replaced-by=c-tree")]
+        )
+    ] == ["b-seedling", "a-tree"]
+
+
+def test_a_reference_naming_nothing_filed_is_unresolved(tree: Declaration) -> None:
+    """`unknown`'s three fields, in a report of its own."""
+    replacing(tree, "greenhouse", "b-seedling", "gone-tree")
+    found = read.listing(tree)
+    assert found.unresolved == [
+        {depends.SLUG: "b-seedling", depends.KEY: "replaces", depends.NAMES: "gone-tree"}
+    ]
+    assert found.unknown == []
+
+
+def test_a_declaration_with_no_references_carries_no_inverse_and_no_report(
+    tree: Declaration,
+) -> None:
+    """The corpus-independence rule from the other side: no state declares
+    one, so the field and the report are absent, not empty."""
+    plan = tree.root / "plan.toml"
+    plan.write_text(
+        "\n".join(
+            line
+            for line in plan.read_text().splitlines()
+            if not line.startswith("references")
+        )
+        + "\n"
+    )
+    plain = load(plan)
+    replacing(plain, "greenhouse", "b-seedling", "gone-tree")
+    (row,) = read.listing(plain).rows
+    assert "replaced-by" not in row
+    assert "unresolved" not in [name for name, gate in read.REPORTS if gate(plain)]
 
 
 def test_a_row_carries_the_edges_it_waits_on_that_are_still_filed(
@@ -2063,7 +2136,8 @@ def test_a_row_carries_exactly_the_derived_keys_the_roster_names(
     file(tree, "orchard", "a-seedling.md")
     assert tree.derived, "the fixture derives nothing, so this proves nothing"
     [row] = read.rows(tree, read.items(tree))
-    assert [key for key in row if key in DERIVABLE_KEYS] == list(tree.derived)
+    derivable = (*DERIVABLE_KEYS, *tree.inverses)
+    assert [key for key in row if key in derivable] == list(tree.derived)
 
 
 def test_a_declaration_that_derives_nothing_else_carries_only_the_age(
@@ -2167,3 +2241,27 @@ def test_without_the_question_every_rows_commands_is_none(
     file(tree, "greenhouse", "a-seedling.md")
     (row,) = read.listing(tree).rows
     assert read.COMMANDS in row and row[read.COMMANDS] is None
+
+
+# --------------------------------------------------------------------------
+# `unlisting`: what a `list` given no `--state` leaves out
+# --------------------------------------------------------------------------
+
+
+def test_unlisting_keeps_the_listed_rows_and_counts_the_rest() -> None:
+    declaration = load(FIXTURES / "plan.toml")
+    rows = [
+        {read.SLUG: "a", read.STATE: "greenhouse"},
+        {read.SLUG: "b", read.STATE: "firewood"},
+        {read.SLUG: "c", read.STATE: "orchard"},
+        {read.SLUG: "d", read.STATE: "firewood"},
+    ]
+    kept, records = read.unlisting(declaration, rows)
+    assert [row[read.SLUG] for row in kept] == ["a", "c"]
+    assert records == [{read.STATE: "firewood", read.COUNT: 2}]
+
+
+def test_unlisting_names_no_state_that_lost_nothing() -> None:
+    declaration = load(FIXTURES / "plan.toml")
+    rows = [{read.SLUG: "a", read.STATE: "greenhouse"}]
+    assert read.unlisting(declaration, rows) == (rows, [])

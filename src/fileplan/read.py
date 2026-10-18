@@ -80,6 +80,10 @@ CARRIER = "carrier"
 #: Report-only, like `BULLET_REST`. See docs/method.md#sub-phases
 BULLET_REASON = "reason"
 
+#: The field an `unlisted` record adds to the state it names: how many rows
+#: this read left out of it. See docs/method.md#listed
+COUNT = "count"
+
 #: How many candidates an ambiguous prefix names, one per line, before it
 #: says how many more there are. See docs/method.md#the-handle
 CANDIDATES = 10
@@ -205,6 +209,7 @@ def rows(
     blocking: Mapping[str, tuple[str, ...]] = MappingProxyType({}),
     ages: Mapping[str, int] = MappingProxyType({}),
     commands: Mapping[str, list[str]] = MappingProxyType({}),
+    referenced: Mapping[str, Mapping[str, list[str]]] = MappingProxyType({}),
 ) -> list[dict[str, Any]]:
     """`found` as mappings, one per item, every declared key present.
 
@@ -216,13 +221,15 @@ def rows(
     The derived fields come between `state` and the declared keys, each
     present whenever the declaration has such a state at all: a capability's
     key, then the three counted off the body, then `blocked-by`, then
-    `stale-days`. A `0` sub-phase count is a section nobody has decomposed,
+    `stale-days`, then `commands`, then each inverse a state's `references`
+    declares. A `0` sub-phase count is a section nobody has decomposed,
     where `None` is a state that counts none, and the pair is what tells a
     finished decomposition from a state with no bullets at all. See
     docs/method.md#the-listing and docs/method.md#the-cursor
 
     `claimed`, `blocking` and `ages` are the facts read from outside the item
-    file, each a mapping by slug. Working them out is `listing`'s, so this
+    file, each a mapping by slug, and `referenced` is one such mapping per
+    inverse. Working them out is `listing`'s, so this
     function stays pure over what it is handed. `blocked-by` names only what
     is still filed, because "waiting on X" and "X does not exist" are
     different facts (docs/method.md#dependencies). A slug git could not answer
@@ -235,10 +242,7 @@ def rows(
     waits = declaration.has_dependencies
     takes = declaration.takes_items
     # `blocking` inverted: who waits on each slug, in the traversal's order.
-    waited: dict[str, list[str]] = {}
-    for slug, named in blocking.items():
-        for one in named:
-            waited.setdefault(one, []).append(slug)
+    waited = depends.inverse(blocking)
     return [
         {
             SLUG: one.slug,
@@ -287,6 +291,10 @@ def rows(
             ),
             stale.DAYS: ages.get(one.slug),
             **({COMMANDS: commands.get(one.slug) or None} if takes else {}),
+            **{
+                inverse: referenced.get(inverse, {}).get(one.slug)
+                for inverse in declaration.inverses
+            },
             **{key: one.get(key) for key in INTRINSIC_KEYS},
             **{key: one.get(key) for key in declaration.keys},
             PATH: str(one.path.relative_to(declaration.root)),
@@ -322,6 +330,10 @@ class Listing:
     #: array would be a union mostly empty at every read.
     unknown: list[dict[str, Any]] = field(default_factory=list)
     misordered: list[dict[str, Any]] = field(default_factory=list)
+    #: The references naming nothing filed, in `unknown`'s three fields. A
+    #: report of its own, because `unknown` says dependency in its gate, its
+    #: line and its docs. See docs/method.md#references
+    unresolved: list[dict[str, Any]] = field(default_factory=list)
     #: The two register reports, one record each: a number in neither the
     #: state nor the document its `archive` names, and a `##` in that document
     #: the register cannot read. The arithmetic is
@@ -374,6 +386,7 @@ REPORTS: tuple[tuple[str, Callable[[Declaration], bool]], ...] = (
     ),
     ("unknown", lambda one: one.has_dependencies),
     ("misordered", lambda one: one.has_dependencies),
+    ("unresolved", lambda one: one.has_references),
     ("gaps", lambda one: one.has(numbered.NAME)),
     ("lost", lambda one: one.has(numbered.NAME)),
     # Not a report: what the register holds rather than what is wrong with it.
@@ -417,6 +430,7 @@ def listing(
     """
     found = items(declaration)
     blocking, unknown, misordered = _dependencies(found)
+    referenced, unresolved = _references(found)
     gaps, lost, register = _register(declaration, found)
     unmarkable = _unmarkable(declaration, found)
     passed = _unread(declaration, found)
@@ -469,6 +483,7 @@ def listing(
         blocking=blocking,
         ages=ages,
         commands=commands,
+        referenced=referenced,
     )
     walked = len(found)
 
@@ -479,6 +494,7 @@ def listing(
         undecomposed=undecomposed,
         unknown=unknown,
         misordered=misordered,
+        unresolved=unresolved,
         gaps=gaps,
         lost=lost,
         unmarkable=unmarkable,
@@ -725,6 +741,33 @@ def _dependencies(
     return blocking, unknown, misordered
 
 
+def _references(
+    found: Sequence[Item],
+) -> tuple[dict[str, dict[str, list[str]]], list[dict[str, Any]]]:
+    """The two facts a reference gives, over one traversal: who names each
+    item, per inverse, and the edges naming nothing filed.
+
+    `_dependencies`' sibling, without the blocking. An edge resolves against
+    any filed item in any state, so an item is read back as a referent
+    wherever it sits. See docs/method.md#references
+    """
+    filed = {one.slug for one in found}
+    held: dict[str, dict[str, tuple[str, ...]]] = {}
+    unresolved: list[dict[str, Any]] = []
+    for one in found:
+        for key, inverse in one.state.references.items():
+            edges = depends.edges(one.head, key)
+            if not edges:
+                continue
+            held.setdefault(inverse, {})[one.slug] = edges
+            unresolved += [
+                {depends.SLUG: one.slug, depends.KEY: key, depends.NAMES: named}
+                for named in depends.unknown(edges, filed)
+            ]
+    referenced = {inverse: depends.inverse(holders) for inverse, holders in held.items()}
+    return referenced, unresolved
+
+
 def comparison(
     key: str,
     given: str,
@@ -842,6 +885,29 @@ def matching(
     """The rows that satisfy every test. Pure; AND, because narrowing is what
     a second filter is for."""
     return [dict(row) for row in rows if all(_satisfies(row, test) for test in tests)]
+
+
+def unlisting(
+    declaration: Declaration, rows: Sequence[Mapping[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The rows in a listed state, and one record per unlisted state that
+    lost a row, in declared order. Pure.
+
+    The count is of the rows given, so taken after the filters it is what the
+    hiding took from this read. A state that lost nothing gets no record.
+    See docs/method.md#listed
+    """
+    hidden = set(declaration.unlisted)
+    counts = {name: 0 for name in declaration.unlisted}
+    kept = []
+    for row in rows:
+        if row[STATE] in hidden:
+            counts[row[STATE]] += 1
+        else:
+            kept.append(dict(row))
+    return kept, [
+        {STATE: name, COUNT: count} for name, count in counts.items() if count
+    ]
 
 
 def _satisfies(row: Mapping[str, Any], test: Test) -> bool:
@@ -1161,21 +1227,25 @@ def numbered_handle(
 def edge_errors(
     declaration: Declaration, state: State, given: Mapping[str, Any]
 ) -> list[str]:
-    """Every edge a run was handed for `state`'s dependencies key that names
-    no item, with the near misses a handle gets.
+    """Every edge a run was handed for `state`'s dependencies key or its
+    reference keys that names no item, with the near misses a handle gets.
 
     A run's check on a value it was handed, so nothing is resolved or
     rewritten: an exact slug is required. An edge that dangles later, after a
     rename or an abandon, is still only reported. See docs/method.md#dependencies
+    and docs/method.md#references
     """
-    edges = depends.edges(given, state.dependencies)
-    if not edges:
+    keys = [key for key in (state.dependencies, *state.references) if key is not None]
+    handed = {key: depends.edges(given, key) for key in keys}
+    if not any(handed.values()):
         return []
     named = [(one.slug, "") for one in items(declaration)]
+    filed = {slug for slug, _ in named}
     return [
-        f'{state.dependencies} names "{edge}", and no item carries that '
+        f'{key} names "{edge}", and no item carries that '
         f"slug{_nearest(named, edge)}"
-        for edge in depends.unknown(edges, {slug for slug, _ in named})
+        for key, edges in handed.items()
+        for edge in depends.unknown(edges, filed)
     ]
 
 

@@ -1,7 +1,10 @@
-"""Dependencies: what an item waits on, and what names nothing.
+"""Edges: what an item waits on, what it references, and what names nothing.
 
-A state says which declared key holds an item's dependencies. So the word a
-workflow spells them with appears nowhere in `src/`.
+A state says which declared key holds an item's dependencies, and which keys
+hold its references. So the words a workflow spells them with appear nowhere
+in `src/`. `edges`, `without`, `repoint`, `unknown` and `inverse` are about
+edges of either kind. Only `blocking` and `misordered` are about dependencies,
+because only a dependency waits: a reference is a record that blocks nothing.
 
 Absence does not mean satisfied. A dependency naming an item that is not filed
 reads as `unknown`, never as met. Reading it as met would let a mistyped slug
@@ -19,7 +22,7 @@ here refuses and nothing gates.
 
 Everything is pure.
 
-See docs/method.md#dependencies
+See docs/method.md#dependencies and docs/method.md#references
 """
 
 from __future__ import annotations
@@ -116,6 +119,20 @@ def repoint(value: Any, slug: str, into: str, *, own: str) -> Any | None:
     if not kept:
         return None
     return kept if isinstance(value, list) else kept[0]
+
+
+def inverse(holders: Mapping[str, Iterable[str]]) -> dict[str, list[str]]:
+    """`holders` the other way round: for each slug named, who names it.
+
+    `holders` maps an item's slug to the edges it holds, and the answer keeps
+    its order, so the holders of one slug list in traversal order. A slug
+    named twice by one holder lists that holder once.
+    """
+    named: dict[str, list[str]] = {}
+    for slug, edges in holders.items():
+        for one in dict.fromkeys(edges):
+            named.setdefault(one, []).append(slug)
+    return named
 
 
 def blocking(edges: Iterable[str], filed: Container[str]) -> tuple[str, ...]:

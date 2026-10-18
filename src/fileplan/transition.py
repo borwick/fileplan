@@ -29,10 +29,12 @@ from fileplan import claim, depends, item, numbered, queued, read, subphase
 from fileplan.declaration import (
     ADD_BULLET,
     CAPABILITY_KEYS,
+    CLOSE,
     DISSOLVING,
     MARK_BULLET,
     MERGE,
     RENAME,
+    TODAY,
     Declaration,
     Key,
     Refusal,
@@ -52,16 +54,19 @@ def offer_errors(head: Mapping[str, Any], transition: Transition) -> list[str]:
     """Every way `head` is not something `transition` could take right now.
 
     Its `requires` and `refuses`, and nothing else. A key present but empty
-    carries nothing, so it reads as missing rather than as satisfied, and
-    `refuses` asks `read.carries` so a list is the several values it holds.
-    A key refused on presence refuses any value at all.
+    carries nothing, so it reads as missing rather than as satisfied. A
+    required option is left out, because the run supplies it and
+    `value_errors` refuses a run that does not. `refuses` reads the head as it
+    is before the run, a key the run stamps included, and asks `read.carries`
+    so a list is the several values it holds. A key refused on presence
+    refuses any value at all.
     Pure: no filesystem, no cwd.
     See docs/method.md#commands
     """
     errors = [
         f'{transition.name} requires "{key}", which this item does not carry'
         for key in transition.requires
-        if _missing(head, key)
+        if key not in transition.sets and _missing(head, key)
     ]
     errors += [
         f'{transition.name} refuses {key} = "{entry}"'
@@ -88,10 +93,15 @@ def value_errors(
     A list-valued key given one value, and a single-valued key given a list,
     each refuse by name before either arm. Every key the run takes as an
     option, whichever head it lands on: the carrier's `sets`, and the keys a
-    verb that files writes onto the filed item.
+    verb that files writes onto the filed item. And a required option the run
+    was not given, which click refuses too, for a caller that is not the CLI.
     See docs/method.md#list-valued
     """
-    errors: list[str] = []
+    errors = [
+        f'{transition.name} requires "{key}", and this run was not given it'
+        for key in transition.sets
+        if key in transition.requires and key not in given
+    ]
     for key in (*transition.sets, *transition.files_sets):
         if key not in given:
             continue
@@ -151,6 +161,33 @@ def dangle_errors(
     return errors
 
 
+def referenced_errors(
+    owner: item.Item,
+    transition: Transition,
+    others: Sequence[item.Item],
+    root: Path,
+) -> list[str]:
+    """Every filed item whose references name `owner`, if `transition` closes.
+
+    A reference is a record. Clearing the edge would erase it, and leaving it
+    would make a record read as a typo, so a close refuses until the edge is
+    gone. A merge repoints instead, and is not asked. Pure, and the run and
+    the row's `commands` both call it. See docs/method.md#references
+    """
+    if transition.kind != CLOSE:
+        return []
+    return [
+        f"{named(one.path, root)} names it in {key}. A reference is a record, "
+        "so closing the item would leave that edge naming nothing. Take "
+        f'"{owner.slug}" out of {key} there first, or merge the item into the '
+        "one that continues it"
+        for one in others
+        if one.path != owner.path
+        for key in one.state.references
+        if owner.slug in depends.edges(one.head, key)
+    ]
+
+
 def unmarked_errors(owner: item.Item, transition: Transition) -> list[str]:
     """Every sub-phase of `owner` that `transition` would file a record over.
 
@@ -195,6 +232,7 @@ def commands(
         and not offer_errors(one.head, transition)
         and not _held_elsewhere(declaration, transition, one.slug)
         and not dangle_errors(one, transition, walked, declaration.root)
+        and not referenced_errors(one, transition, walked, declaration.root)
         and not unmarked_errors(one, transition)
         and not unread_errors(declaration, transition, one, one.head)
         and not form_errors(declaration, transition, one, _settable(transition, one))
@@ -204,10 +242,10 @@ def commands(
 
 
 def _settable(transition: Transition, one: item.Item) -> dict[str, Any]:
-    """`one`'s head, with every key `transition` sets counted as carried: a
-    run may be given any of them, and a row may not leave out a command the
-    run would take."""
-    return {**one.head, **{key: True for key in transition.sets}}
+    """`one`'s head, with every key `transition` writes counted as carried: a
+    run may be given any option, writes every fixed value, and a row may not
+    leave out a command the run would take."""
+    return {**one.head, **{key: True for key in transition.lands}}
 
 
 def _held_elsewhere(
@@ -285,7 +323,8 @@ class _Running:
     name: str
     #: `--body` as given. What a run writes is `_bulleting`'s answer.
     body: str | None
-    #: The verb's `sets` keys, the ones given nothing already dropped.
+    #: The verb's `sets` keys, the ones given nothing already dropped, then
+    #: its fixed values with `TODAY` substituted.
     given: Mapping[str, Any]
     #: What the destination state's capabilities were asked for.
     asked: Mapping[str, Any]
@@ -322,6 +361,9 @@ def execute(
     # Before the lock and before either arm, so `--check` says it in the same words.
     if wrong := value_errors(given, transition, declaration.keys):
         raise Refusal(wrong)
+    # After the grading, which is of what the caller gave. A fixed value is
+    # graded at load, and it wins over a caller's: it is never an option.
+    given |= _stamped(transition)
     several = not isinstance(name, str)
     handles = (name,) if isinstance(name, str) else tuple(name)
     if several and transition.kind != MERGE:
@@ -345,6 +387,19 @@ def execute(
             wrote = _dissolve(running, handles)
             return wrote if several or isinstance(wrote, str) else wrote[0]
         return _move(running)
+
+
+def _stamped(transition: Transition) -> dict[str, Any]:
+    """The values `transition` writes of its own, `TODAY` substituted."""
+    today = _today().isoformat()
+
+    def stamp(value: str) -> str:
+        return value.replace(TODAY, today)
+
+    return {
+        key: [stamp(one) for one in value] if isinstance(value, list) else stamp(value)
+        for key, value in transition.fixed.items()
+    }
 
 
 def _unheard(said: str) -> None:
@@ -456,7 +511,7 @@ def _create(running: _Running) -> Path | str:
         raise Refusal(_taken(stem, destination, running.declaration.root)) from None
 
     head = {"title": running.name}
-    head.update(_landing(running, running.transition.sets))
+    head.update(_landing(running, running.transition.lands))
     head.update(entering)
     _place(running, destination, head, _prose(body))
     _apply(claiming, running.declaration.root)
@@ -480,7 +535,7 @@ def _cursor_errors(
     head = dict(original.head)
     if state.cursor in running.transition.drops:
         head.pop(state.cursor, None)
-    writes = state.cursor in running.transition.sets and state.cursor in running.given
+    writes = state.cursor in running.transition.lands and state.cursor in running.given
     if writes:
         head[state.cursor] = running.given[state.cursor]
     head.update(marking)
@@ -537,7 +592,7 @@ def _move(running: _Running) -> Path | str:
     errors += read.edge_errors(
         running.declaration,
         running.declaration.states[running.transition.to],
-        _landing(running, running.transition.sets),
+        _landing(running, running.transition.lands),
     )
     errors += _cursor_errors(running, original, body, marking)
     if errors:
@@ -554,7 +609,7 @@ def _move(running: _Running) -> Path | str:
         for key, value in original.head.items()
         if key not in running.transition.drops and key not in CAPABILITY_KEYS.values()
     }
-    head.update(_landing(running, running.transition.sets))
+    head.update(_landing(running, running.transition.lands))
     head.update(entering)
     head.update(marking)
     if renaming is not None:
@@ -1281,19 +1336,31 @@ def _clearing(
 
 
 def _dependency(one: item.Item) -> tuple[str, ...]:
-    """The key a dissolve clears: the referent's own state's `dependencies`."""
+    """The key a close clears: the referent's own state's `dependencies`."""
     return () if one.state.dependencies is None else (one.state.dependencies,)
+
+
+def _edges(one: item.Item) -> tuple[str, ...]:
+    """The keys a merge repoints: the referent's `dependencies` and its
+    references, since the work continues as the survivor. A close clears no
+    reference, because `referenced_errors` has refused it first."""
+    return (*_dependency(one), *one.state.references)
 
 
 def _references(declaration: Declaration, one: item.Item) -> tuple[str, ...]:
     """Every head key the tool reads a slug out of, for an item like `one`.
 
-    Its state's `dependencies` and `opened-for`, and the key each verb that
-    `files` names for where a filed item came from. What a retitle repoints.
-    See docs/method.md#retitle
+    Its state's `dependencies`, `references` and `opened-for`, and the key
+    each verb that `files` names for where a filed item came from. What a
+    retitle repoints. See docs/method.md#retitle
     """
     carried = [files["item"] for files in declaration.files]
-    named_by = (one.state.dependencies, one.state.opened_for, *carried)
+    named_by = (
+        one.state.dependencies,
+        *one.state.references,
+        one.state.opened_for,
+        *carried,
+    )
     return tuple(dict.fromkeys(key for key in named_by if key is not None))
 
 
@@ -1349,13 +1416,14 @@ def _dissolve(running: _Running, handles: Sequence[str]) -> tuple[Path, ...] | s
             original,
             None if survivor is None else survivor.slug,
             list(tree.values()),
-            _dependency,
+            _dependency if survivor is None else _edges,
         )
         # Each clearing sees the last one's edits, so the edges compose.
         tree.update((one.path, one) for one in clearing.edits)
         clearings.append(clearing)
         errors = offer_errors(original.head, running.transition)
         errors += dangle_errors(original, running.transition, whole, root)
+        errors += referenced_errors(original, running.transition, whole, root)
         errors += unmarked_errors(original, running.transition)
         if errors:
             refusal = [f"{named(original.path, root)} cannot {verb}", *errors]
@@ -1681,6 +1749,12 @@ def _apply(claiming: _Claiming, root: Path) -> None:
 def _now() -> dt.datetime:
     """When a claim was taken. Aware, because this tree is shared."""
     return dt.datetime.now(dt.timezone.utc)
+
+
+def _today() -> dt.date:
+    """The date `TODAY` stands for: local, because a date a session writes by
+    hand is the one on its own calendar."""
+    return dt.date.today()
 
 
 # --------------------------------------------------------------------------

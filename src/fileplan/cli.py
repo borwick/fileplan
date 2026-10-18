@@ -14,6 +14,7 @@ declaration.
 from __future__ import annotations
 
 import dataclasses
+import json
 import sys
 from importlib.metadata import version
 from pathlib import Path
@@ -398,7 +399,10 @@ def _command(declaration: Declaration, transition: Transition) -> click.Command:
                 ),
             )
         )
-    params += [_option(declaration, key) for key in transition.sets]
+    params += [
+        _option(declaration, key, required=key in transition.requires)
+        for key in transition.sets
+    ]
     if placed:
         params += _placement_options(transition)
     if minting:
@@ -554,6 +558,9 @@ def contract(declaration: Declaration, transition: Transition) -> dict[str, Any]
         # reading the contract rather than `--help` has nowhere else to get
         # them.
         "sets": list(transition.sets),
+        # The values the run writes of its own, as declared: `{today}` is
+        # substituted by the run, not here. The epilog's `Writes` block.
+        "writes": dict(transition.fixed),
         "kind": transition.kind,
         "declares": _declared(transition),
         # The table as declared, or `null`: where the filed item goes, which
@@ -601,6 +608,12 @@ def _epilog(declaration: Declaration, transition: Transition) -> str:
     # key has no value to mean.
     if row["drops"]:
         blocks.append(("Drops", row["drops"]))
+    # The same subject as `Drops`, what the head holds afterwards, and not in
+    # `Reading`, which says what a value the caller supplies means.
+    if writes := [
+        f"{key} = {json.dumps(value)}" for key, value in row["writes"].items()
+    ]:
+        blocks.append(("Writes", writes))
     blocks.append(("Declares", [row["kind"], *row["declares"]]))
     # Which head each key lands on: `sets` is the carrier's, and the keys
     # named here are the filed item's. See docs/method.md#filing
@@ -829,11 +842,16 @@ def _into_option() -> click.Option:
     )
 
 
-def _option(declaration: Declaration, key_name: str) -> click.Option:
+def _option(
+    declaration: Declaration, key_name: str, *, required: bool = False
+) -> click.Option:
     """The `--option` a key becomes when a transition `sets` it.
 
-    Optional, always: a key that must be present is enforced by the next
-    transition's `requires`. A cursor takes a name, so it is ordinary text. A
+    Optional unless `required`: a key the transition both `sets` and
+    `requires`, which the run supplies rather than the head. Otherwise a key
+    that must be present is enforced by the next transition's `requires`.
+    See docs/method.md#transitions. A cursor takes a name, so it is ordinary
+    text. A
     list-valued key's option repeats and says so in its metavar, because click
     renders no marker of its own.
     See docs/method.md#list-valued
@@ -844,6 +862,7 @@ def _option(declaration: Declaration, key_name: str) -> click.Option:
         type=click.Choice(key.values) if key.values else None,
         multiple=key.list_valued,
         metavar=_repeated(key) if key.list_valued else None,
+        required=required,
         help=key.help,
     )
 
@@ -1138,6 +1157,11 @@ def _read_run(
 
     def run(**given: Any) -> None:
         as_json = given.pop("as_json")
+        # Read before `_tests` pops it: any `--state` turns hiding off.
+        # See docs/method.md#listed
+        hiding = (
+            naming is None and not given.get("state") and bool(declaration.unlisted)
+        )
         handle = given.pop(naming) if naming else None
         wanted = given.pop(bulleting) if bulleting else None
         tests = [] if naming else _tests(declaration, given)
@@ -1180,6 +1204,9 @@ def _read_run(
                 found, rows=[row for row in found.rows if row[read.SLUG] == slug]
             )
         chosen = read.matching(found.rows, tests)
+        unlisted: list[dict[str, Any]] = []
+        if hiding:
+            chosen, unlisted = read.unlisting(declaration, chosen)
         unsorted: list[dict[str, Any]] = []
         if by_state:
             chosen, unsorted = read.ordered(
@@ -1203,6 +1230,10 @@ def _read_run(
         # follows the invocation and the declaration, never the corpus.
         if by_state:
             beside["unsorted"] = unsorted
+        # And what this read left out, wherever a state is not listed: like
+        # `unsorted`, it is about the invocation rather than the tree.
+        if declaration.unlisted and naming is None:
+            beside["unlisted"] = unlisted
         if as_json:
             # stderr stays silent: the counts live in the envelope instead.
             click.echo(
@@ -1231,6 +1262,12 @@ def _read_run(
         click.echo(
             f"\nshowing {len(chosen)} of {found.walked} {LIST_KIND}", err=True
         )
+        for one in unlisted:
+            click.echo(
+                f"not listed: {one[read.STATE]} ({one[read.COUNT]}). "
+                f"--state {one[read.STATE]} lists them",
+                err=True,
+            )
         # An empty tree says how to file the first item, so a newcomer's first
         # listing names a command rather than a count. See docs/method.md#the-listing
         if not found.walked and handle is None:
@@ -1269,6 +1306,18 @@ def _unknown(one: Mapping[str, Any]) -> str:
     """
     return (
         f"unknown dependency: {one[depends.SLUG]} names "
+        f'"{one[depends.NAMES]}" in {one[depends.KEY]}, and no item carries '
+        "that slug"
+    )
+
+
+def _unresolved(one: Mapping[str, Any]) -> str:
+    """One reference naming nothing filed, as the text form's exception line.
+
+    `_unknown`'s shape, for a reference. See docs/method.md#references
+    """
+    return (
+        f"unresolved reference: {one[depends.SLUG]} names "
         f'"{one[depends.NAMES]}" in {one[depends.KEY]}, and no item carries '
         "that slug"
     )
@@ -1391,6 +1440,7 @@ REPORT_LINES: Mapping[str, Callable[[Any], str] | None] = {
     "undecomposed": _undecomposed,
     "unknown": _unknown,
     "misordered": _misordered,
+    "unresolved": _unresolved,
     "gaps": _gap,
     "lost": _lost,
     "register": None,
@@ -1572,7 +1622,12 @@ def _contents(
                 ],
                 source=str(declaration.source),
                 states=[
-                    {"name": state.name, "path": state.path, "sort": state.sort}
+                    {
+                        "name": state.name,
+                        "path": state.path,
+                        "sort": state.sort,
+                        "listed": state.listed,
+                    }
                     for state in declaration.states.values()
                 ],
                 keys=[
@@ -1605,6 +1660,9 @@ def _contents(
     for state in declaration.states.values():
         # The sort, declared or defaulted, so a default is never hidden.
         sorting = f"  sorted by {state.sort}" if state.sort else ""
+        # And a state left out of the default read, so the hiding is read back.
+        if not state.listed:
+            sorting += "  not listed"
         click.echo(
             f"  {state.name:<{width}}  {state.path + '/':<{places + 1}}{sorting}".rstrip()
         )

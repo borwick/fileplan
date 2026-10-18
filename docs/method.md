@@ -87,6 +87,11 @@ abandoned, and that item really is waiting on something that is not going to
 happen. Somebody should have to read that sentence, which is why declining is
 a **move** rather than a deletion.
 
+**The state is [not listed](#listed).** A plain `fileplan list` leaves its
+items out and says how many it left out. Set-aside work is finished with, and
+reading it on every listing buries the work that is open. `--state abandoned`
+lists it.
+
 ### carrier
 
 An item that exists to **hold findings** while a question is being answered.
@@ -913,6 +918,7 @@ tree, and narrowed by no filter. These are the reports:
 * `stranded` is a claim with no item.
 * `undecomposed` is a started section carrying no [sub-phases](#sub-phases).
 * `unknown` and `misordered` are the two [dependency](#dependencies) reports.
+* `unresolved` is a [reference](#references) naming nothing filed.
 * `gaps` is a number in neither its state nor that state's archive. `lost` is
   an archive heading the register cannot read. Both belong to [the
   register](#the-register), which is their one home.
@@ -954,6 +960,7 @@ present whenever the declaration could fill it and absent otherwise:
 * `stranded` is present wherever a state claims.
 * `undecomposed` is present wherever a state carries a cursor.
 * `unknown` and `misordered` are present wherever a state reads dependencies.
+* `unresolved` is present wherever a state declares references.
 * `gaps`, `lost` and `register` are present wherever a state is numbered.
   `register` is not a report, and [the register](#the-register) is its home.
 * `unmarkable` is present wherever a command marks.
@@ -963,6 +970,9 @@ present whenever the declaration could fill it and absent otherwise:
 * `unsorted` is present wherever the read sorts anything: `--sort` was given,
   or a state declares a `sort`. It names each row the read put last for
   missing a sort key, and covers only the rows shown.
+* `unlisted` is present wherever a state is not listed, on `list`. It names
+  each state the read left out and how many rows it lost.
+  [`listed`](#listed) is its home.
 * `rows` is the rows, always last.
 
 **What `version` promises.** It goes up only when a field is removed, or
@@ -1035,11 +1045,69 @@ the last one and drop the rest without a word. So a second `--state` refuses,
 naming both. `fileplan list plan` names a state as an argument, and click
 refuses it. The line after click's says `did you mean --state plan?`.
 
+A state can leave its rows out of a `list` given no `--state`, and the read
+says what it left out. [`listed`](#listed) is that field's home.
+
 A bad filter refuses **before the tree is walked**. The parse is where a
 refusal happens, so `--state zzz` costs no traversal to reject.
 
 [`show`](#show) is the same read again, narrowed by a handle rather than by a
 filter. `show` takes no filter at all.
+
+### listed
+
+A state may declare `listed = false`. A `list` given no `--state` then leaves
+that state's rows out. This repo's [`abandoned`](#abandoned) declares it:
+
+```toml
+[states.abandoned]
+path   = "abandoned"
+listed = false
+```
+
+**A state left without the field is listed.** So a forgotten field hides
+nothing. `listed = true` is legal, and it is the default written out. Any
+value that is not `true` or `false` refuses at load by name.
+
+**The read says what it left out.** After the `showing 4 of 7 items` frame,
+the text form prints one line on stderr for each state that lost a row:
+
+```
+not listed: abandoned (3). --state abandoned lists them
+```
+
+The frame's second number is still everything the traversal walked, so the
+`4` and the `3` add up to the `7`. A state that lost nothing gets no line.
+Hiding the rows without that line would make abandoned work look gone.
+
+**Any `--state` turns the hiding off.** `--state abandoned`, `--state
+'!=plan'` and `--state ':plan,abandoned'` are all comparisons, and the
+comparison does the narrowing. So a state is shown whenever `--state` names
+it, and there is one rule rather than one per operator. [`show`](#show) names
+its item, so it finds an item in an unlisted state too.
+
+**The other filters do not turn it off.** `--has commands=discard` still
+leaves the unlisted rows out, and the line counts the rows the hiding took
+**after** the filters. So `list --has commands=discard` says `not listed:
+abandoned (2)` when two abandoned items matched. That count is what makes a
+miss loud: the read says there were matches it did not show.
+
+**`--json` leaves out the same rows as the text form.** Both renderings come
+off one list of rows, and a JSON read that disagreed with the text read would
+be two answers to one question. The envelope's `unlisted` array says what was
+left out instead: one `{"state": "abandoned", "count": 3}` record per state,
+in declared order. The array is present on every `list` wherever some state
+is not listed, and it is empty when nothing was left out or `--state` was
+given. `matched` counts the rows shown and `read` counts the rows walked, as
+they always do. A program that wants the rows passes `--state`.
+
+**The exception reports are unchanged.** They are computed over the whole
+tree, and no filter narrows them. So an `unknown dependency:` line still names
+an item in an unlisted state. Leaving rows out of the read hides no problem.
+
+[`fileplan`](#the-contract) with no command marks the state `not listed` in
+its overview, and `fileplan --json` gives each state a `listed` field. So the
+default can be read back without opening `plan.toml`.
 
 ### commands
 
@@ -1057,7 +1125,8 @@ A command is named when everything its own run checks about the item holds:
 
 * the item is **in the transition's `from` state**;
 * the item's head satisfies everything the transition [`requires` and
-  `refuses`](#transitions);
+  `refuses`](#transitions), counting a required option as met, because the
+  run supplies it;
 * no **other** session holds the item's [claim](#the-claim), where the
   transition enters or leaves a claimed state;
 * no open [carrier](#carrier) names the item, where the transition is a close
@@ -1068,7 +1137,7 @@ A command is named when everything its own run checks about the item holds:
   register](#the-register));
 * no bullet in the body is one the reader passes over, where the transition
   writes or marks a bullet ([sub-phases](#sub-phases)), and the item carries
-  what its state's name form needs, counting any key the transition sets;
+  what its state's name form needs, counting any key the run writes;
 * for a [mark-bullet](#marking), the item has a bullet a mark could still go
   on.
 
@@ -1203,9 +1272,9 @@ The **`Reading` block** hands the pointers over. `doc =` has been graded at
 every invocation since the loader existed. A pointer at a document the repo
 does not ship refuses. The transition's own `doc` is the **program**: the
 section that says what running this transition means, and what a session reads
-before doing the work. Each key the transition `sets` names the section that
-says what the key's value means, and so does each key a filing transition
-writes onto the filed item. The key's `help` was always on the option, and
+before doing the work. Each key the transition takes as an option names the
+section that says what the key's value means, and so does each key a filing
+transition writes onto the filed item. The key's `help` was always on the option, and
 the `help` says what to pass rather than what the key is.
 
 **`doc` is optional on every entry.** A transition or a key whose meaning
@@ -1234,10 +1303,27 @@ under `refuses` in `--json`, the way `plan.toml` spells it.
 `Drops` sits with `Requires` and `Refuses`, because `Drops` is the same
 subject read one step later. `Requires` and `Refuses` say what the head must
 hold for the run to go. `Drops` says what the head will not hold afterwards.
-`Drops` stays **out** of `Reading`, which names what the values a run *writes*
-mean. A dropped key has no value to mean, and the key's own section is one
-`fileplan` read away. A transition that drops nothing carries no `Drops`
+`Drops` stays **out** of `Reading`, which names what the values a session
+*supplies* mean. A dropped key has no value to mean, and the key's own section
+is one `fileplan` read away. A transition that drops nothing carries no `Drops`
 block, the shape `Files` already has.
+
+A transition that writes a [fixed value](#transitions) carries a **`Writes`
+block**, after `Drops`. It is the same subject: what the head holds after the
+run. Each line is one value, written as declared, so `{today}` reads as
+`{today}` rather than as a date:
+
+```
+  Writes
+    status = "accepted"
+    decided = "{today}"
+```
+
+A fixed value stays out of `Reading` too, because no session supplies it. In
+`--json` the block is `writes`: the table of fixed values as declared, `{}`
+for a transition that writes none. `sets` keeps its meaning there, the keys
+the run takes as options. A required option is `"required": true` among the
+`options`, and `[required]` beside the option in `--help`.
 
 A transition that [files](#filing) an item carries a **`Files` block**, after
 `Declares`. The block says where the filed item goes and which keys the run
@@ -1624,6 +1710,85 @@ carries refuses before anything is written, naming the near misses the way
 to be exact: nothing is resolved from a prefix or rewritten. An edge that
 dangles later, after a rename or an abandon, is still only reported.
 
+### references
+
+An item may **name other items as a record**, without waiting on them. A
+decision record that supersedes an older one is the case that earned it. A
+state says which declared keys hold such slugs, and what each is read back as
+on the item it names:
+
+```toml
+[states.decisions]
+references = { supersedes = { inverse = "superseded-by" } }
+
+[keys.supersedes]
+doc         = "method.md#supersedes"
+list-valued = true
+```
+
+Both names are the workflow's. `supersedes` is declared under `[keys]` like
+any other key, and a run writes it like any other key. `superseded-by` is
+declared nowhere else. It is **derived on each read and never stored**: every
+row carries it, holding the filed items whose `supersedes` names this one, or
+`null` where nothing does. It filters like any row field, so `--has
+superseded-by` lists every record something has superseded. Its value is
+found wherever the referent is filed, in any state.
+
+A reference shares the [dependency](#dependencies) machinery, apart from the
+blocking:
+
+* **A run handed a slug nothing carries refuses it**, with the near misses,
+  exactly as a dependency does.
+* **A slug that dangles later is a line in the default read**, and gates
+  nothing:
+
+  ```
+  unresolved reference: use-sqlite names "use-postgress" in supersedes, and
+  no item carries that slug
+  ```
+
+  It is its own report rather than an `unknown dependency:` line, because
+  nothing waits on anything here.
+* **A [merge](#dissolving) repoints a reference** at the survivor, because
+  the work continues as the survivor. **A [retitle](#retitle) repoints it** at
+  the new slug.
+* **A move clears nothing.** The item is still filed, so the edge still
+  names something.
+
+A reference gives **no `blocked-by`, no `misordered` and no gate**. Nothing
+waits on a record, and its place in an order means nothing about the record
+it names.
+
+**A close refuses while a filed item references the item it would take
+away** (John, 2026-10-18). A dependency's edge is cleared at a close, because
+the wait is over. A reference is history, so clearing it would erase the
+record. Leaving it would turn history into a permanent `unresolved
+reference:` line that looks the same as a typo. So the close refuses, naming
+each referent and the key, and the row's [`commands`](#commands) does not
+offer it. Take the slug out of the referent first, if the record really
+should go, or merge the item into the one that continues it.
+
+**The rules a declaration is held to**, each refused by name at load:
+
+* each key is a declared key, and not one the tool owns;
+* a key holds one kind of edge, so it is not also the state's `dependencies`
+  or `opened-for` key;
+* each key declares an `inverse`, and nothing else;
+* an inverse is a usable name, and no row already carries it: not a declared
+  key, and not a name the tool derives or reserves;
+* one key reads back under one inverse, and one inverse reads back one key.
+  The same pair on several states is one reference, and legal. A drafts state
+  and a decisions state can both declare `supersedes`.
+
+A transition cannot name an inverse in `requires`, `sets`, `drops` or
+`refuses`. It is not a declared key, so it refuses as an undeclared one.
+
+**Why it is built beside `dependencies` and not folded into it** (John,
+2026-10-18). `dependencies = "after"` keeps its spelling, and no `plan.toml`
+changes. The two share one implementation of what an edge is, so each rule
+still has one writer. Folding the two declarations together can be an item of
+its own later.
+
 ### stale-days
 
 Every row carries **`stale-days`**: the whole days between the item file's
@@ -1956,7 +2121,7 @@ claimants for one number, which refuses every later mint. Every refusal is
 computed before either write, so a refused run leaves both files
 byte-identical.
 
-Four things refuse, and one deliberately does not:
+Five things refuse, and one deliberately does not:
 
 - `archives = true` **out of a state that mints no number** refuses at load.
   An entry is named by its number, and there would be nothing to name it by.
@@ -1964,11 +2129,21 @@ Four things refuse, and one deliberately does not:
   move and a close take it. The number is dropped on the way *out*, so an
   in-place transition would file the number and leave the item carrying it
   too.
+- **A way out of a `numbered` state that does not archive** refuses at load,
+  naming the transition and the line to write. A move or a close without
+  `archives = true` drops the number with no entry. The next mint refuses on
+  the gap, far from the run that made it. And if the item held the highest
+  number, nothing refuses at all: the next mint hands that number out again,
+  and two items have carried it. That silent reuse is why the rule covers
+  every way out, and not only the shapes a consumer happened to hit. A
+  `merge` out of a `numbered` state refuses outright, because a merge cannot
+  archive. Write a close with `archives = true`, or merge out of a state that
+  numbers nothing.
 - An item carrying **no number** refuses at the run, by name.
 - A number the archive **already holds** refuses at the run, naming both
   claimants. It is the same refusal a mint gives, because it is the same
   question.
-- A `numbered` state that **no transition archives out of** does *not*
+- A `numbered` state that **no transition leaves** does *not*
   refuse. That is an asymmetry with [`claimed`](#the-claimed-state) and
   [`bulleted`](#bulleted), where an unused capability means the declaration
   cannot do what it says. Here it does not. The `archive` field has a second
@@ -2027,8 +2202,13 @@ leaves on a crash:
 **The edges to the item are cleared — taken out, or pointed at the
 survivor**, which is the invariant [dependencies](#dependencies) rests on.
 Every item in every state is read through **its own state's** `dependencies`
-key. An item in a state that declares none is not touched, because it is
-carrying a fact nothing was declared to read. One line per edited item goes to
+key, and a merge reads its [`references`](#references) keys as well. An item
+in a state that declares none is not touched, because it is carrying a fact
+nothing was declared to read.
+
+**A close refuses over a reference.** A reference is a record, and a close
+would leave it naming nothing. [References](#references) says why, and what
+to do instead. One line per edited item goes to
 stderr, naming the file and the key:
 
 ```
@@ -2924,7 +3104,44 @@ refuses = { decision = true, size = ["XL"] }
 A key present but empty carries nothing, so it passes either form. `false`
 refuses at load, because it would say nothing: write `true`, or a list. Both
 forms are checked by the same function a row's [`commands`](#commands) uses,
-so the row and the run agree.
+so the row and the run agree. `refuses` reads the head as it is before the
+run.
+
+A third field says what the run writes. `sets` is a list or a table. In the
+list, each key becomes an option on the run, `--decided DATE` for `decided`.
+In the table, `true` means the same thing, the way `true` means any value
+under `refuses`. Anything else in the table is a **fixed value**: the run
+writes it, and nobody passes it. The list is shorthand for a table with every
+key `true`. A decision record's `finalise` needs both halves:
+
+```toml
+[transitions.finalise]
+kind     = "move"
+from     = "drafts"
+to       = "decisions"
+requires = ["decided"]
+sets     = { decided = true, status = "accepted" }
+```
+
+A fixed value is graded at load. A key holding one value takes a string, and
+a list-valued key takes a list of strings. Neither may be empty, and each
+value must be in the key's `values` where it declares some. `{today}` is the
+one substitution: the run writes its local date there, in the shape
+`--decided 2026-10-18` writes. Any other brace refuses at load, so there is
+no escape syntax to learn.
+
+**A fixed value is never an option, and never a default.** A session cannot
+override it. If it could, `deprecate` could write `status = "accepted"`, and
+the transition's name would no longer say what it writes.
+
+**A key in both `requires` and the options is a required option.** Above,
+`finalise` takes a draft that carries no `decided` yet, because this run
+supplies one. Without `--decided` the run refuses, and `--help` marks the
+option `[required]`. The row's `commands` counts the key as met, since the
+item cannot carry a value the session has not given yet. `refuses` still
+reads the head before the run, so a transition stamping a value it also
+refuses does not refuse itself. A key in `requires` with a fixed value keeps
+the plain meaning: the head must already carry it.
 
 ### idea
 
@@ -3015,6 +3232,7 @@ it names something new.
 * each state's [`dependencies`](#dependencies) key, which is `after` here;
 * the key each filing transition names for where an item came from, which is
   [`carried-from`](#carried-from) here;
+* each state's [`references`](#references) keys;
 * each state's [`opened-for`](#opened-for) key.
 
 `opened-for` is included because a carrier still naming the old slug would

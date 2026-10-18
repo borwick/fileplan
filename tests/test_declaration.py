@@ -1232,6 +1232,177 @@ def test_a_declaration_with_no_dependencies_carries_neither(
 
 
 # --------------------------------------------------------------------------
+# `references`: slug edges that block nothing, with a derived inverse
+# --------------------------------------------------------------------------
+#
+# Each key is graded as a reference, the dependency key's arms, and each
+# inverse as a row field nothing else may already be. The cross-state rules
+# read the whole document: one key, one inverse, both ways round.
+
+
+def with_references(document: dict, *states: str) -> dict:
+    """`well_formed()` plus `replaces`, a reference read back as
+    `replaced-by`, on each of `states` (both by default)."""
+    document["keys"]["replaces"] = {"doc": "method.md#cultivar", "list-valued": True}
+    for name in states or ("greenhouse", "orchard"):
+        document["states"][name]["references"] = {
+            "replaces": {"inverse": "replaced-by"}
+        }
+    return document
+
+
+def test_the_same_reference_on_two_states_loads_clean() -> None:
+    """The decision-record workflow declares one on its drafts and one on
+    its decisions, so the same pair twice is one reference, not a clash."""
+    assert shape_errors(with_references(well_formed())) == []
+
+
+def test_a_state_carries_its_references_and_the_declaration_its_inverses() -> None:
+    declaration = load(FIXTURES / "plan.toml")
+    assert dict(declaration.states["greenhouse"].references) == {
+        "replaces": "replaced-by"
+    }
+    assert dict(declaration.states["cold-frame"].references) == {}
+    assert declaration.has_references
+    assert declaration.inverses == ("replaced-by",)
+    assert declaration.derived[-1] == "replaced-by"
+    assert "replaced-by" in declaration.carried
+
+
+@pytest.mark.parametrize(
+    ("value", "said"),
+    [
+        ("replaces", "states.orchard.references must be a table of KEY = "),
+        ({"replaces": "replaced-by"}, "states.orchard.references.replaces must be a table"),
+        ({"replaces": {}}, "states.orchard.references.replaces declares no inverse"),
+        (
+            {"replaces": {"inverse": 3}},
+            "states.orchard.references.replaces.inverse must be a string",
+        ),
+        (
+            {"replaces": {"inverse": "replaced-by", "blocks": True}},
+            "states.orchard.references.replaces.blocks is not a reference field",
+        ),
+        (
+            {"replaces": {"inverse": "Replaced By"}},
+            'states.orchard.references.replaces.inverse names "Replaced By", '
+            "which is not a usable name",
+        ),
+    ],
+)
+def test_a_reference_of_the_wrong_shape_refuses_by_name(value: object, said: str) -> None:
+    document = with_references(well_formed(), "orchard")
+    document["states"]["orchard"]["references"] = value
+    assert any(error.startswith(said) for error in shape_errors(document))
+
+
+@pytest.mark.parametrize(
+    ("key", "said"),
+    [
+        ("replacse", 'names undeclared key "replacse"'),
+        ("title", 'names "title", which is intrinsic'),
+        ("position", 'names "position", which the queued capability'),
+        ("blocks", 'names "blocks", which every listing derives'),
+    ],
+)
+def test_a_reference_key_the_tool_cannot_read_refuses(key: str, said: str) -> None:
+    """`_key_reference_error`'s arms, with no message of their own."""
+    document = with_references(well_formed(), "orchard")
+    document["states"]["orchard"]["references"] = {key: {"inverse": "replaced-by"}}
+    assert any(
+        error.startswith(f"states.orchard.references {said}")
+        for error in shape_errors(document)
+    )
+
+
+@pytest.mark.parametrize("field", [depends.FIELD, OPENED_FOR])
+def test_a_reference_key_the_state_already_reads_slugs_out_of_refuses(
+    field: str,
+) -> None:
+    """One key, one meaning: a key that blocks and records at once would do
+    whichever the reader of the moment looked at."""
+    document = with_references(well_formed(), "orchard")
+    document["states"]["orchard"][field] = "replaces"
+    assert (
+        f'states.orchard.references names "replaces", which '
+        f"states.orchard.{field} already reads slugs out of"
+    ) in "\n".join(shape_errors(document))
+
+
+def test_an_inverse_with_a_declared_keys_name_refuses_naming_the_state() -> None:
+    document = with_references(well_formed(), "orchard")
+    document["keys"]["replaced-by"] = {"doc": "method.md#cultivar"}
+    assert any(
+        error.startswith(
+            'keys.replaced-by redeclares "replaced-by", which states.orchard '
+            "derives as the inverse of replaces"
+        )
+        for error in shape_errors(document)
+    )
+
+
+@pytest.mark.parametrize(
+    "inverse", ["title", "slug", "state", "path", "blocks", "position", "claimed-by"]
+)
+def test_an_inverse_a_row_already_carries_refuses(inverse: str) -> None:
+    document = with_references(well_formed(), "orchard")
+    document["states"]["orchard"]["references"] = {"replaces": {"inverse": inverse}}
+    assert any(
+        error.startswith(
+            f'states.orchard.references.replaces.inverse names "{inverse}", '
+            "which a row already carries"
+        )
+        for error in shape_errors(document)
+    )
+
+
+def test_one_key_declaring_two_inverses_refuses() -> None:
+    document = with_references(well_formed())
+    document["states"]["orchard"]["references"]["replaces"]["inverse"] = "ousted-by"
+    assert [error for error in shape_errors(document) if "inverse" in error] == [
+        'states.orchard.references.replaces.inverse names "ousted-by", and '
+        'states.greenhouse.references.replaces names "replaced-by". One key '
+        "reads back under one inverse. Name the same one on both"
+    ]
+
+
+def test_two_keys_sharing_one_inverse_refuses() -> None:
+    document = with_references(well_formed(), "greenhouse")
+    document["keys"]["ousts"] = {"doc": "method.md#cultivar"}
+    document["states"]["orchard"]["references"] = {"ousts": {"inverse": "replaced-by"}}
+    assert [error for error in shape_errors(document) if "inverse" in error] == [
+        'states.orchard.references.ousts.inverse names "replaced-by", which '
+        "states.greenhouse.references.replaces already reads back. One inverse "
+        "reads back one key, or the row could not say which edge it came from. "
+        "Name another inverse"
+    ]
+
+
+@pytest.mark.parametrize("field", ["requires", "sets", "drops"])
+def test_a_transition_naming_an_inverse_refuses_as_undeclared(field: str) -> None:
+    """Nothing new: the inverse is no declared key, so a verb cannot name it."""
+    document = with_references(well_formed())
+    document["transitions"]["transplant"][field] = ["replaced-by"]
+    assert (
+        f'transitions.transplant.{field} names undeclared key "replaced-by"'
+        in shape_errors(document)
+    )
+
+
+def test_a_declaration_with_no_references_carries_no_inverse(tmp_path: Path) -> None:
+    source = tmp_path / "plan.toml"
+    source.write_text(
+        re.sub(r"(?m)^references\s*=.*\n", "", (FIXTURES / "plan.toml").read_text())
+    )
+    for name in FIXTURE_FILES[1:]:
+        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    declaration = load(source)
+    assert not declaration.has_references
+    assert declaration.inverses == ()
+    assert "replaced-by" not in declaration.carried
+
+
+# --------------------------------------------------------------------------
 # `opened-for`: which declared key says what an item here was opened for
 # --------------------------------------------------------------------------
 #
@@ -2202,12 +2373,12 @@ def test_a_numbered_state_and_a_verb_that_files_entries_out_is_well_formed() -> 
 
 def test_a_transition_carries_whether_it_archives() -> None:
     """`claims`' and `mints`' field, read off the declaration the same way.
-    The fixture's `grub-out` archives and `harvest` — which leaves the same
-    state — does not, so the flag comes from the verb rather than from either
-    state it names."""
+    The fixture's `grub-out` archives and `espalier`, which stays in the same
+    state, does not, so the flag comes from the verb rather than from either
+    state it names. Every way out of `orchard` archives, because the state is
+    numbered."""
     declaration = load(FIXTURES / "plan.toml")
     assert declaration.transitions["grub-out"].archives
-    assert not declaration.transitions["harvest"].archives
     assert not declaration.transitions["espalier"].archives
 
 
@@ -2264,6 +2435,73 @@ def test_a_numbered_state_no_verb_archives_out_of_does_not_refuse() -> None:
     refuse a legitimate declaration."""
     document = archiving(well_formed())
     del document["transitions"]["grub-out"]
+    assert shape_errors(document) == []
+
+
+def test_a_move_out_of_a_numbered_state_that_does_not_archive_refuses() -> None:
+    """**Every way out of a numbered state archives.** A move that does not
+    drops the number with no entry, and the next mint refuses on the gap, far
+    from the cause. If the item held the highest number, nothing refuses at
+    all and the number is minted again. `archives = false` is the same verb
+    written out. See docs/method.md#the-register"""
+    for archives in (None, False):
+        document = archiving(well_formed())
+        grub_out = document["transitions"]["grub-out"]
+        del grub_out["archives"]
+        if archives is not None:
+            grub_out["archives"] = archives
+        assert shape_errors(document) == [
+            "transitions.grub-out leaves states.orchard, which is numbered, and "
+            "does not archive. The number it carries would be dropped with no "
+            "entry, and the next mint would refuse on the gap. Write archives = "
+            "true in transitions.grub-out"
+        ]
+
+
+def test_a_close_out_of_a_numbered_state_that_does_not_archive_refuses() -> None:
+    """The consumer's case: a close takes the file away, and the number with
+    it."""
+    document = dissolving(well_formed())
+    del document["transitions"]["grub-out"]["archives"]
+    assert (
+        "transitions.grub-out leaves states.orchard, which is numbered, and "
+        "does not archive. The number it carries would be dropped with no "
+        "entry, and the next mint would refuse on the gap. Write archives = "
+        "true in transitions.grub-out"
+    ) in shape_errors(document)
+
+
+def test_a_merge_out_of_a_numbered_state_refuses_outright() -> None:
+    """A merge cannot archive, so there is no line to add to it. The refusal
+    names the two shapes that work instead."""
+    document = archiving(well_formed())
+    document["transitions"]["inarch"] = {
+        "kind": "merge",
+        "doc": "method.md#inarch",
+        "help": "Graft trees into one.",
+        "from": "orchard",
+    }
+    assert shape_errors(document) == [
+        "transitions.inarch merges items out of states.orchard, which is "
+        "numbered, and a merge cannot archive. The numbers the absorbed items "
+        "carry would be dropped with no entry, and the next mint would refuse "
+        'on the gap. Write kind = "close" with archives = true, or merge out of '
+        "a state that numbers nothing"
+    ]
+
+
+def test_ways_out_of_a_state_that_numbers_nothing_need_no_archives() -> None:
+    """The control. `transplant` moves into the numbered `orchard` out of the
+    unnumbered `greenhouse`, and a close and a merge out of `greenhouse` take
+    nothing a register counts."""
+    document = archiving(well_formed())
+    for name, kind in (("compost", "close"), ("inarch", "merge")):
+        document["transitions"][name] = {
+            "kind": kind,
+            "doc": f"method.md#{name}",
+            "help": "Out.",
+            "from": "greenhouse",
+        }
     assert shape_errors(document) == []
 
 
@@ -2639,6 +2877,7 @@ def test_a_list_valued_flag_that_is_not_a_boolean_refuses() -> None:
     assert "keys.rootstock.list-valued must be true or false" in shape_errors(document)
 
 
+
 #: Every field where the tool itself puts or reads exactly one value, with
 #: where it is declared in the fixture. Graded over the fixture rather than
 #: over `well_formed()` because all six are declared there already: the two
@@ -2685,6 +2924,142 @@ def test_dependencies_naming_a_list_valued_key_loads_clean() -> None:
     document = fixture_document()
     document["states"]["orchard"][depends.FIELD] = "pest"
     assert shape_errors(document) == []
+
+
+# --------------------------------------------------------------------------
+# `sets` as a table: options and fixed values
+# --------------------------------------------------------------------------
+#
+# One table holds both: `true` takes the key as an option, as `refuses` reads
+# `true` as any value, and anything else is the value the run writes of its
+# own. The list form is shorthand for every key `true`.
+
+
+def stamping(document: dict, **sets: object) -> dict:
+    """`well_formed()` with `transplant`'s `sets` written as the table `sets`."""
+    document["transitions"]["transplant"]["sets"] = sets
+    return document
+
+
+def test_a_table_of_options_and_fixed_values_is_well_formed() -> None:
+    document = stamping(well_formed(), rootstock=True, cultivar="heirloom")
+    assert shape_errors(document) == []
+    document = stamping(list_valued(well_formed()), rootstock=["m9", "{today}"])
+    assert shape_errors(document) == []
+
+
+@pytest.mark.parametrize(
+    ("value", "says"),
+    [
+        (
+            False,
+            "transitions.transplant.sets.rootstock is false, which writes "
+            "nothing. Write true for an option, or the value to write",
+        ),
+        (
+            "",
+            "transitions.transplant.sets.rootstock must be true, or a non-empty "
+            "string, because keys.rootstock holds one value",
+        ),
+        (
+            ["m9"],
+            "transitions.transplant.sets.rootstock must be true, or a non-empty "
+            "string, because keys.rootstock holds one value",
+        ),
+        (
+            3,
+            "transitions.transplant.sets.rootstock must be true, or a non-empty "
+            "string, because keys.rootstock holds one value",
+        ),
+        (
+            "{tomorrow}",
+            'transitions.transplant.sets.rootstock is "{tomorrow}", and {today} '
+            "is the one substitution a fixed value takes. Drop the other braces",
+        ),
+        (
+            "m9 {today}}",
+            'transitions.transplant.sets.rootstock is "m9 {today}}", and '
+            "{today} is the one substitution a fixed value takes. Drop the "
+            "other braces",
+        ),
+    ],
+)
+def test_a_fixed_value_a_single_valued_key_cannot_hold_refuses(
+    value: object, says: str
+) -> None:
+    assert shape_errors(stamping(well_formed(), rootstock=value)) == [says]
+
+
+@pytest.mark.parametrize("value", ["m9", [], ["m9", ""]])
+def test_a_fixed_value_a_list_valued_key_cannot_hold_refuses(value: object) -> None:
+    """A string given to a list-valued key, and an empty list or an empty
+    entry, which would write a key that carries nothing."""
+    assert shape_errors(stamping(list_valued(well_formed()), rootstock=value)) == [
+        "transitions.transplant.sets.rootstock must be true, or a non-empty "
+        "list of non-empty strings, because keys.rootstock is list-valued"
+    ]
+
+
+def test_a_fixed_value_outside_the_closed_set_refuses() -> None:
+    assert shape_errors(stamping(well_formed(), cultivar="grafted")) == [
+        'transitions.transplant.sets.cultivar names "grafted", which is not a '
+        "declared value of keys.cultivar"
+    ]
+
+
+def test_a_table_key_is_graded_as_a_list_entry_is() -> None:
+    assert shape_errors(stamping(well_formed(), title="Tree")) == [
+        'transitions.transplant.sets names "title", which is intrinsic to every '
+        "item rather than a declared key"
+    ]
+    assert shape_errors(stamping(well_formed(), graft=True)) == [
+        'transitions.transplant.sets names undeclared key "graft"'
+    ]
+
+
+def test_sets_that_is_neither_a_list_nor_a_table_refuses() -> None:
+    document = well_formed()
+    document["transitions"]["transplant"]["sets"] = "rootstock"
+    assert shape_errors(document) == [
+        "transitions.transplant.sets must be a list of strings, or a table of "
+        "key = true or key = the value to write"
+    ]
+
+
+def test_the_list_form_is_the_table_with_every_key_true(tmp_path: Path) -> None:
+    """Shorthand, so no `plan.toml` written before the table changes."""
+    loaded = []
+    for sets in ('["rootstock"]', "{ rootstock = true }"):
+        source = tmp_path / "plan.toml"
+        source.write_text(
+            '[states.greenhouse]\n\n[states.orchard]\n\n'
+            "[keys.rootstock]\n\n"
+            '[transitions.transplant]\nkind = "move"\nfrom = "greenhouse"\n'
+            f'to = "orchard"\nsets = {sets}\n'
+        )
+        loaded.append(load(source).transitions["transplant"])
+    assert loaded[0] == loaded[1]
+    assert loaded[0].sets == ("rootstock",) and dict(loaded[0].fixed) == {}
+
+
+def test_a_table_loads_its_options_and_its_fixed_values_apart(
+    tmp_path: Path,
+) -> None:
+    """`sets` keeps its meaning, the option keys, and `fixed` holds the rest as
+    declared, `{today}` not yet substituted. `lands` is both."""
+    source = tmp_path / "plan.toml"
+    source.write_text(
+        '[states.greenhouse]\n\n[states.orchard]\n\n'
+        '[keys.rootstock]\n\n[keys.planted]\n\n'
+        '[keys.cultivar]\nvalues = ["heirloom", "hybrid"]\n\n'
+        '[transitions.transplant]\nkind = "move"\nfrom = "greenhouse"\n'
+        'to = "orchard"\nrequires = ["rootstock"]\n'
+        'sets = { cultivar = "hybrid", rootstock = true, planted = "{today}" }\n'
+    )
+    transplant = load(source).transitions["transplant"]
+    assert transplant.sets == ("rootstock",)
+    assert dict(transplant.fixed) == {"cultivar": "hybrid", "planted": "{today}"}
+    assert transplant.lands == ("rootstock", "cultivar", "planted")
 
 
 # --------------------------------------------------------------------------
@@ -3185,13 +3560,14 @@ def test_derived_lists_the_gated_names_in_table_order() -> None:
     """The fixture opts into every gate, so `derived` is the whole roster
     — and in the roster's order, which is the order a row spells them."""
     declaration = load(FIXTURES / "plan.toml")
-    assert declaration.derived == DERIVABLE_KEYS
+    assert declaration.derived == (*DERIVABLE_KEYS, *declaration.inverses)
     assert declaration.derived == (
         *CLAIM_KEYS,
         *subphase.DERIVED,
         *depends.DERIVED,
         *STALE_KEYS,
         *COMMAND_KEYS,
+        "replaced-by",
     )
 
 
@@ -3436,3 +3812,37 @@ def test_a_state_sorts_by_each_derived_group_it_carries() -> None:
     document = well_formed()
     document["states"]["greenhouse"]["sort"] = "commands"
     assert any("greenhouse.sort names" in e for e in shape_errors(document))
+
+
+# --------------------------------------------------------------------------
+# `listed`: a state left out of a `list` given no `--state`
+# --------------------------------------------------------------------------
+
+
+def test_a_state_without_listed_is_listed() -> None:
+    """Absent means listed, so a forgotten field hides nothing."""
+    declaration = load(FIXTURES / "plan.toml")
+    assert declaration.states["greenhouse"].listed is True
+    assert declaration.states["firewood"].listed is False
+
+
+def test_listed_true_is_the_default_written_out() -> None:
+    document = well_formed()
+    document["states"]["orchard"]["listed"] = True
+    assert shape_errors(document) == []
+
+
+@pytest.mark.parametrize("value", ["no", 0])
+def test_a_listed_that_is_not_a_bool_refuses_by_name(value: object) -> None:
+    document = well_formed()
+    document["states"]["orchard"]["listed"] = value
+    assert "states.orchard.listed must be true or false" in shape_errors(document)
+
+
+def test_the_declaration_names_its_unlisted_states(tmp_path: Path) -> None:
+    assert load(FIXTURES / "plan.toml").unlisted == ("firewood",)
+    for name in FIXTURE_FILES:
+        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    plan = tmp_path / "plan.toml"
+    plan.write_text(plan.read_text().replace("listed = false\n", ""))
+    assert load(plan).unlisted == ()
