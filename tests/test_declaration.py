@@ -370,7 +370,7 @@ def test_an_unknown_kind_refuses_naming_the_kinds() -> None:
     assert (
         "transitions.transplant.kind is 'transplant', which is not a kind "
         "(kinds: create, move, reorder, edit, rename, close, merge, "
-        "add-bullet, mark-bullet)"
+        "add-bullet, mark-bullet, write-bullet)"
     ) in shape_errors(document)
 
 
@@ -1874,6 +1874,82 @@ def test_marking_into_a_state_that_carries_no_bullets_refuses_by_name() -> None:
     )
 
 
+def test_writing_under_a_bullet_in_a_state_that_carries_none_refuses_by_name() -> None:
+    """The mark's rule over a write-bullet: text goes under a bullet, and a
+    state that declares no heading has no bullet for it to go under."""
+    document = well_formed()
+    document["transitions"]["jot"] = {
+        "kind": "write-bullet",
+        "doc": "method.md#jot",
+        "help": "Write under a step.",
+        "from": "orchard",
+    }
+    assert (
+        "transitions.jot is a write-bullet, and states.orchard does not "
+        'name "bulleted" in its capabilities. Text goes under a bullet, and '
+        "states.orchard is what declares the heading those bullets live "
+        'under. Name "bulleted" in states.orchard.capabilities, or give '
+        "jot another kind" in shape_errors(document)
+    )
+
+
+def test_a_write_bullet_takes_no_sets_and_says_what_it_does_take() -> None:
+    """`--text` and `--replace` can never collide with a declared key,
+    because the kind table gives a write-bullet no key to declare."""
+    document = well_formed()
+    document["transitions"]["jot"] = {
+        "kind": "write-bullet",
+        "doc": "method.md#jot",
+        "help": "Write under a step.",
+        "from": "orchard",
+        "sets": ["text"],
+    }
+    assert (
+        "transitions.jot.sets is set, and a write-bullet does not take it "
+        "(a write-bullet takes from, refuses, requires)" in shape_errors(document)
+    )
+
+
+def test_a_mark_that_merges_is_well_formed() -> None:
+    document = marking(well_formed())
+    document["transitions"]["pot-on"]["merges"] = True
+    assert shape_errors(document) == []
+
+
+def test_merges_on_a_kind_that_is_not_a_mark_bullet_refuses_listing_the_fields() -> None:
+    """The kind table's rule, over the new rider: a fold is a disposition, and
+    only a mark-bullet disposes of a bullet."""
+    document = bulleted(well_formed())
+    document["transitions"]["espalier"]["merges"] = True
+    assert shape_errors(document) == [
+        "transitions.espalier.merges is set, and an add-bullet does not take it "
+        "(an add-bullet takes from, refuses, requires, sets)"
+    ]
+
+
+def test_merges_that_is_not_a_boolean_refuses() -> None:
+    """`claims`' rule: `merges = "false"` is truthy too."""
+    document = marking(well_formed())
+    document["transitions"]["pot-on"]["merges"] = "false"
+    assert "transitions.pot-on.merges must be true or false" in shape_errors(document)
+
+
+def test_merges_beside_files_refuses_by_name() -> None:
+    """A disposition does one second write: moving the prose under another
+    bullet, or filing it as an item. Both on one verb would do two."""
+    document = marking(well_formed())
+    document["transitions"]["pot-on"]["merges"] = True
+    document["transitions"]["pot-on"]["files"] = {
+        "state": "greenhouse",
+        "item": "cultivar",
+        "name": "rootstock",
+    }
+    assert any(
+        error.startswith("transitions.pot-on declares both merges and files.")
+        for error in shape_errors(document)
+    )
+
+
 def test_two_verbs_marking_one_state_with_the_same_word_refuse_naming_both() -> None:
     """One rule with two spellings, and the bullet afterwards cannot say which
     of them ran — the `values` argument, over a word two verbs write."""
@@ -2877,6 +2953,77 @@ def test_a_list_valued_flag_that_is_not_a_boolean_refuses() -> None:
     assert "keys.rootstock.list-valued must be true or false" in shape_errors(document)
 
 
+# --------------------------------------------------------------------------
+# `directory`: a key whose values are files in one directory.
+# See docs/method.md#directory
+# --------------------------------------------------------------------------
+
+
+def _directory_errors(document: dict, root: Path) -> list[str]:
+    """`pointer_errors` narrowed to the key table: the `doc =` pointers
+    refuse in a bare tmp tree, and are not what these are about."""
+    return [
+        one
+        for one in pointer_errors(document, root)
+        if one.startswith("keys.") and ".directory " in one
+    ]
+
+
+def test_a_key_carries_the_directory_it_declares(tmp_path: Path) -> None:
+    document = well_formed()
+    document["keys"]["rootstock"]["directory"] = "sketches"
+    (tmp_path / "sketches").mkdir()
+    assert shape_errors(document) == []
+    assert _directory_errors(document, tmp_path) == []
+    for name in FIXTURE_FILES:
+        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    declaration = load(tmp_path / "plan.toml")
+    assert declaration.keys["notebook"].directory is None
+
+
+def test_a_directory_that_does_not_exist_refuses_at_every_invocation(
+    tmp_path: Path,
+) -> None:
+    """A typo'd directory would report every value missing and no file
+    orphaned, burying the typo among findings that look real."""
+    document = well_formed()
+    document["keys"]["rootstock"]["directory"] = "skecthes"
+    (error,) = _directory_errors(document, tmp_path)
+    assert error.startswith("keys.rootstock.directory names skecthes, which is not a directory")
+    assert "Create the directory" in error
+
+
+def test_a_file_where_the_directory_should_be_refuses(tmp_path: Path) -> None:
+    document = well_formed()
+    document["keys"]["rootstock"]["directory"] = "sketches"
+    (tmp_path / "sketches").write_text("")
+    (error,) = _directory_errors(document, tmp_path)
+    assert "names sketches, which is not a directory" in error
+
+
+@pytest.mark.parametrize("value", [3, "", "  ", ["sketches"]])
+def test_a_directory_that_is_not_a_non_empty_string_refuses_by_name(
+    value: object,
+) -> None:
+    document = well_formed()
+    document["keys"]["rootstock"]["directory"] = value
+    assert "keys.rootstock.directory must be a non-empty string" in shape_errors(
+        document
+    )
+
+
+def test_two_keys_naming_one_directory_refuse_naming_both(tmp_path: Path) -> None:
+    """A file one key names would read as orphaned under the other. A
+    trailing slash is the same directory, not a way around the rule."""
+    document = well_formed()
+    document["keys"]["rootstock"]["directory"] = "sketches"
+    document["keys"]["cultivar"]["directory"] = "sketches/"
+    (tmp_path / "sketches").mkdir()
+    (error,) = _directory_errors(document, tmp_path)
+    assert error.startswith("keys.rootstock.directory names sketches, which ")
+    assert "keys.cultivar.directory names too" in error
+
+
 
 #: Every field where the tool itself puts or reads exactly one value, with
 #: where it is declared in the fixture. Graded over the fixture rather than
@@ -3403,6 +3550,8 @@ def test_transitions_iterate_in_toml_document_order() -> None:
         "line-out",
         "ripen",
         "thin",
+        "jot",
+        "graft-together",
         "grub-out",
         "fell",
         "compost",
@@ -3526,6 +3675,8 @@ def test_the_repos_own_plan_toml_loads_clean() -> None:
         "work",
         "finish",
         "skip",
+        "annotate",
+        "fold",
         "decline",
         "discard",
         "archive-plan",

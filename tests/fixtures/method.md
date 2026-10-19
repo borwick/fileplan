@@ -84,6 +84,14 @@ Say a step of the training is finished.
 
 Say a step of the training will not be done.
 
+## jot
+
+Write under a step of the training.
+
+## graft-together
+
+Fold a step of the training into another.
+
 ## line-out
 
 What `line-out` means: a cutting is lined out as a seedling of its own, in the

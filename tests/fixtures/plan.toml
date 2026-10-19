@@ -291,6 +291,22 @@ help  = "Say a step of the training will not be done."
 from  = "orchard"
 marks = "thinned"
 
+# Writes under a step's bullet, never on its own line.
+[transitions.jot]
+kind = "write-bullet"
+doc  = "method.md#jot"
+help = "Write under a step of the training."
+from = "orchard"
+
+# Marks a step and moves its prose under another step.
+[transitions.graft-together]
+kind   = "mark-bullet"
+doc    = "method.md#graft-together"
+help   = "Fold a step of the training into another."
+from   = "orchard"
+marks  = "grafted"
+merges = true
+
 # A move that archives: it files `## <number>. <title>` into
 # `orchard-archive.md` and moves the tree rather than deleting it.
 [transitions.grub-out]

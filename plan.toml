@@ -51,6 +51,8 @@ sub-phases        = "Findings"
 sub-phase-pending = "**pending — The investigation is still open.**"
 sub-phase-name    = "f{ordinal}"
 opened-for        = "opened-for"
+# Left out of a plain `fileplan list`; `--state carrier` lists it.
+listed            = false
 
 # `title` is not declared here. Every item has one. See docs/method.md#title.
 
@@ -163,6 +165,25 @@ help  = "Say a sub-phase will not be done."
 from  = "plan"
 marks = "skipped"
 drops = ["sub-phase-status"]
+
+# Writes under a sub-phase's bullet, never on its own line, so neither the
+# mark nor the cursor moves. See docs/method.md#annotate.
+[transitions.annotate]
+kind = "write-bullet"
+doc  = "docs/method.md#annotate"
+help = "Write under a sub-phase: what was planned, decided or found."
+from = "plan"
+
+# Marks one sub-phase and moves its prose under another, so the text has
+# one copy and the name survives. See docs/method.md#fold.
+[transitions.fold]
+kind   = "mark-bullet"
+doc    = "docs/method.md#fold"
+help   = "Fold one sub-phase into another: its prose moves there, and it is marked merged."
+from   = "plan"
+marks  = "merged"
+merges = true
+drops  = ["sub-phase-status"]
 
 [transitions.decline]
 kind     = "move"

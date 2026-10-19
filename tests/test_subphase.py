@@ -1614,3 +1614,274 @@ def test_a_mint_changes_no_bullet_a_reader_already_reads(shape, last):
     assert after.pop(new) == f"- **{new} — New**"
     assert after == before
     assert subphase.errors(written, HEADING) == []
+
+
+# --- writing under a bullet -------------------------------------------------
+
+
+WRITTEN_BODY = body(
+    "### Steps",
+    "- **7-1 — One** **done**",
+    "  Planned.",
+    "",
+    "  Still planned.",
+    "",
+    "- **7-2 — Two**",
+    "- **7-3 — Three**",
+    "  ```",
+    "- quoted",
+    "  ```",
+    "",
+    "### Done when",
+    "- untouched",
+)
+
+
+def test_an_append_goes_after_the_continuation_and_ahead_of_the_blank_lines():
+    written = subphase.write(WRITTEN_BODY, heading=HEADING, name="7-1", text="Decided.")
+    assert subphase.text(written, HEADING, name="7-1") == "\n".join(
+        ["- **7-1 — One** **done**", "  Planned.", "", "  Still planned.", "  Decided."]
+    )
+    assert "  Decided.\n\n- **7-2 — Two**" in written
+
+
+def test_an_append_to_a_bullet_with_no_continuation_writes_its_first():
+    written = subphase.write(WRITTEN_BODY, heading=HEADING, name="7-2", text="First.")
+    assert "- **7-2 — Two**\n  First.\n- **7-3 — Three**" in written
+
+
+def test_a_replace_swaps_only_the_owned_lines():
+    written = subphase.write(
+        WRITTEN_BODY, heading=HEADING, name="7-1", text="Only this.", replace=True
+    )
+    assert written.startswith(
+        body("### Steps", "- **7-1 — One** **done**", "  Only this.", "", "- **7-2 — Two**")
+    )
+
+
+@pytest.mark.parametrize("replace", [False, True], ids=["append", "replace"])
+@pytest.mark.parametrize("name", ["7-1", "7-2", "7-3"])
+def test_a_write_leaves_every_other_line_byte_for_byte(name, replace):
+    """The bullet's own line, the bullets either side, a fenced transcript and
+    the prose after the span all come back exactly as they were."""
+    before = {
+        one.name: subphase.text(WRITTEN_BODY, HEADING, name=one.name)
+        for one in subphase.bullets(WRITTEN_BODY, HEADING, pending=None)
+    }
+    written = subphase.write(
+        WRITTEN_BODY, heading=HEADING, name=name, text="New.", replace=replace
+    )
+    after = {
+        one.name: subphase.text(written, HEADING, name=one.name)
+        for one in subphase.bullets(written, HEADING, pending=None)
+    }
+    assert after.pop(name).splitlines()[0] == before.pop(name).splitlines()[0]
+    assert after == before
+    assert written.endswith(body("### Done when", "- untouched"))
+    assert subphase.write_errors(WRITTEN_BODY, written, HEADING) == []
+
+
+def test_every_non_blank_line_is_indented_and_a_blank_one_stays_empty():
+    written = subphase.write(
+        WRITTEN_BODY, heading=HEADING, name="7-2", text="a\n\n  b\n- c\n\n"
+    )
+    assert "- **7-2 — Two**\n  a\n\n    b\n  - c\n- **7-3" in written
+    assert subphase.count(written, HEADING) == subphase.count(WRITTEN_BODY, HEADING)
+
+
+def test_a_name_the_body_does_not_carry_writes_nothing():
+    assert subphase.write(WRITTEN_BODY, heading=HEADING, name="7-9", text="x") == WRITTEN_BODY
+
+
+@pytest.mark.parametrize("name", ["7-1", "7-2"])
+def test_a_lone_fence_in_the_text_is_named_by_the_check(name):
+    """Indentation keeps the text from adding a bullet, and a fence is the
+    one thing left: it hides every bullet after it."""
+    written = subphase.write(WRITTEN_BODY, heading=HEADING, name=name, text="```")
+    (complaint,) = subphase.write_errors(WRITTEN_BODY, written, HEADING)
+    assert "would no longer be read" in complaint or "never closes" in complaint
+
+
+def test_a_lone_fence_under_the_last_bullet_is_an_unclosed_fence():
+    shape = body("### Steps", "- **7-1 — One**")
+    written = subphase.write(shape, heading=HEADING, name="7-1", text="```")
+    (complaint,) = subphase.write_errors(shape, written, HEADING)
+    assert "never closes" in complaint
+
+
+@pytest.mark.parametrize("text", ["", " ", "\n\n", " \n\t"])
+def test_empty_text_is_refused(text):
+    (complaint,) = subphase.text_errors(text)
+    assert "empty" in complaint
+
+
+def test_ordinary_text_is_no_complaint():
+    assert subphase.text_errors("Decided.\n\nMore.") == []
+
+
+def test_the_indent_is_as_wide_as_the_counted_marker_and_its_space():
+    assert subphase.INDENT == " " * len(f"{subphase.COUNTED} ")
+
+
+# --- carrying an absorbed item in as a sub-phase ----------------------------
+
+
+def carried(shape: str, text: str) -> tuple[str, str]:
+    return subphase.carry(
+        shape, heading=HEADING, prefix=PREFIX, pending=PENDING, title="New", text=text
+    )
+
+
+@pytest.mark.parametrize("shape", SHAPES.values(), ids=SHAPES.keys())
+def test_a_carry_mints_at_the_next_free_ordinal_and_changes_no_other_bullet(shape):
+    """A merge's half of 231-5's rule: the new bullet carries the text
+    indented under it, and every bullet a reader already read comes back byte
+    for byte."""
+    before = {
+        one.name: subphase.text(shape, HEADING, name=one.name)
+        for one in subphase.bullets(shape, HEADING, pending=PENDING)
+    }
+    written, name = carried(shape, "Said.\n\nAnd more.\n")
+    after = {
+        one.name: subphase.text(written, HEADING, name=one.name)
+        for one in subphase.bullets(written, HEADING, pending=PENDING)
+    }
+    assert name == f"{PREFIX}{subphase.next_ordinal(before, PREFIX)}"
+    assert after.pop(name) == f"- **{name} — New**\n  Said.\n\n  And more."
+    assert after == before
+    assert subphase.errors(written, HEADING) == []
+
+
+def test_a_carry_of_no_text_mints_the_bullet_alone():
+    written, name = carried(SPLIT_BODY, "\n\n")
+    assert name == "7-4"
+    assert subphase.text(written, HEADING, name="7-4") == "- **7-4 — New**"
+
+
+def test_a_carry_still_ends_the_list_with_the_pending_bullet():
+    written, _ = carried(SPLIT_BODY, "Said.")
+    assert written.endswith(body("- **7-4 — New**", "  Said.", f"- {PENDING}"))
+
+
+# --- minting in place, and folding one bullet into another -----------------
+
+
+@pytest.mark.parametrize("last", [False, True], ids=["open", "last"])
+@pytest.mark.parametrize("shape", SHAPES.values(), ids=SHAPES.keys())
+def test_a_mint_after_a_bullet_lands_behind_it_and_changes_no_other(shape, last):
+    """The split's half of 231-5's rule: the new bullet goes directly behind
+    the anchor and everything it owns, and every bullet a reader already read
+    comes back byte for byte."""
+    carried = subphase.bullets(shape, HEADING, pending=PENDING)
+    anchor = carried[0].name
+    before = {one.name: subphase.text(shape, HEADING, name=one.name) for one in carried}
+    written = subphase.mint(
+        shape,
+        heading=HEADING,
+        prefix=PREFIX,
+        pending=PENDING,
+        title="New",
+        last=last,
+        after=anchor,
+    )
+    after = {
+        one.name: subphase.text(written, HEADING, name=one.name)
+        for one in subphase.bullets(written, HEADING, pending=PENDING)
+    }
+    (new,) = set(after) - set(before)
+    assert after.pop(new) == f"- **{new} — New**"
+    assert after == before
+    names = subphase.names(written, HEADING)
+    assert names[names.index(anchor) + 1] == new
+    assert subphase.errors(written, HEADING) == []
+
+
+SPLIT_BODY = body(
+    "### Steps",
+    "- **7-1 — One** **done**",
+    "  Said.",
+    "- **7-2 — Two**",
+    "- **7-3 — Three**",
+    f"- {PENDING}",
+)
+
+
+def test_a_mint_after_a_bullet_takes_the_next_free_ordinal_and_not_a_suffix():
+    written = subphase.mint(
+        SPLIT_BODY, heading=HEADING, prefix=PREFIX, pending=PENDING, title="New",
+        after="7-1",
+    )
+    assert subphase.names(written, HEADING) == ["7-1", "7-4", "7-2", "7-3", "unpruned"]
+    assert "  Said.\n- **7-4 — New**\n- **7-2 — Two**" in written
+
+
+def test_a_mint_after_a_bullet_still_ends_the_list_with_the_pending_one():
+    written = subphase.mint(
+        SPLIT_BODY, heading=HEADING, prefix=PREFIX, pending=PENDING, title="New",
+        after="7-2",
+    )
+    assert written.endswith(body("- **7-3 — Three**", f"- {PENDING}"))
+    closed = subphase.mint(
+        SPLIT_BODY, heading=HEADING, prefix=PREFIX, pending=PENDING, title="New",
+        after="7-2", last=True,
+    )
+    assert closed.endswith(body("- **7-2 — Two**", "- **7-4 — New**", "- **7-3 — Three**"))
+
+
+FOLD_BODY = body(
+    "### Steps",
+    "- **7-1 — One**",
+    "  Planned for one.",
+    "- **7-2 — Two** **merged** Into 7-1.",
+    "  Planned for two,",
+    "",
+    "    and indented further.",
+    "```",
+    "$ quoted at column zero",
+    "```",
+    "- **7-3 — Three**",
+    "",
+    "### Done when",
+    "- untouched",
+)
+
+
+def test_absorb_moves_the_continuation_under_the_survivor_headed_once():
+    written = subphase.absorb(FOLD_BODY, heading=HEADING, name="7-2", into="7-1")
+    assert subphase.text(written, HEADING, name="7-1") == "\n".join(
+        [
+            "- **7-1 — One**",
+            "  Planned for one.",
+            "  *From 7-2 — Two:*",
+            "  Planned for two,",
+            "",
+            "    and indented further.",
+            "  ```",
+            "  $ quoted at column zero",
+            "  ```",
+        ]
+    )
+    assert subphase.text(written, HEADING, name="7-2") == (
+        "- **7-2 — Two** **merged** Into 7-1."
+    )
+
+
+@pytest.mark.parametrize("into", ["7-1", "7-3"])
+def test_absorb_leaves_every_other_bullet_byte_for_byte(into):
+    """Before the survivor or after it, the third bullet and the prose after
+    the span come back exactly, and the reader counts what it counted."""
+    other = ({"7-1", "7-3"} - {into}).pop()
+    written = subphase.absorb(FOLD_BODY, heading=HEADING, name="7-2", into=into)
+    assert subphase.text(written, HEADING, name=other) == subphase.text(
+        FOLD_BODY, HEADING, name=other
+    )
+    assert written.endswith(body("### Done when", "- untouched"))
+    assert subphase.write_errors(FOLD_BODY, written, HEADING) == []
+
+
+def test_a_bullet_with_no_continuation_absorbs_as_its_heading_line_alone():
+    shape = body("### Steps", "- **7-1 — One**", "- **7-2**", "- **7-3 — Three**")
+    written = subphase.absorb(shape, heading=HEADING, name="7-2", into="7-3")
+    assert written == body(
+        "### Steps", "- **7-1 — One**", "- **7-2**", "- **7-3 — Three**", "  *From 7-2:*"
+    )

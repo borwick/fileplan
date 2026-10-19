@@ -5,8 +5,8 @@ number is minted on entry. The key is not declared, and declaring it refuses.
 
 The register is derived and never stored. Two sources make it, with two
 different writers. Every item in the state carries its own `number`. The
-`archive` document the state names carries one `## <n>. <title>` heading per
-closed item.
+`archive` the state names carries one `## <n>. <title>` heading per closed
+item: in one document, or one file per entry when it names a directory.
 
 A heading is a closed item's only record. A heading the parse cannot read
 drops its number silently. The gapless walk bounds itself by the highest
@@ -96,6 +96,23 @@ def unreadable(text: str) -> list[tuple[int, str]]:
         for number, line in enumerate(text.splitlines(), start=1)
         if ARCHIVE_HEADING.match(line) and not HEADING.match(line)
     ]
+
+
+def unreadable_entry(text: str) -> list[tuple[int, str]]:
+    """`unreadable` for one file of an archive that is a directory.
+
+    There the file *is* the entry, so a file holding no heading the register
+    can read has dropped its number exactly as an unreadable `##` does: that
+    is a lost close-out, named at line 1 with the file's first line. A stray
+    `README.md` is reported rather than ignored, which is the loud polarity.
+    A file whose only `##` is unreadable is already named by `unreadable`, so
+    it is not named twice. See docs/method.md#the-register
+    """
+    found = unreadable(text)
+    if found or numbers(text):
+        return found
+    first = text.splitlines()[0].strip() if text.strip() else ""
+    return [(1, first)]
 
 
 def lost(state: str, archive: str, line: int, text: str) -> dict[str, Any]:
@@ -223,6 +240,15 @@ def errors(head: Mapping[str, Any]) -> list[str]:
 def heading(number: int, title: str) -> str:
     """An archive entry's heading, as `HEADING` reads it back."""
     return f"## {number}. {title}"
+
+
+def filename(number: int, slug: str) -> str:
+    """The file an entry is written to, in an archive that is a directory.
+
+    The number keeps it findable by what the register calls it, and the slug
+    makes a directory listing readable. What it holds is `entry`'s.
+    """
+    return f"{number}-{slug}.md"
 
 
 def archived(text: str, where: str) -> dict[str, int]:

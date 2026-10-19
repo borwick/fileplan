@@ -69,6 +69,7 @@ you select on, never the transition's name.**
 |---|---|
 | sub-phases written into its body | the kind `add-bullet` |
 | to be picked up, and the cursor moved | `claims` |
+| decisions recorded under its sub-phase | the kind `write-bullet` |
 | a sub-phase said to be over | the kind `mark-bullet` |
 | to be closed out | the kind `close`, **and** `archives` |
 
@@ -146,8 +147,10 @@ brings no memory to the plan.
 2. Build it, then follow that same procedure from its *Running it* paragraph
    on: how to report, what goes in the item body, and why the head change rides in the
    sub-phase's own commit rather than trailing it.
-3. Take the `mark-bullet` transition — its subject is the **bullet**, not the
-   item — and then `release`, both through `/fileplan`. Then commit staging
+3. Take the `write-bullet` transition to record what was decided under the
+   sub-phase's bullet, then the `mark-bullet` transition — the subject of
+   each is the **bullet**, not the item — and then `release`, all through
+   `/fileplan`. Then commit staging
    the specific paths. **Never `git add -A`** — a sibling session may share
    this tree. Subject: `Sub-phase N-M: <what it did>`. Then remove the plan
    file.

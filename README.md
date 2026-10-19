@@ -170,8 +170,8 @@ A transition's `kind` decides what the transition does:
     file's frontmatter.
   - `close` deletes the plan file, which is why `archive` declares no `to`.
 
-`archives = true` writes the closing entry into an archive document. There
-are nine kinds in all, and [the method](https://github.com/borwick/fileplan/blob/main/docs/method.md#kinds) lists them.
+`archives = true` writes the closing entry into an archive document.
+[The method](https://github.com/borwick/fileplan/blob/main/docs/method.md#kinds) lists every kind.
 
 Capabilities give a state extra behaviour. The `plan` state above declares
 `queued` and `numbered`, which is why the plan file picked up a position and a

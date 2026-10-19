@@ -23,6 +23,7 @@ import difflib
 import operator as operators
 import re
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Sequence
 
@@ -71,6 +72,10 @@ BULLET_LINE = "line"
 #: which key, and the entry it carries that the key does not declare.
 #: See docs/method.md#the-listing
 KEY, VALUE = "key", "value"
+
+#: The field a `missing` or `orphaned` record adds: the directory the key
+#: declares. See docs/method.md#directory
+DIRECTORY = "directory"
 
 #: The field an `unfound` record adds to those two: the carrier the filed
 #: item names, which no longer has the bullet. See docs/method.md#carried
@@ -138,7 +143,7 @@ class Test:
 
 
 # --------------------------------------------------------------------------
-# The traversal: the one function here that touches a disk
+# The traversal: the two functions here that touch a disk
 # --------------------------------------------------------------------------
 
 
@@ -175,6 +180,48 @@ def items(declaration: Declaration) -> list[Item]:
         found += here
     if errors:
         raise Refusal(errors)
+    return found
+
+
+@dataclass(frozen=True)
+class Archived:
+    """One file of a state's archive: the path a report names it by, what it
+    holds, and every line of it the register cannot read."""
+
+    where: str
+    text: str
+    lost: list[tuple[int, str]]
+
+
+def archive(declaration: Declaration, state: State) -> list[Archived]:
+    """What `state`'s archive holds, file by file. The one reader of it.
+
+    The `archive` field names a path, and what is on disk decides its form.
+    A file is the archive, read whole. A directory holds one entry per file:
+    every `*.md` directly inside it, sorted by name, with no recursion and any
+    other extension left alone. There a file with no readable heading is a
+    lost close-out (`fileplan.numbered.unreadable_entry`). The load check
+    guarantees the path exists. See docs/method.md#the-register
+    """
+    # A `numbered` state with no `archive` refuses at load.
+    assert state.archive is not None
+    where = state.archive
+    path = declaration.root / where
+    if not path.is_dir():
+        text = path.read_text(encoding="utf-8")
+        return [Archived(where, text, numbered.unreadable(text))]
+    found = []
+    for one in sorted(path.glob(f"*{item.SUFFIX}"), key=lambda p: p.name):
+        if not one.is_file():
+            continue
+        text = one.read_text(encoding="utf-8")
+        found.append(
+            Archived(
+                (PurePosixPath(where) / one.name).as_posix(),
+                text,
+                numbered.unreadable_entry(text),
+            )
+        )
     return found
 
 
@@ -356,6 +403,12 @@ class Listing:
     #: hand edit is found here. It gates nothing: grading at read would break
     #: the whole listing over one item. See docs/method.md#the-listing
     undeclared: list[dict[str, Any]] = field(default_factory=list)
+    #: The two reports of a key declaring a `directory`, one record each: an
+    #: entry naming no file directly inside the key's directory, and a `*.md`
+    #: there that no filed item names in that key. They gate nothing, for the
+    #: reason `unknown` gives. See docs/method.md#directory
+    missing: list[dict[str, Any]] = field(default_factory=list)
+    orphaned: list[dict[str, Any]] = field(default_factory=list)
     #: The filed items naming a bullet their carrier no longer has, one record
     #: per entry: what a split leaves behind until each is repointed. Only
     #: while the carrier is filed, because provenance outlives its carrier.
@@ -394,6 +447,8 @@ REPORTS: tuple[tuple[str, Callable[[Declaration], bool]], ...] = (
     ("unmarkable", lambda one: bool(one.marked_states)),
     ("unread", lambda one: one.counts_sub_phases),
     ("undeclared", lambda one: any(key.values for key in one.keys.values())),
+    ("missing", lambda one: any(key.directory for key in one.keys.values())),
+    ("orphaned", lambda one: any(key.directory for key in one.keys.values())),
     ("unfound", lambda one: bool(one.files)),
 )
 
@@ -435,6 +490,7 @@ def listing(
     unmarkable = _unmarkable(declaration, found)
     passed = _unread(declaration, found)
     undeclared = _undeclared(declaration, found)
+    missing, orphaned = _paths(declaration, found)
     unfound = _unfound(declaration, found)
     ages = stale.ages(
         declaration.root,
@@ -500,6 +556,8 @@ def listing(
         unmarkable=unmarkable,
         unread=passed,
         undeclared=undeclared,
+        missing=missing,
+        orphaned=orphaned,
         unfound=unfound,
         register=register,
     )
@@ -597,6 +655,60 @@ def _undeclared(
     ]
 
 
+def _paths(
+    declaration: Declaration, found: Sequence[Item]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The `missing` and `orphaned` reports, over one walk of each key's
+    directory.
+
+    A value names a file when, read as a `PurePosixPath`, it is a `*.md` file
+    directly inside the key's directory, so `./notes/a.md` names
+    `notes/a.md`. A list is asked entry by entry, `carries`' rule. Every
+    item in every state counts as naming, because the reports cover the whole
+    tree. The directory holds `archive`'s documents: every `*.md` directly
+    inside it, no recursion, other extensions left alone. The load check
+    guarantees each directory exists. See docs/method.md#directory
+    """
+    missing: list[dict[str, Any]] = []
+    orphaned: list[dict[str, Any]] = []
+    for name, key in declaration.keys.items():
+        if key.directory is None:
+            continue
+        directory = PurePosixPath(key.directory)
+        held = {
+            directory / one.name
+            for one in (declaration.root / directory).glob(f"*{item.SUFFIX}")
+            if one.is_file()
+        }
+        named: set[PurePosixPath] = set()
+        for one in found:
+            if name not in one.head:
+                continue
+            for entry in _entries(one.head[name]):
+                path = PurePosixPath(str(entry))
+                if path in held:
+                    named.add(path)
+                    continue
+                missing.append(
+                    {
+                        SLUG: one.slug,
+                        KEY: name,
+                        VALUE: entry,
+                        PATH: str(one.path.relative_to(declaration.root)),
+                        DIRECTORY: directory.as_posix(),
+                    }
+                )
+        orphaned += [
+            {
+                KEY: name,
+                DIRECTORY: directory.as_posix(),
+                PATH: path.as_posix(),
+            }
+            for path in sorted(held - named)
+        ]
+    return missing, orphaned
+
+
 def _unfound(
     declaration: Declaration, found: Sequence[Item]
 ) -> list[dict[str, Any]]:
@@ -670,20 +782,19 @@ def _register(
     for state in declaration.states.values():
         if not state.has(numbered.NAME):
             continue
-        # A `numbered` state with no `archive` refuses at load.
         assert state.archive is not None
         where = state.archive
-        text = (declaration.root / where).read_text(encoding="utf-8")
-        lost += [
-            numbered.lost(state.name, where, line, said)
-            for line, said in numbered.unreadable(text)
-        ]
         held: dict[str, Any] = {
             one.slug: one.get(numbered.KEY)
             for one in found
             if one.state.name == state.name
         }
-        held.update(numbered.archived(text, where))
+        for entry in archive(declaration, state):
+            lost += [
+                numbered.lost(state.name, entry.where, line, said)
+                for line, said in entry.lost
+            ]
+            held.update(numbered.archived(entry.text, entry.where))
         held_numbers = numbered.taken(held)
         gaps += [
             {

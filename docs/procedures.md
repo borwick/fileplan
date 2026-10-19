@@ -53,6 +53,20 @@ out is a body of bullets, each one session's worth.
    mint. This is **mint, then fill**, not one command.
 6. Commit, staging that one path.
 
+**Re-cutting a section.** A decomposition is a proposal, and planning a
+sub-phase sometimes shows it was cut wrong. Re-cut it with the commands, not
+by hand. **To split one sub-phase in two**, mint the new half with `decompose
+--title … --after` the old one, so it lands beside it rather than at the end
+([bulleted](method.md#bulleted)). Then `annotate --replace` each half, so each
+says only its own part and carries its own *done when*. **To merge two**,
+`fold` the absorbed one `--into` the survivor ([fold](method.md#fold)). Its
+prose moves under the survivor, and it is marked `merged` rather than deleted,
+so nothing naming it is left dangling. Then `annotate --replace` the survivor,
+if the two texts read better as one. **Ideas merged into the section**
+arrive as sub-phases at the end ([merge](method.md#merge)), so re-cut them
+the same way, with `fold` and `annotate`. Commit the item, staging that one
+path.
+
 ## planning and working a sub-phase
 
 The listing names which sub-phase is next in `next-sub-phase`, computed off
@@ -102,8 +116,11 @@ with its count, the listing in the shape the plan predicted, and
 `git show --stat` naming the paths the plan named and no others.
 
 **Then update the item body**: record the decisions made along the way in
-that sub-phase's own bullet. This is the durable record. The section's archive
-entry is assembled from it.
+that sub-phase's own bullet, **with the command** rather than by hand. It is
+the transition the bare `fileplan` listing shows as a `write-bullet`, given
+`--text -` and a heredoc ([annotate](method.md#annotate)). The tool indents
+the lines and refuses a write that would change the sub-phases counted. This
+is the durable record. The section's archive entry is assembled from it.
 
 **Then mark the bullet with the command, never by hand.** It is the transition
 the bare `fileplan` listing shows declaring `marks`, whose subject is the

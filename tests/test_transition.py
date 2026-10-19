@@ -3845,23 +3845,45 @@ def test_a_carry_and_a_self_edge_compose_into_one_write(tree: Declaration) -> No
     carried(tree, "a-seedling")
     after = read(survivor, tree)
     assert "after" not in after
-    assert after.body.endswith("### Ay\n\nThe ay body.\n")
+    assert "- **2-1 — Ay**\n  The ay body.\n" in after.body
 
 
 def test_a_carry_that_would_give_the_survivor_a_second_sub_phases_heading_refuses(
     tree: Declaration,
 ) -> None:
     """Graded before any write, with the check every listing runs, so the
-    next listing cannot refuse the tree this run left."""
+    next listing cannot refuse the tree this run left. The `###` arm, so the
+    orchard here counts its sub-phases and mints none: a `bulleted` survivor
+    indents the heading instead, which the next test pins."""
     seedling(tree, "a-seedling", titled("Ay", "## Steps\n\n- **1-1 — Dig**\n"))
     survivor = orchard(tree, "c-seedling")
     prose(survivor, tree, "## Steps\n\n- **1-1 — Plant**\n")
     before = snapshot(tree)
+    counted = dataclasses.replace(
+        tree,
+        states={**tree.states, "orchard": dataclasses.replace(tree.states["orchard"], pending=None)},
+    )
 
     with pytest.raises(Refusal, match='2 "Steps" headings') as refused:
-        carried(tree, "a-seedling")
+        carried(counted, "a-seedling")
     assert "inarch cannot carry into orchard/c-seedling.md" in refused.value.messages
     assert snapshot(tree) == before
+
+
+def test_a_carry_into_a_bulleted_survivor_indents_a_sub_phases_heading_it_brings(
+    tree: Declaration,
+) -> None:
+    """The same two bodies, and no refusal: the writer indents the absorbed
+    text, and an indented line is not a heading."""
+    seedling(tree, "a-seedling", titled("Ay", "## Steps\n\n- **1-1 — Dig**\n"))
+    survivor = orchard(tree, "c-seedling")
+    prose(survivor, tree, "## Steps\n\n- **2-1 — Plant**\n")
+
+    carried(tree, "a-seedling")
+    assert read(survivor, tree).body == (
+        "## Steps\n\n- **2-1 — Plant**\n- **2-2 — Ay**\n  ## Steps\n\n"
+        "  - **1-1 — Dig**\n- **unpruned — Say what the rest of the training is.**\n"
+    )
 
 
 def test_a_survivor_another_session_holds_refuses_a_merge(

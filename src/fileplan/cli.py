@@ -38,6 +38,7 @@ from fileplan.declaration import (
     MERGE,
     PLACING,
     RENAME,
+    WRITE_BULLET,
     Declaration,
     Key,
     Refusal,
@@ -45,7 +46,16 @@ from fileplan.declaration import (
     load,
     named,
 )
-from fileplan.transition import INTO, KEEP_CLAIMS as KEEPING, MARKING, NOTE, RECORD
+from fileplan.transition import (
+    AFTER,
+    INTO,
+    KEEP_CLAIMS as KEEPING,
+    MARKING,
+    NOTE,
+    RECORD,
+    REPLACE,
+    TEXT,
+)
 from fileplan.transition import RETITLE as RETITLING
 from fileplan.transition import commands, execute, release
 
@@ -113,10 +123,39 @@ MINTING = (
         "This is the final sub-phase. Close the decomposition, leaving "
         "nothing pending.",
     ),
+    (
+        AFTER,
+        "NAME",
+        str,
+        "Write the new sub-phase directly after the bullet named NAME, not at "
+        "the end. The name is still the next free ordinal.",
+    ),
 )
 
-#: `RECORD` is the option a close that `archives` takes: the prose that goes
-#: under the entry's heading, required, and only on that one shape. `INTO`
+#: The options a write-bullet takes beside the bullet's name: the text, and
+#: whether it replaces what is under the bullet. `--text` is required, and
+#: `-` reads stdin through `_prose`. See docs/method.md#annotate
+WRITING = (
+    (
+        TEXT,
+        "TEXT",
+        str,
+        "What to write under the bullet. Required. Each line is indented by "
+        "the tool, so text cannot add a bullet. `-` reads the text from "
+        "stdin, so `--text - < notes.md` takes it from a file.",
+    ),
+    (
+        REPLACE,
+        None,
+        None,
+        "Replace the lines under the bullet with the text. Without it the "
+        "text goes after them. The bullet's own line is never touched.",
+    ),
+)
+
+#: `RECORD` is the option every verb that `archives` takes: the prose that
+#: goes under the entry's heading, required on a close and optional on a
+#: move. `INTO`
 #: is a merge's survivor, `NOTE` a mark-bullet's reason, `MARKING` the key a
 #: mark-bullet's bullet is read back under, `RETITLING` a rename's new title
 #: and `KEEPING` the key `--keep-claims` is read back under. Each is the
@@ -172,7 +211,7 @@ CHECK = "check"
 #: The options a transition may declare beside its kind, which the
 #: `Declares` block lists after the kind, by name and nothing else: what each
 #: means is a section the `Reading` block points at. See docs/method.md#kinds
-DECLARED = ("claims", "files", "archives")
+DECLARED = ("claims", "files", "merges", "archives")
 
 #: What the JSON envelope calls this listing, and the noun the text frame
 #: counts in on every read whose rows are items.
@@ -362,11 +401,12 @@ def _command(declaration: Declaration, transition: Transition) -> click.Command:
     creating = transition.source is None
     absorbing = transition.kind == MERGE
     marking = transition.marks is not None
+    writing = transition.kind == WRITE_BULLET
     renaming = transition.kind == RENAME
     placed = _places(declaration, transition)
     minting = transition.kind == ADD_BULLET
     filing = transition.files is not None
-    recording = transition.records
+    recording = transition.archives
     claiming = transition.claims
     params: list[click.Parameter] = [
         # One positional, variadic only on a merge: several
@@ -379,6 +419,12 @@ def _command(declaration: Declaration, transition: Transition) -> click.Command:
         # After the item's, so the usage line reads ITEM NAME.
         params.append(click.Argument([BULLET], metavar=MARKING_METAVAR))
         params.append(_note_option(transition))
+        if transition.merges:
+            params.append(_fold_option(transition))
+    if writing:
+        # The same second positional as a mark-bullet's, and no --note.
+        params.append(click.Argument([BULLET], metavar=MARKING_METAVAR))
+        params += _writing_options()
     if renaming:
         # After the item's too: ITEM TITLE, as `idea TITLE` takes one.
         params.append(click.Argument([RETITLING], metavar=RETITLE_METAVAR))
@@ -413,7 +459,7 @@ def _command(declaration: Declaration, transition: Transition) -> click.Command:
         # the item this run files, never the one it moves.
         params += [_option(declaration, key) for key in transition.files_sets]
     if recording:
-        params.append(_record_option())
+        params.append(_record_option(transition))
     if absorbing:
         params.append(_into_option())
     if claiming:
@@ -432,6 +478,12 @@ def _command(declaration: Declaration, transition: Transition) -> click.Command:
         if marking:
             asked[MARKING] = given.pop(BULLET)
             asked[NOTE] = given.pop(NOTE)
+            if transition.merges:
+                asked[INTO] = given.pop(INTO)
+        if writing:
+            asked[MARKING] = given.pop(BULLET)
+            asked[TEXT] = _prose(given.pop(TEXT))
+            asked[REPLACE] = given.pop(REPLACE)
         if renaming:
             asked[RETITLING] = given.pop(RETITLING)
         if recording:
@@ -736,6 +788,26 @@ def _minting_options(transition: Transition) -> list[click.Parameter]:
     ]
 
 
+def _writing_options() -> list[click.Parameter]:
+    """What a write-bullet takes: the text, and whether it replaces.
+
+    `_minting_options`' shape, with no collision check: a write-bullet takes
+    no `sets`, so no declared key can be called either. See
+    docs/method.md#annotate
+    """
+    return [
+        click.Option(
+            [f"--{flag}", flag],
+            metavar=metavar,
+            type=kind,
+            is_flag=kind is None,
+            required=kind is not None,
+            help=said,
+        )
+        for flag, metavar, kind, said in WRITING
+    ]
+
+
 def _filing_options(transition: Transition) -> list[click.Parameter]:
     """What a verb that `files` takes: a title for the item, and its prose.
 
@@ -758,21 +830,35 @@ def _filing_options(transition: Transition) -> list[click.Parameter]:
     ]
 
 
-def _record_option() -> click.Option:
-    """The prose a close that archives files under its entry.
+def _record_option(transition: Transition) -> click.Option:
+    """The prose a verb that archives files under its entry.
 
-    Required, and it needs no `sets` collision check: a close takes no `sets`
-    in `plan.toml`. `-` reads stdin through `_prose`.
+    Required on a close, which deletes the item. Optional on a move, which
+    leaves it readable where it went, so the heading can still be filled by
+    hand. A move can take `sets`, so a key of the same name refuses by name.
+    `-` reads stdin through `_prose`. See docs/method.md#dissolving
     """
+    if (field := _setting(transition, RECORD)) is not None:
+        raise Refusal(
+            f'{field} names "{RECORD}", and a transition that archives '
+            f"already takes --{RECORD} for the entry's prose. One option "
+            "cannot mean two things"
+        )
+    said = (
+        "Required, because this command deletes the item and leaves nothing "
+        "to write the entry from afterwards."
+        if transition.records
+        else "Optional: without it the heading is filed alone, and the item "
+        "is still readable where it moved, so the prose can be written "
+        "under the heading afterwards."
+    )
     return click.Option(
         [f"--{RECORD}", RECORD],
         metavar="TEXT",
-        required=True,
+        required=transition.records,
         help=(
-            "The archive entry's prose. Required, because this command "
-            "deletes the item and leaves nothing to write the entry from "
-            "afterwards. `-` reads the prose from stdin, so "
-            "`--record - < entry.md` takes it from a file."
+            f"The archive entry's prose. {said} `-` reads the prose from "
+            "stdin, so `--record - < entry.md` takes it from a file."
         ),
     )
 
@@ -780,8 +866,8 @@ def _record_option() -> click.Option:
 def _note_option(transition: Transition) -> click.Option:
     """Why a disposition disposed of the finding the way it did.
 
-    Not required, and it needs the `sets` collision check, which the two
-    options above do not. Taken as a value, and `-` is not stdin here: a note
+    Not required, and it needs the `sets` collision check. Taken as a value,
+    and `-` is not stdin here: a note
     is one line by construction.
     """
     if (field := _setting(transition, NOTE)) is not None:
@@ -797,6 +883,30 @@ def _note_option(transition: Transition) -> click.Option:
             "Why the bullet was disposed of this way, written on the bullet "
             "beside the mark. One line, and nothing reads the note back as a "
             "field."
+        ),
+    )
+
+
+def _fold_option(transition: Transition) -> click.Option:
+    """The bullet a fold moves the marked bullet's prose under.
+
+    Required, and it needs the `sets` collision check, as `--note` does: a
+    mark-bullet may declare `sets`. `INTO` is a merge's key too, and the two
+    never sit on one command. See docs/method.md#fold
+    """
+    if (field := _setting(transition, INTO)) is not None:
+        raise Refusal(
+            f'{field} names "{INTO}", and a '
+            f"transition that folds a bullet already takes --{INTO} for the "
+            "bullet its prose moves under. One option cannot mean two things"
+        )
+    return click.Option(
+        [f"--{INTO}", INTO],
+        metavar="NAME",
+        required=True,
+        help=(
+            "The bullet of the same item that the marked bullet's prose moves "
+            "under. It must be unmarked, and it is where the cursor goes."
         ),
     )
 
@@ -1390,6 +1500,22 @@ def _undeclared(one: Mapping[str, Any]) -> str:
     )
 
 
+def _missing(one: Mapping[str, Any]) -> str:
+    """One entry of a directory key naming no file in its directory, as a line."""
+    return (
+        f'missing file: {one[read.SLUG]} names "{one[read.VALUE]}" in '
+        f"{one[read.KEY]}, and {one[read.DIRECTORY]} holds no such file"
+    )
+
+
+def _orphaned(one: Mapping[str, Any]) -> str:
+    """One file in a key's directory that no item names, as a line."""
+    return (
+        f"orphaned file: {one[read.PATH]} is in {one[read.DIRECTORY]}, and no "
+        f"item names it in {one[read.KEY]}"
+    )
+
+
 def _first_item(declaration: Declaration) -> list[str]:
     """What an empty tree's listing says to do: one line per create, in
     declared order, or nothing where the declaration creates nothing."""
@@ -1447,6 +1573,8 @@ REPORT_LINES: Mapping[str, Callable[[Any], str] | None] = {
     "unmarkable": _unmarkable,
     "unread": _unread,
     "undeclared": _undeclared,
+    "missing": _missing,
+    "orphaned": _orphaned,
     "unfound": _unfound,
 }
 

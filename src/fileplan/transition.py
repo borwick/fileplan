@@ -22,7 +22,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
 from fileplan import claim, depends, item, numbered, queued, read, subphase
@@ -35,6 +35,7 @@ from fileplan.declaration import (
     MERGE,
     RENAME,
     TODAY,
+    WRITE_BULLET,
     Declaration,
     Key,
     Refusal,
@@ -238,6 +239,8 @@ def commands(
         and not form_errors(declaration, transition, one, _settable(transition, one))
         and not number_errors(declaration, transition, one)
         and (transition.kind != MARK_BULLET or _markable(one))
+        and (transition.kind != WRITE_BULLET or _writable(one))
+        and (not transition.merges or _foldable(one))
     ]
 
 
@@ -298,6 +301,35 @@ def _markable(one: item.Item) -> bool:
             pending=one.state.pending,
             marks=one.state.marks,
         )
+    )
+
+
+def _foldable(one: item.Item) -> bool:
+    """Whether `one` carries two bullets a fold could take: one to mark, and
+    one unmarked to move its prose under. See docs/method.md#marking"""
+    if not one.state.sub_phases:
+        return False
+    return (
+        sum(
+            bullet.mark is None and not bullet.unmarkable
+            for bullet in subphase.bullets(
+                one.body,
+                one.state.sub_phases,
+                pending=one.state.pending,
+                marks=one.state.marks,
+            )
+        )
+        >= 2
+    )
+
+
+def _writable(one: item.Item) -> bool:
+    """Whether `one` carries a named bullet text could go under, marked or
+    not. See docs/method.md#bulleted"""
+    if not one.state.sub_phases:
+        return False
+    return bool(
+        subphase.bullets(one.body, one.state.sub_phases, pending=one.state.pending)
     )
 
 
@@ -424,6 +456,7 @@ def _would(
     writing: str | None = None,
     renaming: _Renaming | None = None,
     carrying: Path | None = None,
+    carried_as: str | None = None,
 ) -> str:
     """The one sentence `--check` prints: what this run would do.
 
@@ -464,7 +497,10 @@ def _would(
         where = ", ".join(named(one.path, root) for one in clearing.edits)
         said.append(f"clear the edge to it in {where}")
     if carrying is not None:
-        said.append(f"carry its body into {named(carrying, root)}")
+        said.append(
+            f"carry its body into {named(carrying, root)}"
+            + (f" as {carried_as}" if carried_as is not None else "")
+        )
     return f"{opening}, and would {_listed(said)}" if said else opening
 
 
@@ -582,7 +618,9 @@ def _move(running: _Running) -> Path | str:
     marking = _marking_cursor(running, disposing)
     # Before the shed below drops every capability key: an entry is filed under
     # the number the item carried in the state it is leaving.
-    archiving = _archiving(running, original)
+    archiving = _archiving(
+        running, original, record=str(running.asked.get(RECORD) or "")
+    )
     filing = _filing(running, original, disposing)
     renaming = _renaming(running, original, claiming)
 
@@ -757,14 +795,17 @@ def _mint(
     holds, which makes it a reservation rather than a reading.
     See docs/method.md#the-register
     """
-    assert state.archive is not None  # a numbered state with none refuses at load.
-    where = state.archive
-    text = (declaration.root / where).read_text(encoding="utf-8")
-    if lost := numbered.heading_errors(numbered.unreadable(text), where):
+    archive = read.archive(declaration, state)
+    if lost := [
+        error
+        for entry in archive
+        for error in numbered.heading_errors(entry.lost, entry.where)
+    ]:
         raise Refusal(lost)
 
     taken = dict(held)
-    taken.update(numbered.archived(text, where))
+    for entry in archive:
+        taken.update(numbered.archived(entry.text, entry.where))
     return numbered.next_number(
         numbered.taken(taken),
         current=current if isinstance(current, int) else None,
@@ -782,9 +823,13 @@ ANCHORS = ("above", "below")
 #: of `asked`, because two capabilities now put options on one verb.
 PLACEMENT = (*ANCHORS, "at")
 
-#: The same, for the capability that writes a body: a title to mint, and
-#: whether this is the last one.
-MINTING = ("title", "last")
+#: The bullet a mint goes directly behind, rather than at the end of the
+#: list. See docs/method.md#bulleted
+AFTER = "after"
+
+#: The same, for the capability that writes a body: a title to mint, whether
+#: this is the last one, and where it goes.
+MINTING = ("title", "last", AFTER)
 
 #: The one a mark-bullet takes: which bullet this run acts on, a positional
 #: on the command line. See docs/method.md#marking
@@ -794,8 +839,14 @@ MARKING = "name"
 #: other half's option. See docs/method.md#marking
 NOTE = "note"
 
-#: The one a verb that both archives and dissolves takes: the prose that goes
-#: under the entry's heading. See docs/method.md#dissolving
+#: The two a write-bullet takes beside `MARKING`: the text it writes under
+#: the bullet, and whether that text replaces what is there rather than
+#: following it. See docs/method.md#annotate
+TEXT, REPLACE = "text", "replace"
+
+#: The one every verb that archives takes: the prose that goes under the
+#: entry's heading. Required on a close, optional on a move.
+#: See docs/method.md#dissolving
 RECORD = "record"
 
 #: The one a verb that absorbs takes: the item the work continues as, required
@@ -919,21 +970,7 @@ def _disposing(running: _Running, original: item.Item) -> subphase.Bullet | None
     """
     if running.transition.marks is None:
         return None
-    state = running.declaration.states[running.transition.to]
-    # A `marks` into a state that is not `bulleted` refuses back in plan.toml.
-    assert state.sub_phases is not None
-    wanted = running.asked.get(MARKING)
-    carried = subphase.bullets(
-        original.body, state.sub_phases, pending=state.pending, marks=state.marks
-    )
-    found = next((one for one in carried if one.name == wanted), None)
-    if found is None:
-        # One sentence, one home: `show ITEM NAME` refuses in these words too.
-        raise Refusal(
-            subphase.unknown(
-                named(original.path, running.declaration.root), wanted, carried, state.sub_phases
-            )
-        )
+    found = _named_bullet(running, original)
     if found.mark is not None:
         raise Refusal(
             f"{named(original.path, running.declaration.root)} has already disposed of "
@@ -953,6 +990,37 @@ def _disposing(running: _Running, original: item.Item) -> subphase.Bullet | None
     return found
 
 
+def _named_bullet(
+    running: _Running, original: item.Item, wanted: Any = None
+) -> subphase.Bullet:
+    """The named bullet `wanted` names, by default this run's `MARKING`, or
+    refuse.
+
+    The gate a disposition, a write under a bullet, a fold's survivor and a
+    mint's anchor share: `bullets`, so an unnamed bullet and the pending
+    marker refuse as "no such name", in the words `show ITEM NAME` refuses in
+    too. See docs/method.md#marking
+    """
+    state = running.declaration.states[running.transition.to]
+    # A `marks`, a write-bullet or a mint into a state that is not `bulleted`
+    # refuses back in plan.toml.
+    assert state.sub_phases is not None
+    if wanted is None:
+        wanted = running.asked.get(MARKING)
+    carried = subphase.bullets(
+        original.body, state.sub_phases, pending=state.pending, marks=state.marks
+    )
+    found = next((one for one in carried if one.name == wanted), None)
+    if found is None:
+        # One sentence, one home: `show ITEM NAME` refuses in these words too.
+        raise Refusal(
+            subphase.unknown(
+                named(original.path, running.declaration.root), wanted, carried, state.sub_phases
+            )
+        )
+    return found
+
+
 def _marking_cursor(
     running: _Running, disposing: subphase.Bullet | None
 ) -> dict[str, str]:
@@ -960,12 +1028,16 @@ def _marking_cursor(
     cursor, and nothing otherwise.
 
     The mark is the run every sub-phase ends with, so the cursor is current by
-    construction rather than by a session remembering the claiming verb.
+    construction rather than by a session remembering the claiming verb. A
+    fold puts it on the survivor instead, because the work continues there,
+    and `_folding` has already refused a survivor that is not a bullet.
     See docs/method.md#the-cursor
     """
     state = running.declaration.states[running.transition.to]
     if disposing is None or not state.cursor:
         return {}
+    if running.transition.merges:
+        return {state.cursor: str(running.asked.get(INTO))}
     return {state.cursor: disposing.name}
 
 
@@ -997,6 +1069,8 @@ def _bulleting(
             raise Refusal(
                 [f"{named(original.path, running.declaration.root)} cannot take that note", *wrong]
             )
+        if running.transition.merges:
+            return _folding(running, original, disposing, note=note)
         return (
             subphase.mark(
                 original.body,
@@ -1010,6 +1084,9 @@ def _bulleting(
             # Its presence, never its content.
             + (" with a note" if note else ""),
         )
+
+    if running.transition.kind == WRITE_BULLET:
+        return _writing(running, original)
 
     if running.transition.kind != ADD_BULLET:
         return original.body, None, None
@@ -1027,10 +1104,21 @@ def _bulleting(
 
     title = running.asked.get(MINTING[0])
     last = bool(running.asked.get(MINTING[1]))
+    after = running.asked.get(AFTER)
     if title is not None and (wrong := subphase.title_errors(title)):
         raise Refusal(
             [f"{named(original.path, running.declaration.root)} cannot take that sub-phase", *wrong]
         )
+    if after is not None:
+        if title is None:
+            raise Refusal(
+                f"--{AFTER} says where a new sub-phase goes, and without "
+                f"--{MINTING[0]} there is no sub-phase to place. Give --{MINTING[0]} "
+                f"beside --{AFTER} {after}"
+            )
+        # The anchor may be marked: new work after a finished sub-phase is the
+        # ordinary case.
+        _named_bullet(running, original, after)
 
     notice = None
     if (
@@ -1041,9 +1129,8 @@ def _bulleting(
         )
     ):
         notice = (
-            f"{original.slug} had no sub-phase left pending under "
-            f'"{state.sub_phases}", so this re-opens it: "{state.pending}" '
-            "is back. Finish with --last to take it out again"
+            f"{_reopened(original.slug, state)}. "
+            f"Finish with --{MINTING[1]} to take it out again"
         )
 
     return (
@@ -1054,10 +1141,134 @@ def _bulleting(
             pending=state.pending,
             title=title,
             last=last,
+            after=after,
         ),
         notice,
-        "put the pending bullet back" if notice is not None else None,
+        "; ".join(
+            clause
+            for clause in (
+                f"write the sub-phase after {after}" if after is not None else None,
+                "put the pending bullet back" if notice is not None else None,
+            )
+            if clause
+        )
+        or None,
     )
+
+
+def _reopened(slug: str, state: State) -> str:
+    """What a run that mints into a finished decomposition says it did."""
+    return (
+        f"{slug} had no sub-phase left pending under "
+        f'"{state.sub_phases}", so this re-opens it: "{state.pending}" is back'
+    )
+
+
+def _folding(
+    running: _Running,
+    original: item.Item,
+    disposing: subphase.Bullet,
+    *,
+    note: str | None,
+) -> tuple[str, str | None, str | None]:
+    """`_bulleting`'s answer for a mark that merges: mark, then fold.
+
+    Every refusal is here, before `_move` writes a byte. `_disposing` has
+    already refused a marked bullet. The survivor is a named bullet, not the
+    bullet itself, and not marked, and the folded body still reads the bullets
+    the marked one does. The note opens with the survivor, so the mark says
+    where the prose went. The check says how many lines move and never the
+    text. See docs/method.md#fold
+    """
+    state = running.declaration.states[running.transition.to]
+    assert state.sub_phases is not None
+    where = named(original.path, running.declaration.root)
+    survivor = _named_bullet(running, original, running.asked.get(INTO))
+    if survivor.name == disposing.name:
+        raise Refusal(
+            f"{where} cannot move {disposing.name}'s prose under itself. "
+            f"--{INTO} names the bullet the prose moves under, which is another "
+            "bullet of the same item"
+        )
+    if survivor.mark is not None:
+        raise Refusal(
+            f"{where} cannot move {disposing.name}'s prose under {survivor.name}: "
+            f'{survivor.name} is marked "{survivor.mark}". Prose moved under a '
+            "finished sub-phase is work nobody will pick up. Name an "
+            "unmarked bullet"
+        )
+    said = f"Into {survivor.name}." + (f" {note}" if note else "")
+    marked = subphase.mark(
+        original.body,
+        heading=state.sub_phases,
+        name=disposing.name,
+        word=str(running.transition.marks),
+        note=said,
+    )
+    body = subphase.absorb(
+        marked, heading=state.sub_phases, name=disposing.name, into=survivor.name
+    )
+    if wrong := subphase.write_errors(marked, body, state.sub_phases):
+        raise Refusal(
+            [f"{where} cannot move {disposing.name}'s prose under {survivor.name}", *wrong]
+        )
+    owned = subphase.text(original.body, state.sub_phases, name=disposing.name)
+    assert owned is not None  # `_named_bullet` found it.
+    return (
+        body,
+        None,
+        f'mark {disposing.name} "{running.transition.marks}"'
+        # Its presence, never its content.
+        + (" with a note" if note else "")
+        + f", and move {_lines(len(owned.splitlines()) - 1)} under "
+        f"{survivor.name}",
+    )
+
+
+def _writing(
+    running: _Running, original: item.Item
+) -> tuple[str, str | None, str | None]:
+    """`_bulleting`'s answer for a write-bullet: text under one named bullet.
+
+    Every refusal is here, before `_move` writes a byte: the bullet, the
+    text, and whether the written body still reads the bullets this one does.
+    The check clause says how many lines go where and never the text.
+    See docs/method.md#annotate
+    """
+    found = _named_bullet(running, original)
+    state = running.declaration.states[running.transition.to]
+    assert state.sub_phases is not None
+    where = named(original.path, running.declaration.root)
+    text = str(running.asked.get(TEXT) or "")
+    replace = bool(running.asked.get(REPLACE))
+    if wrong := subphase.text_errors(text):
+        raise Refusal([f"{where} cannot take that text", *wrong])
+    body = subphase.write(
+        original.body,
+        heading=state.sub_phases,
+        name=found.name,
+        text=text,
+        replace=replace,
+    )
+    if wrong := subphase.write_errors(original.body, body, state.sub_phases):
+        raise Refusal([f"{where} cannot take that text under {found.name}", *wrong])
+
+    lines = len(text.rstrip("\n").splitlines())
+    if not replace:
+        return body, None, f"append {_lines(lines)} under {found.name}"
+    owned = subphase.text(original.body, state.sub_phases, name=found.name)
+    assert owned is not None  # `_named_bullet` found it.
+    return (
+        body,
+        None,
+        f"replace {_lines(len(owned.splitlines()) - 1)} under {found.name} "
+        f"with {lines}",
+    )
+
+
+def _lines(lines: int) -> str:
+    """A number of lines, as a check clause says it."""
+    return f"{lines} line{'' if lines == 1 else 's'}"
 
 
 @dataclass(frozen=True)
@@ -1085,8 +1296,12 @@ def _archiving(
     Only a verb that declares `archives` files one, into the source state's
     `archive`. Three refusals, all before any write: a `##` the register
     cannot read, an item carrying no number, and a number the archive already
-    holds. `record` is the prose under the heading, and is empty for every
-    verb that moves the item rather than dissolving it.
+    holds. `record` is the prose under the heading. A close requires it, and
+    a move that leaves it empty files the heading alone.
+
+    An archive that is a document gets the entry inserted at its register
+    place. One that is a directory gets a new file, `numbered.filename`,
+    holding what that insertion would: nothing in any other entry is touched.
     See docs/method.md#the-register
     """
     if not running.transition.archives:
@@ -1094,23 +1309,48 @@ def _archiving(
 
     assert running.transition.source is not None
     state = running.declaration.states[running.transition.source]
-    # Both halves refuse back in plan.toml, so there is always a document here.
-    assert state.archive is not None
-    where = state.archive
-    path = running.declaration.root / where
-    text = path.read_text(encoding="utf-8")
-    if lost := numbered.heading_errors(numbered.unreadable(text), where):
+    archive = read.archive(running.declaration, state)
+    if lost := [
+        error
+        for entry in archive
+        for error in numbered.heading_errors(entry.lost, entry.where)
+    ]:
         raise Refusal(lost)
 
     if wrong := number_errors(running.declaration, running.transition, original):
         raise Refusal(wrong)
     number = original.get(numbered.KEY)
+    title = str(original.get("title"))
+    heading = numbered.heading(number, title)
 
-    title = original.get("title")
-    heading = numbered.heading(number, str(title))
+    # Both halves refuse back in plan.toml, so there is always an archive here.
+    assert state.archive is not None
+    where = state.archive
+    path = running.declaration.root / where
+    if path.is_dir():
+        # The duplicate refusal `entry` makes, over every file at once.
+        held: dict[str, Any] = {}
+        for entry in archive:
+            held.update(numbered.archived(entry.text, entry.where))
+        held[f'"{title}"'] = number
+        numbered.next_number(numbered.taken(held), current=number)
+        name = numbered.filename(number, original.slug)
+        path, where = path / name, (PurePosixPath(where) / name).as_posix()
+        # A file already here that passed both refusals holds another number
+        # under a name it was given by hand. Writing would drop that number.
+        if path.exists():
+            raise Refusal(
+                f"{where} already exists, holding an entry under another "
+                f"number. Writing {heading} there would drop that entry's "
+                "number from the register — rename the file to the number "
+                "it holds"
+            )
+        text = numbered.entry("", number, title, record)
+    else:
+        text = numbered.entry(archive[0].text, number, title, record)
     return _Archiving(
         path=path,
-        text=numbered.entry(text, number, str(title), record),
+        text=text,
         heading=heading,
         notice=(
             f"{where}: filed `{heading}` at its place in the "
@@ -1434,7 +1674,7 @@ def _dissolve(running: _Running, handles: Sequence[str]) -> tuple[Path, ...] | s
     if survivor is not None:
         if not failed:
             carried = _carrying(running, tree[survivor.path], [one for one, *_ in taken.values()])
-            tree[survivor.path] = carried
+            tree[survivor.path] = carried.survivor
     if failed:
         raise Refusal(
             [
@@ -1453,9 +1693,10 @@ def _dissolve(running: _Running, handles: Sequence[str]) -> tuple[Path, ...] | s
                 claiming=claiming,
                 archiving=archiving,
                 clearing=clearing,
-                carrying=None if carried is None else carried.path,
+                carrying=None if carried is None else carried.survivor.path,
+                carried_as=carried.names[index] if carried and carried.names else None,
             )
-            for (original, claiming, archiving), clearing in runs
+            for index, ((original, claiming, archiving), clearing) in enumerate(runs)
         )
 
     for original, *_ in taken.values():
@@ -1465,7 +1706,7 @@ def _dissolve(running: _Running, handles: Sequence[str]) -> tuple[Path, ...] | s
     # One write per referent, of its head after every clearing.
     edited = dict.fromkeys(one.path for clearing in clearings for one in clearing.edits)
     if carried is not None:
-        edited[carried.path] = None
+        edited[carried.survivor.path] = None
     _clear([tree[path] for path in edited])
     for _, claiming, _ in taken.values():
         _apply(claiming, root)
@@ -1476,6 +1717,8 @@ def _dissolve(running: _Running, handles: Sequence[str]) -> tuple[Path, ...] | s
     for clearing in clearings:
         for said in clearing.notices:
             running.say(said)
+    if carried is not None and carried.notice is not None:
+        running.say(carried.notice)
     slugs = [original.slug for original, *_ in taken.values()]
     for said in _mentions(list(tree.values()), slugs, root, f"which {verb} took away"):
         running.say(said)
@@ -1489,14 +1732,29 @@ def _dissolve(running: _Running, handles: Sequence[str]) -> tuple[Path, ...] | s
     )
 
 
+@dataclass(frozen=True)
+class _Carried:
+    """The survivor a merge writes, resolved before anything is written."""
+
+    survivor: item.Item
+    #: The sub-phase each absorbed item became, in the order named, or empty
+    #: where the survivor's state carries none and the bodies went under `###`.
+    names: tuple[str, ...] = ()
+    #: What the run says once it has written, where a finished
+    #: decomposition is re-opened.
+    notice: str | None = None
+
+
 def _carrying(
     running: _Running, survivor: item.Item, gone: Sequence[item.Item]
-) -> item.Item:
+) -> _Carried:
     """`survivor` with each of `gone`'s bodies appended, in the order given.
 
-    Each lands under `### <its title>`, stripped of blank lines at either
-    end. Two refusals, both before any write: a survivor another session
-    holds, since a carry writes prose into a body that session may be
+    The survivor's state decides the form. Where it is `bulleted`, each item
+    becomes the sub-phase `_bulleted_carry` mints; anywhere else each lands
+    under `### <its title>`. Either way each body is stripped of blank lines
+    at either end. Two refusals, both before any write: a survivor another
+    session holds, since a carry writes prose into a body that session may be
     rewriting, and a composed body its state's sub-phase check refuses, so
     the next listing cannot. The head is not graded. No writes.
     See docs/method.md#merge
@@ -1507,11 +1765,16 @@ def _carrying(
         held := _record(running.declaration, survivor.slug)
     ) is not None:
         _foreign(running, survivor.slug, held)
-    body = survivor.body.rstrip("\n")
-    for one in gone:
-        carried = one.body.strip("\n")
-        body += f"\n\n### {one.get('title')}\n\n{carried}"
-    body += "\n"
+    if state.sub_phases and state.pending and state.sub_phase_name:
+        carried = _bulleted_carry(running, survivor, gone)
+        body = carried.survivor.body
+    else:
+        carried = None
+        body = survivor.body.rstrip("\n")
+        for one in gone:
+            text = one.body.strip("\n")
+            body += f"\n\n### {one.get('title')}\n\n{text}"
+        body += "\n"
     if state.sub_phases and (errors := subphase.errors(body, state.sub_phases)):
         raise Refusal(
             [
@@ -1520,7 +1783,75 @@ def _carrying(
                 *errors,
             ]
         )
-    return item.Item(path=survivor.path, state=state, head=survivor.head, body=body)
+    if carried is not None:
+        return carried
+    return _Carried(
+        item.Item(path=survivor.path, state=state, head=survivor.head, body=body)
+    )
+
+
+def _bulleted_carry(
+    running: _Running, survivor: item.Item, gone: Sequence[item.Item]
+) -> _Carried:
+    """`_carrying`'s answer for a survivor in a `bulleted` state: one
+    sub-phase per absorbed item, titled by its title, its body the bullet's
+    prose.
+
+    Three refusals of its own, before any write: a title the strict form
+    cannot carry, naming the item; a field the name form needs that the
+    survivor's head does not carry; and a body whose text would change the
+    bullets the survivor reads, which only a fence can do. Minting into a
+    finished decomposition re-opens it, and the notice says so.
+    See docs/method.md#merge
+    """
+    root = running.declaration.root
+    state = survivor.state
+    assert state.sub_phases and state.pending and state.sub_phase_name
+    where = named(survivor.path, root)
+    verb = running.transition.name
+    errors = [
+        said
+        for one in gone
+        if (wrong := subphase.title_errors(str(one.get("title"))))
+        for said in (f"{named(one.path, root)} cannot become a sub-phase", *wrong)
+    ]
+    if absent := subphase.absent(state.sub_phase_name, survivor.head):
+        errors.append(
+            f"{where} carries no {', '.join(absent)}, and {state.name} names "
+            f'its bullets "{state.sub_phase_name}" — so this run has nothing '
+            "to name a sub-phase from"
+        )
+    if errors:
+        raise Refusal([f"{verb} cannot carry into {where}", *errors])
+
+    prefix = subphase.prefix(state.sub_phase_name, survivor.head)
+    body = survivor.body
+    names: list[str] = []
+    for one in gone:
+        minting = dict(
+            heading=state.sub_phases,
+            prefix=prefix,
+            pending=state.pending,
+            title=str(one.get("title")),
+        )
+        # The bullet alone is what the written body must still read.
+        alone, _ = subphase.carry(body, **minting, text="")
+        written, name = subphase.carry(body, **minting, text=one.body.strip("\n"))
+        if wrong := subphase.write_errors(alone, written, state.sub_phases):
+            raise Refusal(
+                [f"{verb} cannot carry {named(one.path, root)} into {where} as {name}", *wrong]
+            )
+        body = written
+        names.append(name)
+
+    notice = None
+    if subphase.opens(survivor.body, heading=state.sub_phases, pending=state.pending):
+        notice = _reopened(survivor.slug, state)
+    return _Carried(
+        item.Item(path=survivor.path, state=state, head=survivor.head, body=body),
+        tuple(names),
+        notice,
+    )
 
 
 def _mentions(

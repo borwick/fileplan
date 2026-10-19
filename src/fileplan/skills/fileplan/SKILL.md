@@ -88,14 +88,19 @@ The kind says what the run does:
   still need out of it first; afterwards only git has it.
 * **`merge`** — each item named is deleted, its body is appended to the
   survivor `--into` names under its title, and the edges pointing at it are
-  repointed at the survivor rather than cleared. Read the survivor
-  afterwards.
+  repointed at the survivor rather than cleared. Where the survivor's state
+  has sub-phases, each item becomes a sub-phase instead, with its body as
+  that bullet's prose. Read the survivor afterwards.
 * **`add-bullet`** — the run writes into the item's body in a strict form.
   Expect to mint first and fill the prose in afterwards.
 * **`mark-bullet`** — the run's subject is one **bullet** rather than the
   item, and what it writes onto that bullet is the declaration's own word.
   The offer for such a transition lists bullets, so the second argument is a
   bullet's name.
+* **`write-bullet`** — the run's subject is one **bullet** too, named the
+  same way, and it writes `--text` under that bullet. The text goes after
+  what is there unless `--replace` is given, and the bullet's own line is
+  left alone. Pass `--text -` and a heredoc for anything longer than a line.
 
 The options after the kind add to what it does:
 
@@ -105,6 +110,9 @@ The options after the kind add to what it does:
   declaration names, carrying the two declared keys that say where it came
   from. It rides on a `mark-bullet`, so the same run disposes of the bullet
   the new item was written from.
+* **`merges`** — the run marks one bullet and moves its prose under the
+  bullet `--into` names, another bullet of the same item. Both must be
+  unmarked. Read both bullets afterwards with `show ITEM NAME`.
 * **`archives`** — the run files a record of the item. On a `close`, compose
   that record **in full before running**, because what it is written from
   goes with the file.

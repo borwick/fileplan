@@ -109,6 +109,17 @@ DEPTH = "###"
 #: `NAME_END`'s three, so what is written stops where the reader says it does.
 DASH = "—"
 
+#: What every line written under a bullet opens with: as wide as `COUNTED`
+#: and the space after it, so the text lines up under the bullet's own. An
+#: indented line is never counted, so text written here cannot add a bullet.
+INDENT = " " * (len(COUNTED) + 1)
+
+#: The line that heads a folded bullet's prose under the bullet it moves to:
+#: the absorbed bullet's name and title, as `DASH` joins them on its own
+#: line. Italic and unbulleted, so it is the tool's prose and counts as
+#: nothing. See docs/method.md#marking
+FROM = "*From {}:*"
+
 #: The ordinal a body with no bullets under the heading mints first.
 FIRST = 1
 
@@ -577,6 +588,7 @@ def mint(
     pending: str,
     title: str | None = None,
     last: bool = False,
+    after: str | None = None,
 ) -> str:
     """`body` with the next sub-phase written in, and the pending bullet set.
 
@@ -585,6 +597,12 @@ def mint(
     append the pending bullet unless `last` was given. Nothing asks whether
     the decomposition was already finished, so minting into a finished section
     re-opens it, which is correct.
+
+    `after` names the bullet the new sub-phase goes directly behind, past
+    every line it owns, rather than at the end of the list. Only the place
+    changes: the name is still the next free ordinal, and the pending bullet
+    still ends the list. A name the span does not carry places nothing
+    differently; the caller refuses one first.
 
     Assumes `title` graded by `title_errors` and `pending` by `pending_errors`.
     The heading is created only where the body has none, at `DEPTH`. Total
@@ -621,11 +639,17 @@ def mint(
     bullets = [
         number for number, (line, live) in enumerate(paired) if live and _counts(line)
     ]
+    live = [live for _, live in paired]
     if bullets:
-        cut = _owned(span, [live for _, live in paired], bullets[-1])
+        cut = _owned(span, live, bullets[-1])
     else:
         written = [number for number, line in enumerate(span) if line.strip()]
         cut = written[-1] + 1 if written else 0
+    anchor = next(
+        (number for number in bullets if after and _name(span[number]) == after),
+        None,
+    )
+    placed = cut if anchor is None else _owned(span, live, anchor)
 
     added: list[str] = []
     if title is not None:
@@ -638,10 +662,20 @@ def mint(
             prefix,
         )
         added.append(f"{COUNTED} **{prefix}{ordinal} {DASH} {title}**")
-    if not last:
-        added.append(_pending_line(pending))
+    pended = [] if last else [_pending_line(pending)]
+    if placed == cut:
+        added += pended
+        pended = []
 
-    written = lines[: start + 1] + span[:cut] + added + span[cut:] + lines[end:]
+    written = (
+        lines[: start + 1]
+        + span[:placed]
+        + added
+        + span[placed:cut]
+        + pended
+        + span[cut:]
+        + lines[end:]
+    )
     return "\n".join(written) + "\n" if written else ""
 
 
@@ -677,6 +711,146 @@ def mark(
             lines[number] = f"{written} {note}" if note else written
             break
     return "\n".join(lines) + "\n" if lines else ""
+
+
+def write(
+    body: str, *, heading: str, name: str, text: str, replace: bool = False
+) -> str:
+    """`body` with `text` written under one bullet, and every other byte identical.
+
+    The bullet's own line is never touched, so its name, title, mark and note
+    stay as they were. An append goes directly after the last line `_owned`
+    says the bullet owns, ahead of the blank lines that close the gap, and a
+    bullet with no continuation gets its first. `replace` swaps the owned
+    lines after the bullet's own for `text` instead.
+
+    Every non-blank line of `text` gets `INDENT` and blank ones stay empty;
+    otherwise it is verbatim, trailing newlines aside. The first matching
+    bullet only, and total like `mark`: a name the body does not carry writes
+    nothing. Assumes `text` graded by `text_errors`. Whether the result still
+    reads the same bullets is `write_errors`' question, asked by the caller.
+    """
+    lines = body.splitlines()
+    bounds = _bounds(lines, heading)
+    if bounds is None:
+        return body
+    start, end = bounds
+    ok = _unfenced(lines)
+    for number in range(start + 1, end):
+        line = lines[number]
+        if ok[number] and _counts(line) and _name(line) == name:
+            cut = _owned(lines, ok, number)
+            lines[number + 1 if replace else cut : cut] = [
+                f"{INDENT}{one}" if one.strip() else ""
+                for one in text.rstrip("\n").splitlines()
+            ]
+            break
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+def carry(
+    body: str, *, heading: str, prefix: str, pending: str, title: str, text: str
+) -> tuple[str, str]:
+    """`body` with one sub-phase minted and `text` written under it, and its name.
+
+    `mint` then `write`, and nothing of its own: the name is the next free
+    ordinal, which is `mint`'s rule, so it is one the body did not carry. The
+    pending bullet is put back at the end, and a heading the body lacks is
+    made. An empty `text` mints the bullet alone. Pure, and total like both.
+    Assumes `title` graded by `title_errors`; whether the result still reads
+    the bullets the minted body does is `write_errors`' question.
+    """
+    name = f"{prefix}{next_ordinal(names(body, heading), prefix)}"
+    body = mint(body, heading=heading, prefix=prefix, pending=pending, title=title)
+    if text.strip():
+        body = write(body, heading=heading, name=name, text=text)
+    return body, name
+
+
+def absorb(body: str, *, heading: str, name: str, into: str) -> str:
+    """`body` with bullet `name`'s continuation moved under bullet `into`. Pure.
+
+    The lines `_owned` says `name` owns after its own come off, and go after
+    everything `into` owns, headed by `FROM`. The bullet's own line stays, so
+    the caller marks it first with `mark`, and this does one thing. Each moved
+    line loses one `INDENT` where it carries one, and `write` adds it back, so
+    prose lines up as it did and a column-zero fenced line gains the indent.
+    A bullet with no continuation moves its heading line alone.
+
+    Total like `write`: a `name` or `into` the body does not carry writes
+    nothing there. Whether the result still reads the same bullets is
+    `write_errors`' question, asked by the caller.
+    """
+    lines = body.splitlines()
+    bounds = _bounds(lines, heading)
+    if bounds is None:
+        return body
+    start, end = bounds
+    ok = _unfenced(lines)
+    for number in range(start + 1, end):
+        line = lines[number]
+        if ok[number] and _counts(line) and _name(line) == name:
+            cut = _owned(lines, ok, number)
+            moved = lines[number + 1 : cut]
+            del lines[number + 1 : cut]
+            title = _title(line)
+            headed = FROM.format(f"{name} {DASH} {title}" if title else name)
+            text = "\n".join(
+                [headed]
+                + [one.removeprefix(INDENT) for one in moved]
+            )
+            return write(
+                "\n".join(lines) + "\n", heading=heading, name=into, text=text
+            )
+    return body
+
+
+def write_errors(body: str, written: str, heading: str) -> list[str]:
+    """Why `written` does not read the bullets `body` does, or nothing. Pure.
+
+    The check a write under a bullet runs before it writes a byte. Indentation
+    already keeps the text from adding a bullet, so what is left is a fence:
+    an odd number of fence lines hides every line after them, so a bullet is
+    lost or the fence never closes. Asked as more than the count — every
+    counted bullet's line, before and after — so a hidden bullet and a new one
+    cannot balance out. `errors` over `written` comes first, and names the
+    unclosed fence where there is one.
+    """
+    if wrong := errors(written, heading):
+        return wrong
+    before = [line for _, line, _ in _counted(body, heading)]
+    after = [line for _, line, _ in _counted(written, heading)]
+    if before == after:
+        return []
+    if len(before) != len(after):
+        said = (
+            f'the body would carry {len(after)} bullets under "{heading}", '
+            f"where it carries {len(before)}"
+        )
+    else:
+        said = f'the bullets under "{heading}" would read differently'
+    kept = set(names(written, heading))
+    if lost := [name for name in names(body, heading) if name not in kept]:
+        said += f", and {', '.join(lost)} would no longer be read"
+    return [
+        f"{said}. Text under a bullet is indented, so only a fence can do "
+        "that: an odd number of fence lines hides every line after them"
+    ]
+
+
+def text_errors(text: str) -> list[str]:
+    """Every way `text` cannot be written under a bullet. Pure.
+
+    One case: nothing in it. An append of nothing writes nothing, and a
+    replace with nothing would delete the bullet's prose without saying so.
+    """
+    if text.strip():
+        return []
+    return [
+        "the text is empty, and a write under a bullet needs something to "
+        "write. An append of nothing writes nothing, and a replace with "
+        "nothing would delete the bullet's prose without saying so"
+    ]
 
 
 def opens(body: str, *, heading: str, pending: str) -> bool:

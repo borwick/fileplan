@@ -269,6 +269,46 @@ def test_the_refusal_is_built_from_the_walk_the_report_is_built_from() -> None:
 
 
 # --------------------------------------------------------------------------
+# An archive that is a directory: the file is the entry
+# --------------------------------------------------------------------------
+
+
+def test_an_entry_file_with_a_readable_heading_is_not_a_lost_close_out() -> None:
+    assert numbered.unreadable_entry("## 3. A tree\n\nWhy.\n") == []
+
+
+def test_an_entry_file_with_no_heading_is_a_lost_close_out_at_line_one() -> None:
+    """The file *is* the entry, so one the register cannot number from has
+    dropped its number exactly as an unreadable `##` does. A stray `README.md`
+    is named rather than skipped, which is the polarity that fails loud."""
+    assert numbered.unreadable_entry("# Read me\n\nProse.\n") == [(1, "# Read me")]
+
+
+def test_an_empty_entry_file_is_a_lost_close_out_too() -> None:
+    assert numbered.unreadable_entry("") == [(1, "")]
+
+
+def test_an_entry_files_unreadable_heading_is_named_once_at_its_own_line() -> None:
+    """The walk a document gets, unchanged, so the line named is the one to
+    fix — and not a second time at line 1 for holding no readable heading."""
+    text = "Preamble.\n\n## Section 3: A tree\n"
+    assert numbered.unreadable_entry(text) == [(3, "## Section 3: A tree")]
+
+
+def test_two_readable_headings_in_one_entry_file_are_two_entries() -> None:
+    """No extra rule: a file reads as a document does."""
+    text = "## 3. A tree\n\n## 4. Another\n"
+    assert numbered.unreadable_entry(text) == []
+    assert numbered.archived(text, WHERE) == {f"{WHERE} § 3.": 3, f"{WHERE} § 4.": 4}
+
+
+def test_an_entry_file_is_named_by_its_number_then_its_slug() -> None:
+    """The number keeps the file findable by what the register calls it; the
+    slug makes a directory listing readable."""
+    assert numbered.filename(37, "a-felled-tree") == "37-a-felled-tree.md"
+
+
+# --------------------------------------------------------------------------
 # The two records a listing carries
 # --------------------------------------------------------------------------
 

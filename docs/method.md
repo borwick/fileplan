@@ -154,6 +154,14 @@ nothing under `src/` knows the word.
 The key is optional. An item carrying no `draft` has no design document, and a
 section whose preamble says everything needs none.
 
+**This repo's `draft` declares no [`directory`](#directory).** No item here
+carries `draft`, and `docs/drafts/` holds the design every session reads
+first. Declaring the directory would report each of those documents as
+orphaned on every read, and a report that is always there teaches a reader to
+skip it. A workflow that writes one draft per item declares the directory, and
+the listing then names a `draft` pointing at no file and a draft that no item
+names.
+
 ### size
 
 How much work the item is: `S`, `M`, `L`, `XL`. A **closed set**, and an
@@ -404,6 +412,47 @@ list-valued dependency key is the case that works.
 A key says it holds several, or it holds one. Holding one is the default,
 which is what every key had before the field existed.
 
+### directory
+
+A key may declare that its values are **files in one directory**:
+
+```toml
+[keys.sketch]
+directory = "sketches"
+```
+
+Each value is then a repo-relative path naming a file directly inside
+`sketches/`. The listing compares the two sides and says where they disagree:
+
+* **`missing`** is a value naming no file in the directory. That covers a file
+  that does not exist and a path outside the directory. A list-valued key is
+  asked entry by entry.
+* **`orphaned`** is a file in the directory that no item names in that key.
+  Every item in every state counts as naming a file, listed or not.
+
+The files in the directory are the `*.md` files directly inside it, the same
+rule a [register](#the-register) kept as a directory reads by. A file below a
+subdirectory and a file with another extension are left alone. Paths compare
+as POSIX paths, so `./sketches/a.md` and `sketches/a.md` name one file, and
+`sketches/` and `sketches` are one directory.
+
+Neither report refuses anything, for the reason
+[dependencies](#dependencies) gives. A wrong path is a fact to report, and
+refusing the listing over one item would hide every other item.
+
+Two shapes refuse when the declaration loads, at every invocation:
+
+* **a directory that does not exist**, or a file where the directory should
+  be. A typo there would report every value as missing and no file as
+  orphaned, which buries the typo among findings that look real. Create the
+  directory, empty if nothing has been written there yet.
+* **two keys naming one directory**. A file one key names would read as
+  orphaned under the other, and an orphan would stop meaning one thing. The
+  refusal names both keys.
+
+`directory` must be a non-empty string, and a key without one is not asked
+about paths at all.
+
 ### the lock
 
 Every transition that writes holds one exclusive lock, `local/.plan.lock`, for
@@ -476,6 +525,27 @@ to two sessions. The tool occasionally says a claim is held when it is not,
 and releasing the claim is the fix. Closing the hole would cost a second identifier on
 every record, or a process start-time check that needs a subprocess this tool
 does not take.
+
+**A claim stays on the host that took it.** `local/` is not committed, so a
+second clone of the tree sees no claims at all. Committing the claim records
+would make that worse. The liveness probe answers only on the host that wrote
+a record, so every other clone would read a committed claim as held
+elsewhere, and [`release`](#release) refuses a claim taken on another host. A
+crashed session on one machine would then block every other machine, and
+nobody there could tell whether the session was dead. Every pick and every
+release would also cost a commit, in every tree, for a case only a tree
+worked from several machines has.
+
+**What crosses clones is the commit.** A head key the claiming transition
+sets is committed with the item. In this repo, `work` sets the `sub-phase`
+cursor and `sub-phase-status = "planned"`, so a clone that pulls sees which
+sub-phase is taken and how far it has got. Where several machines work one
+tree, pull before picking an item up, then commit and push the claiming
+transition before the work starts. When git refuses the push as not a fast
+forward, somebody else got there first: pull, and read the listing again
+before going on. A clone that has not pulled still sees the item as free,
+because [a missing record means unclaimed](#the-claimed-state), and the
+refused push is what catches the collision.
 
 ### the claimed state
 
@@ -933,6 +1003,13 @@ tree, and narrowed by no filter. These are the reports:
   edit lands here. Each record carries the item's `slug`, the `key`, the
   `value` and the `path`, one per entry of a list. It gates nothing, for the
   reason [dependencies](#dependencies) gives.
+* `missing` is a value of a key declaring a [`directory`](#directory) that
+  names no file in that directory. Each record carries the item's `slug`, the
+  `key`, the `value`, the item's `path` and the `directory`, one per entry of
+  a list.
+* `orphaned` is a file in a key's [`directory`](#directory) that no item
+  names in that key. Each record carries the `key`, the `directory` and the
+  file's `path`, so `path` is what an editor opens.
 * `unread` is a bullet the reader passes over that was plainly meant as a
   sub-phase. [Sub-phases](#sub-phases) says which two cases it names. Each
   record carries `item`, `name`, `line`, `path` and a `reason`. The `name` is
@@ -966,6 +1043,8 @@ present whenever the declaration could fill it and absent otherwise:
 * `unmarkable` is present wherever a command marks.
 * `unread` is present wherever a state counts sub-phases.
 * `undeclared` is present wherever a key declares its values.
+* `missing` is present wherever a key declares a directory.
+* `orphaned` is present wherever a key declares a directory.
 * `unfound` is present wherever a command [files](#filing) an item.
 * `unsorted` is present wherever the read sorts anything: `--sort` was given,
   or a state declares a `sort`. It names each row the read put last for
@@ -1220,6 +1299,9 @@ a bullet record from a row off the envelope. The record carries the same facts
 the verbatim lines carry, not more. `title`, `mark` and `text` are extracted
 *from* the lines a person reads. The three extracted fields are shaped for the
 audience that would otherwise re-parse the bold.
+
+[`annotate`](#annotate) is the write that pairs with this read: it writes the
+continuation that `show ITEM NAME` prints.
 
 A bullet read is `show` narrowed one step further. A
 [mark-bullet](#commands)'s subject is a bullet, so a bullet is already a
@@ -1485,7 +1567,7 @@ help = "Write the next sub-phase into a section."
 from = "plan"
 ```
 
-There are nine kinds, and the kind decides which other fields the
+There are ten kinds, and the kind decides which other fields the
 transition takes. A field the kind does not take refuses by name, and the
 refusal lists the fields the kind does take.
 
@@ -1499,7 +1581,8 @@ refusal lists the fields the kind does take.
 | `close` | takes the item's file away | `from` only | `archives` |
 | `merge` | takes the item away into a survivor | `from` only | none |
 | `add-bullet` | writes the next bullet into the item's body | `from` only | `sets` |
-| `mark-bullet` | writes a word onto one bullet | `from` only | `marks`, `sets`, `drops`, `files` |
+| `mark-bullet` | writes a word onto one bullet | `from` only | `marks`, `sets`, `drops`, `files`, `merges` |
+| `write-bullet` | writes text under one bullet | `from` only | none |
 
 Every kind that starts from an item also takes `requires` and `refuses`, and
 every kind takes `doc` and `help`. A transition with no `help` gets one from
@@ -1987,9 +2070,11 @@ archive      = "docs/plan-archive.md"
 ```
 
 A `numbered` state with no `archive` refuses. An `archive` on a state that
-mints nothing refuses too, since nothing would read it. The named file must
-**exist**, checked at every invocation like a `doc =` pointer. An *empty* file
-is the legitimate case: a repo that has closed nothing.
+mints nothing refuses too, since nothing would read it. The named path must
+**exist**, checked at every invocation like a `doc =` pointer. It may be a
+file or a directory, and the directory form is described further down. An
+*empty* file or directory is the legitimate case: a repo that has
+closed nothing.
 
 **A register may declare where it begins.** `first-number` is the first number
 the state may hold, **inclusive**, and it defaults to 1:
@@ -2110,7 +2195,48 @@ apart.
 **Recording an item and deleting it are two different choices.** A move
 that sets an item aside records it and moves the file. A close records it and
 takes the file away. `archives` is the recording alone, an option on a
-`move` or a `close`, and the deletion is the close's kind.
+`move` or a `close`, and the deletion is the close's kind. Every transition
+that archives takes `--record`, the prose that goes under the heading. A
+close requires `--record`, and a move does not ([dissolving](#dissolving)
+says why).
+
+**An archive may be a directory, with one file per entry.** What is on disk
+decides the form. There is no extra field to declare it.
+
+```toml
+[states.plan]
+capabilities = ["queued", "claimed", "numbered"]
+archive      = "docs/plan-archive"
+```
+
+The directory form exists for **several sessions sharing one working tree**.
+With a single archive file, two close-outs at once both write and commit that
+one file, and they collide. With a directory, the two close-outs write two
+different files.
+
+An entry is filed as **`<number>-<slug>.md`**, such as `37-a-worked-example.md`.
+The number keeps the file findable by what the register calls it. The slug
+makes a directory listing readable. The file holds exactly what an entry in a
+single archive file holds: `## <number>. <title>`, a blank line, then the
+record. Filing writes that one new file and touches no other file in the
+directory.
+
+The register reads **every `*.md` directly inside the directory**. It does not
+read subdirectories, and it ignores other extensions, so a `.gitkeep` is fine.
+Each file is read the way a single archive file is read, so the numbering, the
+gaps and the register's own record come out the same in either form. A lost
+close-out names the entry file and its line.
+
+**A `.md` file there with no readable heading is a lost close-out**, named at
+line 1. The file *is* the entry, so a file the register cannot number from has
+dropped its number, the same as a `##` the parse cannot read. A stray
+`README.md` in the directory is therefore reported rather than skipped. A file
+holding two readable headings is read as two entries, as in a single file.
+
+Two refusals guard the write, and both run before anything is written. A
+number another entry file already holds refuses, naming both files. And a file
+already at the entry's name refuses: it holds some other number, and writing
+over it would drop that number.
 
 **The item is written first and the entry second**, which is
 [the claim record](#the-claimed-state)'s order. A crash between the two leaves
@@ -2235,6 +2361,16 @@ the clearing's job. The notice warns and never rewrites. Rewriting would be
 the tool editing what a person wrote. The exit stays 0. A `--check` prints no
 such line, because the check says what the run would do.
 
+**The listing does not report a slug cited in prose** (John, 2026-10-18). A
+consumer asked for that report, and for the citations to be repointed when a
+merge or a [retitle](#retitle) takes a slug away. Prose has no citation form, so the
+listing cannot tell a slug from an ordinary word that happens to match one.
+Nothing stores the slug of an item that has closed, so a later read cannot know
+that a slug is gone. The run that takes the item away is the one moment the
+tool does know, and that run prints the line above. A workflow that cites in a
+fixed form can check its citations with its own script. Rewriting the
+citations stays no, for the reason the notice gives.
+
 The stderr lines come in the order the run works. The archive entry comes
 first, then the edges, then the prose, then one line per item removed.
 
@@ -2311,9 +2447,15 @@ it, plus a deleted item, is the lost close-out
 [the register](#the-register) exists to prevent. A forgotten record has to
 fail at the one moment it can still be supplied. The refusal is click's,
 followed by one line saying what a record is: the entry filed under the
-item's number in the archive, what it decided and what it shipped. [`decline`](#decline) gains
-no such option and still mints an empty heading, because its item survives in
-[`abandoned`](#abandoned) to be written from.
+item's number in the archive, what it decided and what it shipped.
+
+**A move that archives takes `--record` too, and there it is optional.** The
+moved item survives in its new state, so mint-then-fill still works.
+[`decline`](#decline) given `--record` files the heading with the prose under
+it in one run. Without `--record`, `decline` mints the heading alone, exactly
+as it did before the option existed, and the prose is written under it by
+hand. A move can declare `sets`, so a key called `record` there refuses **by
+name**, which is [the check](#the-check)'s rule.
 
 **What the run prints.** stdout is the **archive document** when the
 transition archives. The run returns the file it wrote, and the item's own
@@ -2671,7 +2813,8 @@ from = "plan"
 ```
 
 A state says its items' bodies *may* be written. A transition says *this* is
-the one that writes them. [The claim](#the-claimed-state) is declared in two
+the one that writes them. A [merge](#merge) into an item in a `bulleted`
+state mints too, one sub-phase per absorbed idea. [The claim](#the-claimed-state) is declared in two
 halves too. Coupling the two to arrival would put `--title` on every
 transition into the state, and any of them could cut a section up on a run
 about something else. Either half alone refuses by name.
@@ -2728,18 +2871,35 @@ bullet, graded at load through the same reader that has to find it again. The
 bullet's name is `pending` in this repo, and that is what a cursor points at
 when a session reaches it.
 
-`decompose` takes `--title`, `--last`, both or neither:
+`decompose` takes `--title`, `--last`, both or neither, and `--after` beside
+`--title`:
 
 ```
 fileplan decompose exits                            # open the decomposition
 fileplan decompose exits --title "The register"     # write one sub-phase
 fileplan decompose exits --title "Close-out" --last # write the last, and close
 fileplan decompose exits --last                     # close, writing nothing
+fileplan decompose exits --title "Numbering" --after 4-2  # write one after 4-2
 ```
 
 Three steps are applied in this order to the body. **Drop** the pending bullet
 if it is there. **Append** the new sub-phase, if `--title` was given.
 **Append** the pending bullet unless `--last` was.
+
+**`--after NAME` puts the new sub-phase directly after the bullet NAME**,
+below every line that bullet owns, instead of at the end of the list. It is
+how a sub-phase is split where it stands. The pending bullet still goes at
+the end. `--after` needs `--title`, since without one there is nothing to
+place, and it refuses alone. NAME may be marked: new work after a finished
+sub-phase is the ordinary case. A name the body has not got refuses in the
+words [`show`](#show) uses, and the pending bullet is not a name here either.
+
+**Only the place changes, not the name.** `--after 4-2` in a body that holds
+`4-5` writes `4-6`, and puts it between `4-2` and `4-3`. The name is still
+the next free ordinal, because a name is an identity, not a position. The
+order of the list was never meaningful. A letter suffix such as `4-2a` would
+be a second naming rule, and it could collide with a name somebody split by
+hand.
 
 **A bare run on a section that is already open changes nothing.** It drops
 the pending bullet and puts the same bullet back, so the file is left byte for
@@ -2773,6 +2933,25 @@ nobody asked for should be loud.
 
 A title carrying `**`, a lone `*` or a newline refuses and writes nothing.
 Each would break the strict form the mint is there to write.
+
+**A `write-bullet` writes under one bullet.** A mint writes a bullet's own
+line, and a mark writes onto the end of it. A `write-bullet` writes the lines
+under it: its continuation, which is what [`show ITEM NAME`](#show) reads
+back. The tool indents every line, so the text lines up under the bullet's
+own. An indented line is [never counted](#sub-phases), so ordinary text
+cannot add a bullet. The text goes after what the bullet already holds, or
+replaces it with `--replace`. The bullet's own line is never touched, so its
+mark and the cursor naming it stay where they were.
+
+**A write that would change what the reader counts refuses before it writes a
+byte.** The run works out the new body first and compares the bullets in it
+with the bullets in the old one: how many there are, and each one's line. Only
+a fence can make them differ. An odd number of fence lines in the text hides
+every line after them, so a bullet below would vanish, or the fence would never
+close. The refusal says which. A `write-bullet` from a state that is not
+`bulleted` refuses at load by name, as a mark does. It is not the second half
+of the capability: a `bulleted` state still needs an add-bullet.
+[`annotate`](#annotate) is this repo's.
 
 `bulleted` gives an item **no head key**. What it writes is the body, which is
 the workflow's prose rather than a line the tool keeps. So there is nothing to
@@ -2881,12 +3060,13 @@ fileplan dismiss cache-misses f1 --note "Nobody has measured it."
 The note is outside the run the mark is read from, so nothing derived moves.
 The name, the title, the mark and the count are what they were. And a
 [filing](#filing) disposition's default title is still the bullet's own text.
-The note is **optional**, unlike `--record` and `--into`, because a
+The note is **optional**, unlike `--into` and a close's `--record`, because a
 disposition with no reason is the ordinary case. A required one would make
 eight runs over a carrier type eight sentences to say nothing. A declared key
 called `note` refuses **by name**, which is [the check](#the-check)'s rule. A
-marking transition may declare `sets` freely, so this is the one of the three
-that can collide.
+marking transition may declare `sets` freely, and so may a move that
+archives. So `--note` and a move's `--record` are the two options that can
+collide with a key.
 
 Three notes refuse, and for two different reasons rather than one stated three
 times. **Empty** says a finding was disposed of for a reason and does not give
@@ -2910,6 +3090,44 @@ Before the run writes any of it, [`--check`](#the-check) says which bullet,
 which word, and whether there is a note. The check says the note's presence,
 never its content, which is a sentence the operator typed a moment ago. All
 three refusals above happen before that first write.
+
+**A disposition can fold its bullet into another.** `merges = true` is a
+second rider on `marks`, as [`files`](#filing) is the first, and the two
+never sit on one transition. A disposition does one second write, not two. A
+folding run takes `--into NAME`, which is required. NAME is the survivor,
+another bullet of the same item. The run does three things:
+
+- it marks the bullet with the transition's word, as any mark does;
+- it writes the note `Into NAME.`, followed by `--note` when one is given;
+- it moves the bullet's continuation under the survivor, so the text has one
+  copy. The moved lines are headed `*From 4-3 — Its title:*`.
+
+```
+- **4-2 — Parse the head**
+  What 4-2 said before.
+  *From 4-3 — Parse the body:*
+  What 4-3 said.
+- **4-3 — Parse the body** **merged** Into 4-2.
+```
+
+**The folded bullet is marked, not deleted.** A name never disappears, so no
+cursor, no `carried` and no `opened-in` is left naming nothing, and the
+[close check](#the-close-check) is satisfied as for any mark. The heading line
+over the moved prose is the tool's own, with no workflow word in it, as a
+[merge](#merge)'s `### <title>` heading has none.
+
+A fold refuses, writing nothing, on a bullet that is already marked, as every
+disposition does. It also refuses on a survivor the body has not got (the
+pending bullet included), on the bullet itself as its own survivor, and on a
+marked survivor: prose moved under a finished sub-phase is work nobody will
+pick up. Last, it refuses on a move that would change the bullets the reader
+counts, as [a `write-bullet`](#bulleted) does. Each moved line gives up one
+indent and the writer adds it back. So prose lines up as it did, and a fenced
+line at column zero gains the indent.
+
+At load, `merges` must be true or false, it is refused beside `files`, and it
+is refused on any kind but a mark-bullet. A declared key called `into`
+refuses by name, as one called `note` does. [`fold`](#fold) is this repo's.
 
 `marks` gives an item **no head key**, like [bulleted](#bulleted): what it
 writes is the body.
@@ -3309,8 +3527,15 @@ fileplan decompose sub-phases --title "Close-out" --last
 fileplan decompose sub-phases --last
 ```
 
-It is an `add-bullet`. That [kind](#kinds) is what gives it `--title` and
-`--last`, and what keeps them off [`queue`](#queue), [`requeue`](#requeue)
+`--after NAME` writes the new sub-phase directly after NAME rather than at the
+end, and still names it with the next free ordinal:
+
+```
+fileplan decompose sub-phases --title "Split from 3" --after 9-3
+```
+
+It is an `add-bullet`. That [kind](#kinds) is what gives it `--title`,
+`--last` and `--after`, and what keeps them off [`queue`](#queue), [`requeue`](#requeue)
 and [`work`](#work). See [bulleted](#bulleted) for the naming, the ordinal, the
 pending bullet and the re-open.
 
@@ -3373,6 +3598,66 @@ which a session reaches for. That judgment is the session's, and `--note` is
 where its reason goes. A sub-phase is disposed of once, so a bullet already
 carrying either word refuses [by name](#marking).
 
+### annotate
+
+Write under a sub-phase: what was planned, what was decided in building, or
+what was found. It is a `write-bullet`, so its subject is one bullet, named
+as [`finish`](#finish) names one:
+
+```
+fileplan annotate out-of-order 12-1 --text - < decided.md
+fileplan annotate out-of-order 12-1 --text "One more line."
+fileplan annotate out-of-order 12-1 --text - --replace < plan.md
+```
+
+`--text` is required, and `-` reads it from stdin. Without `--replace` the
+text goes after the lines already under the bullet. With `--replace` it takes
+their place. Forget `--replace` and the run appends, which leaves a visible
+duplicate and loses nothing. That is the polarity a forgotten flag should fail
+in. The tool indents each line, and a blank line stays empty. A replace that
+writes back what was there leaves the file unchanged, and says so.
+
+It leaves the bullet's own line alone: its name, its title, its mark and its
+note. So a marked bullet takes a write too. This repo writes a sub-phase's
+*Decided in building* record at the same moment it marks the bullet. It takes
+**no claim**, as [`finish`](#finish) does not, and a section somebody else
+holds refuses before anything is written.
+
+It refuses, writing nothing, on a name the body has not got (in the words
+[`show`](#show) uses), on empty text, and on text that would change the
+bullets the reader counts ([bulleted](#bulleted)). `--check` says which bullet
+and how many lines, never the text: `append 3 lines under 12-1`, or `replace
+12 lines under 12-1 with 3`.
+
+What a session does around it is [planning and working a
+sub-phase](procedures.md#planning-and-working-a-sub-phase).
+
+### fold
+
+Fold one sub-phase into another. It marks the first `merged`, and moves its
+prose under the second, which it names with `--into`:
+
+```
+fileplan fold out-of-order 12-4 --into 12-3
+fileplan fold out-of-order 12-4 --into 12-3 --note "One seam, not two."
+```
+
+It is a mark-bullet that [merges](#marking). The folded bullet keeps its name
+and gains `**merged** Into 12-3.`, so anything naming it still finds it. Its
+continuation goes after everything 12-3 already holds, headed `*From 12-4 —
+Its title:*`. [The cursor](#the-cursor) goes to 12-3, not to the bullet
+marked, because 12-3 is where the work continues. It takes the status key off
+the head, as [`finish`](#finish) and [`skip`](#skip) do.
+
+Both bullets must be unmarked, and they must be two. A section offers `fold`
+only while it carries two unmarked bullets. It takes **no claim**.
+`--check` gives counts, never the text: `mark 12-4 "merged" with a note, and
+move 3 lines under 12-3`. To split a sub-phase instead, see
+[`decompose`](#decompose)'s `--after`.
+
+What a session does around it is [decomposing a
+section](procedures.md#decomposing-a-section).
+
 ### decline
 
 Set a section aside: we chose not to do it. It moves the item out of
@@ -3381,15 +3666,19 @@ the section's [archive entry](#the-register)**. The two are one run, because
 the number the entry is filed under is dropped by the move.
 
 ```
-fileplan decline a-worked-example
+fileplan decline a-worked-example --record - <<'END'
+Why the section was set aside, and how far it got.
+END
 ```
 
-The entry is minted and left empty. The heading goes in at its place in the
-register, and the prose under it is the session's to write. Minting before
-filling, as [`decompose`](#decompose) does, is safe here only because
-`decline` **moves** the item rather than deleting it. Everything the record is
-written from is still readable in `abandoned/`. A transition that dissolved
-the item could not fill in afterwards from something that had gone.
+`--record` files the entry with its prose in one run, and `--record -` reads
+the prose from stdin. Without `--record` the heading is minted alone, at its
+place in the register, and the prose under it is the session's to write by
+hand. Minting before filling, as [`decompose`](#decompose) does, is safe here
+only because `decline` **moves** the item rather than deleting it. Everything
+the record is written from is still readable in `abandoned/`. A transition
+that dissolved the item could not fill in afterwards from something that had
+gone, which is why [`archive-plan`](#archive-plan) requires `--record`.
 
 It takes **no claim**, like [`decompose`](#decompose). The ownership check
 still runs: a section somebody else is holding refuses before either file is
@@ -3521,13 +3810,50 @@ hole in the register. Taking the file away without archiving is what lets
 this transition be declared at all.
 
 **A merge keeps the absorbed text.** Each absorbed body is appended to the
-end of the survivor's body, in the order the ideas were named. Each goes
-under a `### <its title>` heading, with blank lines trimmed from either end.
-The survivor's head is not touched, and nothing else records what was
-absorbed: every reference now points at the survivor, and the text is in its
-body. Absorbed ideas are often the specification, as when several small
-fixes become one section, and losing their text would mean composing the
-survivor's body by hand first.
+survivor's body, in the order the ideas were named, with blank lines trimmed
+from either end. Where each body goes depends on the survivor's state.
+
+**Into a section whose state is [`bulleted`](#bulleted), each idea becomes a
+sub-phase.** The bullet is named by the next free ordinal and titled by the
+idea's title, and the idea's body is the bullet's prose, indented under it.
+Merging two ideas into a section whose last sub-phase is `37-6` adds these
+two bullets ahead of the pending bullet:
+
+```
+- **37-7 — Scratch one**
+  One.
+- **37-8 — Scratch two**
+  Two.
+```
+
+**The bullet is the record of what was absorbed.** A section keeps each unit
+of its work as a sub-phase, so the idea arrives where the section's other
+work already is. Every bullet transition works on it at once:
+[`annotate`](#annotate) writes under it, [`fold`](#fold) moves its prose under
+another bullet, and [`finish`](#finish) or [`skip`](#skip) closes it. Without
+this, the section's body has to be rewritten by hand to turn each `###`
+block into a bullet, and the commit message is the only list of what went
+in.
+
+A section with no sub-phases heading gets one, with the pending bullet. A
+section whose decomposition was finished is **re-opened**: the pending bullet
+comes back, and the run says so on stderr. The section now holds work that
+nobody has planned, and the pending bullet is what asks for another look.
+
+**Anywhere else, each idea goes under a `### <its title>` heading.** An idea
+merged into another idea is the usual case.
+
+The survivor's head is not touched, the cursor included, and nothing else
+records what was absorbed: every reference now points at the survivor, and
+the text is in its body. Absorbed ideas are often the specification, as when
+several small fixes become one section, and losing their text would mean
+composing the survivor's body by hand first.
+
+**There is no split transition.** Once an absorbed idea is a bullet, filing
+it back out as an item is what the [`files`](#filing) rider on a marking
+transition already does. A split transition would be new machinery for a
+case the rider covers. This repo's `plan` declares no such filing
+transition, because no section here has needed one.
 
 **This is not a second copy.** The absorbed file is deleted in the same run,
 so only one copy of the text remains. The fact has moved house rather than
@@ -3537,10 +3863,25 @@ merge does, and a plan.toml still declaring `carries` refuses by name.
 
 A merge has two refusals of its own beside the ones every run has, and both
 come before any write. The first is a composed body that its state's
-[sub-phase](#sub-phases) check refuses. Carrying a second `Sub-phases`
-heading into a section would otherwise break the next listing. The second is
-a survivor another session holds, because a merge writes prose into a body
+[sub-phase](#sub-phases) check refuses. A second `Sub-phases` heading carried
+in under `###` would otherwise break the next listing. The second is a
+survivor another session holds, because a merge writes prose into a body
 that session may be rewriting. Have the claim released to get past it.
+
+A merge into a `bulleted` section has three more, also before any write, and
+one refusing idea stops the whole run:
+
+- **An idea whose title the bullet cannot carry.** A title holding `**`, a
+  lone `*` or a newline would break the bold run that names the bullet. The
+  refusal names the idea.
+- **A section missing a field its `sub-phase-name` needs.** The bullet would
+  have no name. The refusal names the field.
+- **An idea whose body would change the bullets the section reads.** The
+  body is indented, so only a fence can do that: a fence the idea opens and
+  never closes hides every bullet after it.
+
+An idea that brings its own `Sub-phases` heading is not refused here,
+because the indented heading is prose under the bullet.
 
 It takes **no claim**, like [`decline`](#decline) and
 [`archive-plan`](#archive-plan). The ownership check runs on the idea being

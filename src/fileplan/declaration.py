@@ -16,7 +16,7 @@ import re
 import tomllib
 from dataclasses import dataclass
 from importlib.metadata import version
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Callable, Iterable, Iterator, Mapping, NamedTuple
 
@@ -126,6 +126,10 @@ LISTED = "listed"
 #: See docs/method.md#list-valued
 LIST_VALUED = "list-valued"
 
+#: The key field naming the directory a key's values are files in.
+#: See docs/method.md#directory
+DIRECTORY = "directory"
+
 #: Every field where the tool writes or reads exactly one value of a declared
 #: key. `dependencies` is left out: `fileplan.depends` reads a bare string as
 #: one edge and a list as many.
@@ -150,17 +154,18 @@ STATE_FIELDS = frozenset(
         LISTED,
     }
 )
-KEY_FIELDS = frozenset({"doc", "help", "values", LIST_VALUED})
+KEY_FIELDS = frozenset({"doc", "help", "values", LIST_VALUED, DIRECTORY})
 
 #: The fields every transition takes, whatever its kind.
 TRANSITION_FIELDS = frozenset({"kind", "doc", "help"})
 
-#: The nine kinds' names, each spelled once. Everything that asks what a
+#: The ten kinds' names, each spelled once. Everything that asks what a
 #: transition does asks its kind by one of these. See docs/method.md#kinds
 CREATE, MOVE, REORDER, EDIT, RENAME = "create", "move", "reorder", "edit", "rename"
 CLOSE, MERGE, ADD_BULLET, MARK_BULLET = "close", "merge", "add-bullet", "mark-bullet"
+WRITE_BULLET = "write-bullet"
 
-#: The nine kinds a transition can be, and the fields each takes beside
+#: The ten kinds a transition can be, and the fields each takes beside
 #: `TRANSITION_FIELDS`. One table, so what a kind allows is read here and
 #: nowhere else, and a field its kind does not take refuses by name.
 #: `from` and `to` are in it too: a create has no `from`, a move has both,
@@ -190,8 +195,18 @@ KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         MERGE: frozenset({"from", "requires", "refuses"}),
         ADD_BULLET: frozenset({"from", "requires", "refuses", "sets"}),
         MARK_BULLET: frozenset(
-            {"from", "requires", "refuses", "marks", "sets", "drops", "files"}
+            {
+                "from",
+                "requires",
+                "refuses",
+                "marks",
+                "sets",
+                "drops",
+                "files",
+                "merges",
+            }
         ),
+        WRITE_BULLET: frozenset({"from", "requires", "refuses"}),
     }
 )
 
@@ -219,6 +234,7 @@ KIND_HELP: Mapping[str, str] = MappingProxyType(
         MERGE: "Merge an item in {from} into another item.",
         ADD_BULLET: "Write the next bullet into an item in {from}.",
         MARK_BULLET: "Mark a bullet of an item in {from} {marks}.",
+        WRITE_BULLET: "Write under a bullet of an item in {from}.",
     }
 )
 
@@ -507,6 +523,9 @@ class Key:
     #: Whether the head carries several of them. A different question from
     #: `values`, which is the set one of them may come from.
     list_valued: bool = False
+    #: The repo-relative directory each value names a file directly inside,
+    #: or `None` where the values are not paths. See docs/method.md#directory
+    directory: str | None = None
 
 
 @dataclass(frozen=True)
@@ -564,6 +583,12 @@ class Transition:
     #: the verb's, not a state's, because only the writer needs to know. Only a
     #: mark-bullet takes one. Default `None`. See docs/method.md#filing
     files: Mapping[str, Any] | None = None
+    #: Whether running this verb folds the bullet it marks into another: the
+    #: marked bullet's prose moves under the bullet `--into` names, and the
+    #: cursor goes there. A rider on `marks`, as `files` is, and never beside
+    #: it: a disposition does one second write. Only a mark-bullet takes it.
+    #: Default `False`. See docs/method.md#marking
+    merges: bool = False
     #: Whether running this verb files the item's archive entry: the number and
     #: title it carried, written into the document its source state's `archive`
     #: names. A different half from the deletion, so a verb that wants both says
@@ -580,8 +605,9 @@ class Transition:
     @property
     def records(self) -> bool:
         """Whether this run files a record and takes the file away: a close
-        that `archives`. The one shape that takes `--record`, and the one the
-        close and dangle checks guard. See docs/method.md#dissolving"""
+        that `archives`. The shape that requires `--record`, which every verb
+        that archives takes, and the one the close and dangle checks guard.
+        See docs/method.md#dissolving"""
         return self.kind == CLOSE and self.archives
 
     @property
@@ -866,7 +892,9 @@ def shape_errors(document: Mapping[str, Any]) -> list[str]:
         errors += _claim_errors(tables["states"], landed)
         errors += _mint_errors(tables["states"], landed)
         errors += _mark_errors(tables["states"], landed)
+        errors += _write_errors(tables["states"], landed)
         errors += _filing_errors(corpus)
+        errors += _merge_errors(landed)
         errors += _archiving_errors(tables["states"], landed)
     errors += _single_value_errors(
         tables["states"], tables["transitions"], corpus.list_valued
@@ -1003,6 +1031,56 @@ def _mark_errors(
         if len(named) > 1
     ]
     return errors
+
+
+def _write_errors(
+    states: Mapping[str, Any], transitions: Mapping[str, Any]
+) -> list[str]:
+    """A write-bullet graded against the state whose body it writes into.
+
+    One rule, `_mark_errors`' first in its words: the state must name
+    `BULLETED`, because that is what declares the heading the bullets live
+    under. It is not the second half of the capability: a `bulleted` state
+    still needs an add-bullet, which `_mint_errors` asks.
+    See docs/method.md#bulleted
+    """
+    errors: list[str] = []
+    for name, entry in transitions.items():
+        if not isinstance(entry, dict) or entry.get("kind") != WRITE_BULLET:
+            continue
+        to = entry.get("to")
+        if not isinstance(to, str) or not isinstance(states.get(to), dict):
+            # An undeclared `from` is one complaint, already made.
+            continue
+        if BULLETED not in _declared_capabilities(states[to]):
+            errors.append(
+                f"transitions.{name} is a write-bullet, and states.{to} does "
+                f'not name "{BULLETED}" in its capabilities. Text goes under a '
+                f"bullet, and states.{to} is what declares the heading those "
+                f'bullets live under. Name "{BULLETED}" in '
+                f"states.{to}.capabilities, or give {name} another kind"
+            )
+    return errors
+
+
+def _merge_errors(transitions: Mapping[str, Any]) -> list[str]:
+    """`merges` graded as a rider on `marks`, beside the other one.
+
+    One rule here: `merges` beside `files`, because each is a second write a
+    disposition does, and a disposition does one. A `merges` that is not a
+    boolean, and one on a kind that is not a mark-bullet, are complaints the
+    field checks and the kind table already make. See docs/method.md#marking
+    """
+    return [
+        f"transitions.{name} declares both merges and files. Each is the second "
+        "write a disposition does: one moves the bullet's prose under another "
+        "bullet, the other files it as an item of its own. A disposition does "
+        f"one of them. Drop merges or files from {name}"
+        for name, entry in transitions.items()
+        if isinstance(entry, dict)
+        and entry.get("merges") is True
+        and "files" in entry
+    ]
 
 
 def _filing_errors(corpus: _Corpus) -> list[str]:
@@ -2003,6 +2081,11 @@ def _key_errors(
         if LIST_VALUED in entry and not isinstance(entry[LIST_VALUED], bool):
             errors.append(f"{where}.{LIST_VALUED} must be true or false")
 
+        if DIRECTORY in entry and not (
+            isinstance(entry[DIRECTORY], str) and entry[DIRECTORY].strip()
+        ):
+            errors.append(f"{where}.{DIRECTORY} must be a non-empty string")
+
         if "values" in entry:
             if not _is_string_list(entry["values"]):
                 # The arm in `_transition_errors` that would check `refuses`
@@ -2083,7 +2166,7 @@ def _transition_errors(corpus: _Corpus) -> list[str]:
         # truthy too.
         errors += [
             f"{where}.{field} must be true or false"
-            for field in ("claims", "archives")
+            for field in ("claims", "archives", "merges")
             if field in entry and not isinstance(entry[field], bool)
         ]
 
@@ -2435,6 +2518,7 @@ def pointer_errors(document: Mapping[str, Any], root: Path) -> list[str]:
     a repo that has closed nothing.
     """
     errors: list[str] = _archive_pointer_errors(document, root)
+    errors += _directory_pointer_errors(document, root)
     headings: dict[Path, set[str] | None] = {}
 
     for where, pointer in _pointers(document):
@@ -2467,13 +2551,45 @@ def _archive_pointer_errors(document: Mapping[str, Any], root: Path) -> list[str
     return [
         f"states.{name}.{ARCHIVE} names {entry[ARCHIVE]}, "
         "which does not exist. A register that cannot read the archive would "
-        "mint a number some closed item already holds. Create the file, empty "
-        "if this repo has closed nothing"
+        "mint a number some closed item already holds. Create the file or "
+        "the directory, empty if this repo has closed nothing"
         for name, entry in states.items()
         if isinstance(entry, dict)
         and isinstance(entry.get(ARCHIVE), str)
-        and not (root / entry[ARCHIVE]).is_file()
+        and not (root / entry[ARCHIVE]).exists()
     ]
+
+
+def _directory_pointer_errors(document: Mapping[str, Any], root: Path) -> list[str]:
+    """Every key `directory` the tree does not hold as a directory, and every
+    directory two keys name.
+
+    Paths compare as `PurePosixPath`, so a trailing slash names the same
+    directory. See docs/method.md#directory
+    """
+    errors: list[str] = []
+    claimed: dict[PurePosixPath, str] = {}
+    for name, entry in document.get("keys", {}).items():
+        if not isinstance(entry, dict) or not isinstance(entry.get(DIRECTORY), str):
+            continue
+        where = f"keys.{name}.{DIRECTORY}"
+        directory = PurePosixPath(entry[DIRECTORY])
+        if not (root / directory).is_dir():
+            errors.append(
+                f"{where} names {entry[DIRECTORY]}, which is not a directory. "
+                "A key whose directory is missing would report every value as "
+                "naming no file. Create the directory, empty if nothing has "
+                "been written there yet"
+            )
+        if directory in claimed:
+            errors.append(
+                f"{where} names {directory}, which keys.{claimed[directory]}"
+                f".{DIRECTORY} names too. A file one key names would read as "
+                "orphaned under the other. Give each key a directory of its own"
+            )
+        else:
+            claimed[directory] = name
+    return errors
 
 
 def _pointers(document: Mapping[str, Any]) -> list[tuple[str, str]]:
@@ -2673,6 +2789,7 @@ def _keys(entries: Mapping[str, Any]) -> dict[str, Key]:
             help=entry.get("help"),
             values=tuple(entry["values"]) if "values" in entry else None,
             list_valued=bool(entry.get(LIST_VALUED, False)),
+            directory=entry.get(DIRECTORY),
         )
         for name, entry in entries.items()
     }
@@ -2704,6 +2821,7 @@ def _transitions(entries: Mapping[str, Any]) -> dict[str, Transition]:
             claims=bool(entry.get("claims", False)),
             marks=entry.get("marks"),
             files=entry.get("files"),
+            merges=bool(entry.get("merges", False)),
             archives=bool(entry.get("archives", False)),
         )
         for name, entry in entries.items()

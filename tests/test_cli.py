@@ -18,12 +18,13 @@ import io
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
 import tokenize
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import click
 import pytest
@@ -42,7 +43,7 @@ from fileplan.cli import (
     RECORD,
     main,
 )
-from fileplan.declaration import KINDS, load
+from fileplan.declaration import CLAIMED, KINDS, load
 from fileplan.item import read as item_read
 
 #: The tool's own option words, built here from the constants that spell
@@ -58,6 +59,7 @@ RESERVED_OPTIONS = (
     *(flag for flag, *_ in PLACEMENT),
     *(flag for flag, *_ in MINTING),
     *(flag for flag, *_ in FILING),
+    *(flag for flag, *_ in cli.WRITING),
 )
 
 # Sibling test modules, not a package: `tests/` is on `sys.path` at
@@ -408,6 +410,129 @@ def test_a_hand_edited_value_its_key_does_not_declare_is_named(
             "path": "orchard/a-seedling.md",
         }
     ]
+
+
+# --------------------------------------------------------------------------
+# `directory`: the `missing` and `orphaned` reports. See docs/method.md#directory
+# --------------------------------------------------------------------------
+
+
+def sketched(tree: Path, *files: str) -> None:
+    """Declare a list-valued `sketch` key whose values are files in
+    `sketches/`, and put `files` there. The shared fixture stays as it is."""
+    plan = tree / "plan.toml"
+    plan.write_text(
+        plan.read_text()
+        + '\n[keys.sketch]\nhelp = "Where the sketches are."\n'
+        + 'directory = "sketches"\nlist-valued = true\n'
+    )
+    (tree / "sketches").mkdir()
+    for name in files:
+        (tree / "sketches" / name).write_text("A sketch.\n")
+
+
+def sketch(path: Path, *values: str) -> None:
+    """Hand-write `sketch = [values]` into the head of the item at `path`."""
+    text = path.read_text(encoding="utf-8")
+    path.write_text(
+        text.replace("+++\n", f"+++\nsketch = {json.dumps(list(values))}\n", 1),
+        encoding="utf-8",
+    )
+
+
+def test_a_value_naming_no_file_in_its_directory_is_missing(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A file that does not exist and a file outside the directory both
+    count. A file inside does not, however it is spelled, and a list is
+    asked entry by entry. Nothing refuses: every item still lists."""
+    sketched(tree, "a.md")
+    (tree / "elsewhere.md").write_text("")
+    filed(tree)
+    sketch(
+        tree / "orchard" / "a-seedling.md",
+        "sketches/a.md",
+        "./sketches/a.md",
+        "sketches/gone.md",
+        "elsewhere.md",
+    )
+    capsys.readouterr()
+
+    assert main(["list", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload["rows"]) == 2
+    assert payload["missing"] == [
+        {
+            "slug": "a-seedling",
+            "key": "sketch",
+            "value": value,
+            "path": "orchard/a-seedling.md",
+            "directory": "sketches",
+        }
+        for value in ("sketches/gone.md", "elsewhere.md")
+    ]
+    assert payload["orphaned"] == []
+
+    assert main(["list"]) == 0
+    assert (
+        'missing file: a-seedling names "sketches/gone.md" in sketch, and '
+        "sketches holds no such file"
+    ) in capsys.readouterr().err
+
+
+def test_a_file_in_the_directory_that_no_item_names_is_orphaned(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An item in an unlisted state still names its file. Another extension
+    and anything below a subdirectory are not the directory's documents."""
+    sketched(tree, "felled.md", "stray.md", "notes.txt")
+    (tree / "sketches" / "deeper").mkdir()
+    (tree / "sketches" / "deeper" / "below.md").write_text("")
+    felled(tree)
+    sketch(tree / "firewood" / "old-tree.md", "sketches/felled.md")
+    capsys.readouterr()
+
+    assert main(["list", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["orphaned"] == [
+        {"key": "sketch", "directory": "sketches", "path": "sketches/stray.md"}
+    ]
+    assert payload["missing"] == []
+
+    assert main(["list"]) == 0
+    assert (
+        "orphaned file: sketches/stray.md is in sketches, and no item names it "
+        "in sketch"
+    ) in capsys.readouterr().err
+
+
+def test_neither_directory_report_narrows_under_a_filter(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sketched(tree, "stray.md")
+    filed(tree)
+    sketch(tree / "orchard" / "a-seedling.md", "sketches/gone.md")
+    capsys.readouterr()
+    assert main(["list", "--state", "greenhouse", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [row["slug"] for row in payload["rows"]] == ["another-seedling"]
+    assert [one["value"] for one in payload["missing"]] == ["sketches/gone.md"]
+    assert [one["path"] for one in payload["orphaned"]] == ["sketches/stray.md"]
+
+
+def test_the_directory_reports_are_in_the_envelope_only_where_a_key_declares_one(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    filed(tree)
+    capsys.readouterr()
+    assert main(["list", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "missing" not in payload and "orphaned" not in payload
+
+    sketched(tree)
+    assert main(["list", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["missing"] == [] and payload["orphaned"] == []
 
 
 def test_the_listing_prints_a_record_per_item(
@@ -898,6 +1023,8 @@ def test_the_toc_indexes_the_kind_each_transition_declares(
         "line-out": "mark-bullet, files",
         "ripen": "mark-bullet",
         "thin": "mark-bullet",
+        "jot": "write-bullet",
+        "graft-together": "mark-bullet, merges",
         "grub-out": "move, archives",
         "fell": "close, archives",
         "compost": "close",
@@ -2677,8 +2804,10 @@ def unnumbered(tree: Path) -> None:
     their `marks` for the same reason the mint goes — a word written onto a
     bullet needs a state that has bullets, so `bulleted` cannot come off
     alone. The verbs themselves stay, as the kinds left to them: `ripen`
-    keeps its drop and becomes an edit, and the two that write nothing else
-    become reorders. `propagator` is left exactly as it is, and that is the
+    keeps its drop and becomes an edit, and the three that write nothing else
+    become reorders, `jot` among them, since text under a bullet needs one.
+    `graft-together` becomes a reorder too, and loses `merges` with its
+    `marks`, since a fold is a rider on a mark. `propagator` is left exactly as it is, and that is the
     point: it is bulleted, it is not numbered, and it goes on minting here.
     """
     plan = (tree / "plan.toml").read_text()
@@ -2704,6 +2833,11 @@ def unnumbered(tree: Path) -> None:
                  'kind  = "reorder"\ndoc   = "method.md#thin"')
         .replace('marks = "ripened"\n', "")
         .replace('marks = "thinned"\n', "")
+        .replace('kind = "write-bullet"\ndoc  = "method.md#jot"',
+                 'kind = "reorder"\ndoc  = "method.md#jot"')
+        .replace('kind   = "mark-bullet"\ndoc    = "method.md#graft-together"',
+                 'kind   = "reorder"\ndoc    = "method.md#graft-together"')
+        .replace('marks  = "grafted"\nmerges = true\n', "")
     )
 
 
@@ -3606,18 +3740,19 @@ def test_this_repo_claims_its_own_work_so_its_listing_carries_the_holder(
     repo adopts the capability, so its own listing gains the two fields and
     the `stranded` report — the fields are still generated by the capability
     rather than by the tool, and this is the same proof read the other way
-    round. The behavioural half stays graded against `tests/fixtures/`."""
+    round. The behavioural half stays graded against `tests/fixtures/`.
+
+    The adoption is read off the declaration, not off the rows, so a tree
+    with nothing in `plan` still grades it rather than skipping: a clone of
+    the published tree, or this one between sections."""
+    declared = load(REPO / "plan.toml")
+    assert declared.states["plan"].has(CLAIMED)
+    assert declared.transitions["work"].claims
     monkeypatch.setenv("FILEPLAN_PLAN_TOML", str(REPO / "plan.toml"))
     monkeypatch.chdir(REPO)
     assert main(["list", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert "stranded" in payload
-    if not payload["rows"]:
-        # Empty is the ordinary shape in a clone of the published tree, which
-        # ships with no items, so the missing haystack is skipped rather than
-        # failed. The tree this suite was written in has its own control that
-        # the rows are there, so the skip cannot go quiet unnoticed.
-        pytest.skip("the listing has no rows, so there is no holder to carry")
     for row in payload["rows"]:
         assert "claimed-by" in row and "claim-status" in row
 
@@ -3749,6 +3884,55 @@ def test_a_claim_another_session_holds_refuses_and_touches_neither_file(
     assert not (tree / "firewood" / "first-tree.md").exists()
 
 
+def test_a_moving_verb_given_a_record_files_it_under_the_heading(
+    tree: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`decline --record -`'s shape: the entry and its prose in one run, from
+    stdin, so the session does not write under an empty heading and commit a
+    second time. The item still moves."""
+    orchard(tree, "First tree")
+    capsys.readouterr()
+    monkeypatch.setattr("sys.stdin", io.StringIO("Set aside.\n\nWhy.\n"))
+
+    assert main(["grub-out", "first-tree", "--record", "-"]) == 0
+    printed = capsys.readouterr()
+    assert "## 2. First tree\n\nSet aside.\n\nWhy.\n" in archived(tree)
+    assert "with the record under it" in printed.err
+    assert (tree / "firewood" / "first-tree.md").exists()
+
+
+def test_a_moving_verb_given_no_record_files_the_heading_as_it_always_did(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """**Byte for byte.** The option is new and optional, so a run without it
+    writes exactly the archive it wrote before the option existed."""
+    orchard(tree, "First tree")
+    document = archived(tree)
+    capsys.readouterr()
+
+    assert main(["grub-out", "first-tree"]) == 0
+    assert archived(tree) == f"{document.rstrip()}\n\n## 2. First tree\n"
+    assert "with nothing under it" in capsys.readouterr().err
+
+
+def test_an_archiving_move_whose_sets_names_record_refuses_by_name(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A close takes no `sets`, so the collision could not happen before a
+    move took `--record`. Now it can, and one option cannot mean two things."""
+    plan = (tree / "plan.toml").read_text().replace(
+        'to       = "firewood"\narchives = true\n',
+        'to       = "firewood"\narchives = true\nsets     = ["record"]\n',
+    )
+    plan += '\n[keys.record]\nhelp = "A clashing key."\n'
+    (tree / "plan.toml").write_text(plan)
+    capsys.readouterr()
+
+    assert main(["grub-out", "--help"]) != 0
+    printed = capsys.readouterr().err
+    assert 'transitions.grub-out.sets names "record"' in printed
+
+
 def test_the_holder_files_it_and_the_claim_is_freed(
     tree: Path, session: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -3762,6 +3946,208 @@ def test_the_holder_files_it_and_the_claim_is_freed(
     assert main(["grub-out", "first-tree"]) == 0
     assert not claim.path(tree, "first-tree").exists()
     assert "## 2. First tree" in archived(tree)
+
+
+# --------------------------------------------------------------------------
+# An archive that is a directory: one file per entry
+# --------------------------------------------------------------------------
+#
+# The same `orchard`, its `archive` pointed at a directory. What is on disk
+# decides the form, so nothing else in the declaration changes.
+
+ENTRIES = "orchard-archive"
+
+
+def as_directory(tree: Path, entries: dict[str, str] | None = None) -> Path:
+    """Point `orchard`'s archive at a directory holding `entries`, by default
+    the fixture's one heading in a file of its own."""
+    plan = tree / "plan.toml"
+    plan.write_text(plan.read_text().replace(
+        'archive           = "orchard-archive.md"',
+        f'archive           = "{ENTRIES}"',
+    ))
+    directory = tree / ENTRIES
+    directory.mkdir()
+    for name, text in (entries or {"1-a-felled-tree.md": "## 1. A felled tree\n"}).items():
+        (directory / name).write_text(text)
+    return directory
+
+
+def listed(capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
+    capsys.readouterr()
+    assert main(["list", "--json"]) == 0
+    return json.loads(capsys.readouterr().out)
+
+
+def test_an_archive_that_is_a_directory_loads_and_one_that_is_missing_refuses(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The load check asks for a path that exists, file or directory. Missing,
+    the register cannot read what it holds, so it refuses saying both."""
+    directory = as_directory(tree)
+    assert main(["list"]) == 0
+
+    shutil.rmtree(directory)
+    capsys.readouterr()
+    assert main(["list"]) != 0
+    assert "Create the file or the directory" in capsys.readouterr().err
+
+
+def test_a_mint_over_a_directory_holding_one_and_two_mints_three(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    as_directory(tree, {
+        "1-a-felled-tree.md": "## 1. A felled tree\n",
+        "2-another.md": "## 2. Another\n\nWhy.\n",
+    })
+    orchard(tree, "First tree")
+    capsys.readouterr()
+    assert main(["show", "first-tree", "--json"]) == 0
+    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    assert row["number"] == 3
+
+
+def test_one_corpus_as_a_file_and_as_a_directory_lists_the_same_register(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """**The parity.** One corpus — a live tree at 2, closed 1, 3 and 5, so a
+    gap at 4 — filed both ways. The register and the gaps are the same but for
+    the `archive` each names, which is the declared path either way."""
+    orchard(tree, "First tree")
+    (tree / "orchard-archive.md").write_text(
+        "# The archive\n\n## 1. A felled tree\n\n## 3. Third\n\nWhy.\n\n## 5. Fifth\n"
+    )
+    as_file = listed(capsys)
+
+    (tree / "orchard-archive.md").unlink()
+    as_directory(tree, {
+        "1-a-felled-tree.md": "## 1. A felled tree\n",
+        "3-third.md": "## 3. Third\n\nWhy.\n",
+        "5-fifth.md": "## 5. Fifth\n",
+    })
+    as_dir = listed(capsys)
+
+    def without_archive(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [{k: v for k, v in one.items() if k != "archive"} for one in records]
+
+    for report in ("register", "gaps"):
+        assert without_archive(as_file[report]) == without_archive(as_dir[report])
+    assert [one["number"] for one in as_dir["gaps"]] == [4]
+    assert [one["highest"] for one in as_dir["register"]] == [5]
+    assert {one["archive"] for one in as_file["register"] + as_file["gaps"]} == {
+        "orchard-archive.md"
+    }
+    assert {one["archive"] for one in as_dir["register"] + as_dir["gaps"]} == {ENTRIES}
+    assert as_file["lost"] == as_dir["lost"] == []
+
+
+@pytest.mark.parametrize("verb", ["grub-out", "fell"])
+def test_an_entry_filed_into_a_directory_is_a_file_of_its_own(
+    tree: Path, verb: str, capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both shapes of archiving verb, `decline`'s and `archive-plan`'s. The
+    entry is `<number>-<slug>.md`, holding what a document's entry holds, and
+    every other entry file is left byte for byte — two close-outs at once in
+    one shared tree touch two files, not one."""
+    directory = as_directory(tree, {
+        "1-a-felled-tree.md": "## 1. A felled tree\n\nKept.\n",
+        "notes.txt": "Not an entry.\n",
+    })
+    orchard(tree, "First tree")
+    before = {one.name: one.read_bytes() for one in directory.iterdir()}
+    capsys.readouterr()
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("What it was.\n"))
+    assert main([verb, "first-tree", "--record", "-"]) == 0
+    printed = capsys.readouterr()
+    assert f"{ENTRIES}/2-first-tree.md" in printed.err
+    assert (directory / "2-first-tree.md").read_text() == (
+        "## 2. First tree\n\nWhat it was.\n"
+    )
+    assert {
+        one.name: one.read_bytes() for one in directory.iterdir()
+        if one.name != "2-first-tree.md"
+    } == before
+
+
+def test_a_number_two_entry_files_hold_refuses_naming_both(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    as_directory(tree, {
+        "1-a-felled-tree.md": "## 1. A felled tree\n",
+        "1-a-copy.md": "## 1. A copy\n",
+    })
+    capsys.readouterr()
+    assert main(["sprout", "A tree", "--body", "Prose.", "--cultivar", "heirloom"]) == 0
+    assert main(["transplant", "a-tree"]) != 0
+    said = capsys.readouterr().err
+    assert f"{ENTRIES}/1-a-copy.md § 1." in said
+    assert f"{ENTRIES}/1-a-felled-tree.md § 1." in said
+
+
+def test_an_unreadable_heading_in_an_entry_file_is_named_by_that_file_and_line(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """In the listing, which does not refuse, and at the mint, which does."""
+    as_directory(tree, {
+        "1-a-felled-tree.md": "## 1. A felled tree\n",
+        "2-lost.md": "Preamble.\n\n## Section 2: lost\n",
+    })
+    (lost,) = listed(capsys)["lost"]
+    assert (lost["archive"], lost["line"], lost["text"]) == (
+        f"{ENTRIES}/2-lost.md", 3, "## Section 2: lost",
+    )
+
+    assert main(["sprout", "A tree", "--body", "Prose.", "--cultivar", "heirloom"]) == 0
+    capsys.readouterr()
+    assert main(["transplant", "a-tree"]) != 0
+    assert f"{ENTRIES}/2-lost.md:3:" in capsys.readouterr().err
+
+
+def test_a_markdown_file_with_no_heading_there_is_a_lost_close_out(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The file is the entry, so a file holding no number has dropped one. A
+    stray `README.md` is named rather than skipped: loud by default."""
+    as_directory(tree, {
+        "1-a-felled-tree.md": "## 1. A felled tree\n",
+        "README.md": "# What this is\n",
+    })
+    (lost,) = listed(capsys)["lost"]
+    assert (lost["archive"], lost["line"], lost["text"]) == (
+        f"{ENTRIES}/README.md", 1, "# What this is",
+    )
+
+
+def test_a_file_that_is_not_markdown_there_is_left_alone(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A `.gitkeep` is how an empty directory gets committed."""
+    as_directory(tree, {
+        "1-a-felled-tree.md": "## 1. A felled tree\n",
+        ".gitkeep": "",
+        "notes.txt": "## Section 9: not read\n",
+    })
+    payload = listed(capsys)
+    assert payload["lost"] == [] and payload["gaps"] == []
+    assert [one["highest"] for one in payload["register"]] == [1]
+
+
+def test_an_entry_file_under_another_number_at_the_name_refuses_and_writes_nothing(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A file renamed by hand, holding a number other than its name's. Writing
+    over it would drop that number, so the run refuses before any write."""
+    directory = as_directory(tree)
+    orchard(tree, "First tree")
+    (directory / "2-first-tree.md").write_text("## 3. Renamed by hand\n")
+    capsys.readouterr()
+
+    assert main(["grub-out", "first-tree"]) != 0
+    assert "already exists" in capsys.readouterr().err
+    assert (directory / "2-first-tree.md").read_text() == "## 3. Renamed by hand\n"
+    assert (tree / "orchard" / "first-tree.md").exists()
 
 
 # --------------------------------------------------------------------------
@@ -5540,15 +5926,23 @@ def test_the_record_is_required_on_a_verb_that_archives_and_dissolves(
     assert archived(tree) == document
 
 
-def test_the_record_option_is_only_on_the_verb_that_needs_it(
+def test_the_record_option_is_on_every_verb_that_archives(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Generated by what the verb declares, like every other capability's
-    options. `grub-out` moves the item, so its source material survives and the
-    session fills the entry in; `compost` archives nothing to write under."""
+    """Generated by `archives`, like every other capability's options, and
+    **required** only where the item goes away. `grub-out` moves the item, so
+    its source material survives and the heading can still be filled by hand;
+    `compost` archives nothing to write under."""
     for name in ("fell", "grub-out", "compost", "transplant"):
         assert main([name, "--help"]) == 0
-        assert ("--record" in capsys.readouterr().out) == (name == "fell")
+        printed = capsys.readouterr().out
+        assert ("--record" in printed) == (name in ("fell", "grub-out"))
+        # The option's own help, up to the next option, which is `--check`.
+        said = " ".join(printed.split("--record", 1)[-1].split("--check")[0].split())
+        if name == "fell":
+            assert "[required]" in said
+        if name == "grub-out":
+            assert "[required]" not in said and "Optional" in said
 
 
 def test_the_record_reads_stdin_so_a_heredoc_works(
@@ -6089,6 +6483,126 @@ def test_a_merge_moves_each_body_into_the_survivor(
     assert not (tree / "greenhouse" / "b-seedling.md").exists()
     text = (tree / "greenhouse" / "x-seedling.md").read_text()
     assert text.endswith("Ex.\n\n### B seedling\n\nBee.\n\n### A seedling\n\nAy.\n")
+
+
+# A survivor in a `bulleted` state takes each absorbed item as a sub-phase
+# instead (37-6). `orchard` is bulleted and numbered, so a greenhouse
+# seedling merged into a tree there becomes `2-N`. See docs/method.md#merge
+
+
+def seedlings(*pairs: tuple[str, str]) -> None:
+    for title, body in pairs:
+        assert main(["sprout", title, "--body", body, "--cultivar", "heirloom"]) == 0
+
+
+def test_a_merge_into_a_bulleted_tree_mints_one_sub_phase_per_item_in_the_order_named(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """**The done line, end to end.** Both files gone, each item a named
+    sub-phase titled by its seedling with its body under it, and `show` reads
+    each back as the bullet it is."""
+    seedlings(("A seedling", "Ay.\n\nAnd more."), ("B seedling", "Bee."))
+    orchard(tree, "First tree")
+    assert main(["espalier", "first-tree", "--title", "Planted"]) == 0
+    path = tree / "orchard" / "first-tree.md"
+    head = path.read_text().partition("+++\n\n")[0]
+    capsys.readouterr()
+
+    assert main(["inarch", "b-seedling", "a-seedling", "--into", "first-tree"]) == 0
+    assert not (tree / "greenhouse" / "a-seedling.md").exists()
+    assert not (tree / "greenhouse" / "b-seedling.md").exists()
+    assert path.read_text().endswith(
+        "- **2-1 — Planted**\n"
+        "- **2-2 — B seedling**\n  Bee.\n"
+        "- **2-3 — A seedling**\n  Ay.\n\n  And more.\n"
+        "- **unpruned — Say what the rest of the training is.**\n"
+    )
+    # The head is not touched, so the cursor stays where it was.
+    assert path.read_text().partition("+++\n\n")[0] == head
+    capsys.readouterr()
+
+    assert main(["show", "first-tree", "2-2"]) == 0
+    assert capsys.readouterr().out == "- **2-2 — B seedling**\n  Bee.\n"
+    assert main(["show", "first-tree", "2-3"]) == 0
+    assert capsys.readouterr().out.startswith("- **2-3 — A seedling**\n  Ay.\n")
+
+
+def test_a_merge_into_a_tree_with_no_steps_opens_the_decomposition(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seedlings(("A seedling", "Ay."))
+    orchard(tree, "First tree")
+    capsys.readouterr()
+
+    assert main(["inarch", "a-seedling", "--into", "first-tree"]) == 0
+    assert (tree / "orchard" / "first-tree.md").read_text().endswith(
+        "Prose.\n\n### Steps\n- **2-1 — A seedling**\n  Ay.\n"
+        "- **unpruned — Say what the rest of the training is.**\n"
+    )
+    assert "re-opens" not in capsys.readouterr().err
+
+
+def test_a_merge_into_a_finished_tree_re_opens_it_and_says_so(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The loud polarity: work added to a finished section puts the pending
+    bullet back, so the section asks for another look."""
+    seedlings(("A seedling", "Ay."))
+    orchard(tree, "First tree")
+    assert main(["espalier", "first-tree", "--title", "Planted", "--last"]) == 0
+    capsys.readouterr()
+
+    assert main(["inarch", "a-seedling", "--into", "first-tree"]) == 0
+    assert (tree / "orchard" / "first-tree.md").read_text().endswith(
+        "- **2-2 — A seedling**\n  Ay.\n"
+        "- **unpruned — Say what the rest of the training is.**\n"
+    )
+    assert "first-tree had no sub-phase left pending under \"Steps\", so this " in (
+        capsys.readouterr().err
+    )
+
+
+@pytest.mark.parametrize(
+    "title, body, said",
+    [
+        ("A **bold** seedling", "Ay.", "greenhouse/a-bold-seedling.md cannot become a sub-phase"),
+        ("A seedling", "```\nunclosed", "never closes"),
+    ],
+    ids=["bold-title", "lone-fence"],
+)
+def test_an_item_that_cannot_become_a_sub_phase_refuses_and_writes_nothing(
+    tree: Path, capsys: pytest.CaptureFixture[str], title: str, body: str, said: str
+) -> None:
+    """All or nothing across the handles: the good seedling stays too."""
+    seedlings((title, body), ("Good seedling", "Fine."))
+    orchard(tree, "First tree")
+    slug = title.lower().replace("*", "").replace(" ", "-")
+    before = tree_bytes(tree)
+    capsys.readouterr()
+
+    assert main(["inarch", "good-seedling", slug, "--into", "first-tree"]) == 2
+    printed = capsys.readouterr()
+    assert "inarch cannot carry " in printed.err
+    assert said in printed.err
+    assert tree_bytes(tree) == before
+
+
+def test_a_check_names_the_sub_phase_each_item_would_become(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seedlings(("A seedling", "Ay."), ("B seedling", "Bee."))
+    orchard(tree, "First tree")
+    before = tree_bytes(tree)
+    capsys.readouterr()
+
+    assert main(["inarch", "a-seedling", "b-seedling", "--into", "first-tree", "--check"]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "inarch would take greenhouse/a-seedling.md away, and would carry its "
+        "body into orchard/first-tree.md as 2-1",
+        "inarch would take greenhouse/b-seedling.md away, and would carry its "
+        "body into orchard/first-tree.md as 2-2",
+    ]
+    assert tree_bytes(tree) == before
 
 
 # --------------------------------------------------------------------------
@@ -6739,3 +7253,337 @@ def test_the_overview_and_the_contract_read_listed_back(
     states = {one["name"]: one for one in declaration_json(capsys)["states"]}
     assert states["firewood"]["listed"] is False
     assert states["greenhouse"]["listed"] is True
+
+
+# --- writing under a bullet --------------------------------------------------
+
+
+def jotted(capsys: pytest.CaptureFixture[str], name: str) -> str:
+    """What `show first-tree NAME` prints after a write."""
+    capsys.readouterr()
+    assert main(["show", "first-tree", name]) == 0
+    return capsys.readouterr().out
+
+
+def test_an_append_and_a_replace_each_write_what_show_reads_back(
+    tree: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The done line end to end: text from stdin, indented by the tool, under
+    one bullet, and `show ITEM NAME` is the read that pairs with it."""
+    named(tree, "graft-1", "graft-2")
+    monkeypatch.setattr(sys, "stdin", io.StringIO("a\n\nb\n"))
+    assert main(["jot", "first-tree", "graft-1", "--text", "-"]) == 0
+    assert jotted(capsys, "graft-1") == "- **graft-1 — step graft-1.**\n  a\n\n  b\n"
+
+    assert main(["jot", "first-tree", "graft-1", "--text", "c"]) == 0
+    assert jotted(capsys, "graft-1").endswith("  b\n  c\n")
+
+    assert main(["jot", "first-tree", "graft-1", "--text", "only", "--replace"]) == 0
+    assert jotted(capsys, "graft-1") == "- **graft-1 — step graft-1.**\n  only\n"
+    assert jotted(capsys, "graft-2") == "- **graft-2 — step graft-2.**\n"
+
+
+def test_a_marked_bullet_takes_a_write_and_keeps_its_mark(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A session records what it decided at the moment it marks, so a mark is
+    no bar to a write, and the write leaves the bullet's own line alone."""
+    named(tree, "graft-1", "graft-2")
+    assert main(["ripen", "first-tree", "graft-1", "--note", "It held."]) == 0
+    assert main(["jot", "first-tree", "graft-1", "--text", "Decided."]) == 0
+    assert jotted(capsys, "graft-1") == (
+        "- **graft-1 — step graft-1.** **ripened** It held.\n  Decided.\n"
+    )
+
+
+@pytest.mark.parametrize("name", ["graft-9", "unpruned"])
+def test_a_name_the_body_has_not_got_refuses_as_no_such_name(
+    tree: Path, capsys: pytest.CaptureFixture[str], name: str
+) -> None:
+    """The gate a disposition and `show` use, so the pending marker refuses
+    in the same words an unknown name does."""
+    path = named(tree, "graft-1")
+    assert main(["espalier", "first-tree"]) == 0
+    before = path.read_bytes()
+    capsys.readouterr()
+
+    assert main(["jot", "first-tree", name, "--text", "x"]) == 2
+    assert f'carries no "{name}", and the names it carries are graft-1' in (
+        capsys.readouterr().err
+    )
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("name", ["graft-1", "graft-2"])
+def test_text_with_a_lone_fence_refuses_before_writing_a_byte(
+    tree: Path, capsys: pytest.CaptureFixture[str], name: str
+) -> None:
+    """The count check, built in: a fence is the one thing indented text can
+    do to the bullets the reader counts, so the run compares before it
+    writes."""
+    path = named(tree, "graft-1", "graft-2")
+    before = path.read_bytes()
+    capsys.readouterr()
+
+    assert main(["jot", "first-tree", name, "--text", "```"]) == 2
+    printed = capsys.readouterr().err
+    assert f"cannot take that text under {name}" in printed
+    assert "would no longer be read" in printed or "never closes" in printed
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("text", ["", "  \n"])
+def test_empty_text_refuses(
+    tree: Path, capsys: pytest.CaptureFixture[str], text: str
+) -> None:
+    path = named(tree, "graft-1")
+    before = path.read_bytes()
+    capsys.readouterr()
+
+    assert main(["jot", "first-tree", "graft-1", "--text", text, "--replace"]) == 2
+    assert "the text is empty" in capsys.readouterr().err
+    assert path.read_bytes() == before
+
+
+def test_the_check_says_which_bullet_and_how_many_lines_and_writes_nothing(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = named(tree, "graft-1")
+    assert main(["jot", "first-tree", "graft-1", "--text", "a\nb"]) == 0
+    before = path.read_bytes()
+    capsys.readouterr()
+
+    assert main(["jot", "first-tree", "graft-1", "--text", "zebra", "--check"]) == 0
+    assert capsys.readouterr().out.rstrip().endswith(
+        "and would append 1 line under graft-1"
+    )
+    assert main(
+        ["jot", "first-tree", "graft-1", "--text", "zebra", "--replace", "--check"]
+    ) == 0
+    said = capsys.readouterr().out
+    assert said.rstrip().endswith("and would replace 2 lines under graft-1 with 1")
+    # How much, never what: the text is the session's, and stays out of it.
+    assert "zebra" not in said
+    assert path.read_bytes() == before
+
+
+def test_a_replace_with_the_same_text_leaves_the_file_unchanged_and_says_so(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = named(tree, "graft-1")
+    assert main(["jot", "first-tree", "graft-1", "--text", "a"]) == 0
+    before = path.read_bytes()
+    capsys.readouterr()
+
+    assert main(["jot", "first-tree", "graft-1", "--text", "a", "--replace"]) == 0
+    assert "is unchanged" in capsys.readouterr().err
+    assert path.read_bytes() == before
+
+
+def test_commands_offers_the_write_only_where_a_named_bullet_is(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    orchard(tree, "First tree")
+    (row,) = rows(capsys, "--state", "orchard")
+    assert "jot" not in row["commands"]
+
+    assert main(["espalier", "first-tree", "--title", "The first", "--last"]) == 0
+    assert main(["ripen", "first-tree", "2-1"]) == 0
+    (row,) = rows(capsys, "--state", "orchard")
+    assert "jot" in row["commands"]
+
+
+# --- minting in place, and folding a bullet into another ---------------------
+
+
+def test_a_mint_after_a_bullet_lands_behind_it_and_show_reads_the_order_back(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The split, end to end: the new sub-phase goes behind the anchor, takes
+    the next free ordinal, and the pending bullet still ends the list."""
+    path = named(tree, "graft-1", "graft-2")
+    assert main(["espalier", "first-tree", "--title", "Between", "--after", "graft-1"]) == 0
+    body = path.read_text()
+    assert "- **graft-1 — step graft-1.**\n- **" in body
+    (row,) = rows(capsys, "--state", "orchard")
+    minted = [line for line in body.splitlines() if "Between" in line]
+    assert len(minted) == 1
+    lines = body.splitlines()
+    at = lines.index(minted[0])
+    assert lines[at - 1] == "- **graft-1 — step graft-1.**"
+    assert lines[at + 1] == "- **graft-2 — step graft-2.**"
+    assert lines[-1].startswith("- **unpruned")
+    assert row["sub-phases"] == 4
+
+
+def test_after_without_a_title_refuses_by_name(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = named(tree, "graft-1")
+    before = path.read_bytes()
+    capsys.readouterr()
+
+    assert main(["espalier", "first-tree", "--after", "graft-1"]) == 2
+    assert "without --title there is no sub-phase to place" in capsys.readouterr().err
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("name", ["graft-9", "unpruned"])
+def test_after_a_name_the_body_has_not_got_refuses_as_no_such_name(
+    tree: Path, capsys: pytest.CaptureFixture[str], name: str
+) -> None:
+    path = named(tree, "graft-1")
+    assert main(["espalier", "first-tree"]) == 0
+    before = path.read_bytes()
+    capsys.readouterr()
+
+    assert main(["espalier", "first-tree", "--title", "New", "--after", name]) == 2
+    assert f'carries no "{name}", and the names it carries are graft-1' in (
+        capsys.readouterr().err
+    )
+    assert path.read_bytes() == before
+
+
+def test_a_mint_after_a_marked_bullet_is_allowed(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """New work after a finished sub-phase is the ordinary case."""
+    path = named(tree, "graft-1", "graft-2")
+    assert main(["ripen", "first-tree", "graft-1"]) == 0
+    assert main(["espalier", "first-tree", "--title", "After", "--after", "graft-1"]) == 0
+    lines = path.read_text().splitlines()
+    at = lines.index("- **graft-1 — step graft-1.** **ripened**")
+    assert lines[at + 1].endswith(" — After**")
+
+
+def test_the_check_names_where_a_mint_goes_and_writes_nothing(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = named(tree, "graft-1")
+    assert main(["espalier", "first-tree"]) == 0
+    before = path.read_bytes()
+    capsys.readouterr()
+
+    assert main(
+        ["espalier", "first-tree", "--title", "New", "--after", "graft-1", "--check"]
+    ) == 0
+    assert capsys.readouterr().out.rstrip().endswith(
+        "and would write the sub-phase after graft-1"
+    )
+    assert path.read_bytes() == before
+
+
+def folding(tree: Path) -> Path:
+    """Three named steps, the middle one carrying two lines of prose."""
+    path = named(tree, "graft-1", "graft-2", "graft-3")
+    assert main(["jot", "first-tree", "graft-2", "--text", "Planned.\nAnd more."]) == 0
+    return path
+
+
+def test_a_fold_marks_the_bullet_moves_its_prose_and_puts_the_cursor_on_the_survivor(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The merge, end to end: one copy of the text, under the survivor and
+    headed by where it came from, and the folded bullet marked with a note
+    saying where."""
+    path = folding(tree)
+    assert main(
+        ["graft-together", "first-tree", "graft-2", "--into", "graft-1", "--note", "One seam."]
+    ) == 0
+    assert jotted(capsys, "graft-1") == (
+        "- **graft-1 — step graft-1.**\n"
+        "  *From graft-2 — step graft-2.:*\n"
+        "  Planned.\n"
+        "  And more.\n"
+    )
+    assert jotted(capsys, "graft-2") == (
+        "- **graft-2 — step graft-2.** **grafted** Into graft-1. One seam.\n"
+    )
+    assert 'graft = "graft-1"' in path.read_text()
+
+
+@pytest.mark.parametrize(
+    "marked, into, said",
+    [
+        pytest.param("graft-1", "graft-1", 'graft-1 is marked "ripened"', id="marked-survivor"),
+        pytest.param("graft-2", "graft-1", "has already disposed of graft-2", id="marked-bullet"),
+        pytest.param(None, "graft-2", "prose under itself", id="itself"),
+        pytest.param(None, "graft-9", 'carries no "graft-9"', id="unknown-survivor"),
+        pytest.param(None, "unpruned", 'carries no "unpruned"', id="pending-survivor"),
+    ],
+)
+def test_a_fold_refuses_before_writing_a_byte(
+    tree: Path,
+    capsys: pytest.CaptureFixture[str],
+    marked: str | None,
+    into: str,
+    said: str,
+) -> None:
+    path = folding(tree)
+    assert main(["espalier", "first-tree"]) == 0
+    if marked is not None:
+        assert main(["ripen", "first-tree", marked]) == 0
+    before = path.read_bytes()
+    capsys.readouterr()
+
+    assert main(["graft-together", "first-tree", "graft-2", "--into", into]) == 2
+    assert said in capsys.readouterr().err
+    assert path.read_bytes() == before
+
+
+def test_a_fold_with_no_survivor_refuses(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--into` is required: a fold with nowhere to move the prose is a mark."""
+    path = folding(tree)
+    before = path.read_bytes()
+    capsys.readouterr()
+
+    assert main(["graft-together", "first-tree", "graft-2"]) == 2
+    assert "--into" in capsys.readouterr().err
+    assert path.read_bytes() == before
+
+
+def test_the_check_for_a_fold_gives_counts_and_writes_nothing(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = folding(tree)
+    before = path.read_bytes()
+    capsys.readouterr()
+
+    assert main(
+        ["graft-together", "first-tree", "graft-2", "--into", "graft-3", "--note", "zebra", "--check"]
+    ) == 0
+    said = capsys.readouterr().out
+    assert said.rstrip().endswith(
+        'and would mark graft-2 "grafted" with a note, and move 2 lines under graft-3'
+    )
+    assert "zebra" not in said and "Planned" not in said
+    assert path.read_bytes() == before
+
+
+def test_commands_offers_the_fold_only_where_two_bullets_are_unmarked(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    named(tree, "graft-1", "graft-2")
+    (row,) = rows(capsys, "--state", "orchard")
+    assert "graft-together" in row["commands"]
+
+    assert main(["ripen", "first-tree", "graft-1"]) == 0
+    (row,) = rows(capsys, "--state", "orchard")
+    assert "graft-together" not in row["commands"]
+
+
+def test_a_sets_key_colliding_with_the_fold_option_refuses_by_name(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--note`'s rule over `--into`: a mark-bullet may declare `sets`."""
+    plan = (tree / "plan.toml").read_text().replace(
+        'marks  = "grafted"', 'marks  = "grafted"\nsets   = ["into"]'
+    )
+    (tree / "plan.toml").write_text(plan + '\n[keys.into]\ndoc = "method.md#into"\n')
+    (tree / "method.md").write_text((tree / "method.md").read_text() + "\n## into\n")
+    assert main(["--help"]) == 2
+    err = capsys.readouterr().err
+    assert 'transitions.graft-together.sets names "into"' in err
+    assert "One option cannot mean two things" in err
