@@ -16,9 +16,10 @@ from __future__ import annotations
 import dataclasses
 import json
 import sys
+from collections.abc import Callable, Mapping
 from importlib.metadata import version
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
 import click
 
@@ -49,35 +50,39 @@ from fileplan.declaration import (
 from fileplan.transition import (
     AFTER,
     INTO,
-    KEEP_CLAIMS as KEEPING,
     MARKING,
     NOTE,
     RECORD,
     REPLACE,
     TEXT,
+    commands,
+    execute,
+    release,
+)
+from fileplan.transition import (
+    KEEP_CLAIMS as KEEPING,
 )
 from fileplan.transition import RETITLE as RETITLING
-from fileplan.transition import commands, execute, release
 
 #: The read's own name. It is not a declared verb and cannot become one.
 LIST_COMMAND = "list"
 
 #: The listing's row for one item, registered unconditionally.
-#: See docs/method.md#show
+#: See docs/reference.md#show
 SHOW_COMMAND = "show"
 
 #: The command that frees a claim: registered only where a state claims what
-#: it holds, and reserved everywhere. See docs/method.md#release
+#: it holds, and reserved everywhere. See docs/reference.md#release
 RELEASE_COMMAND = "release"
 
 #: The command that writes a first declaration, registered unconditionally and
-#: answering before the declaration loads. See docs/method.md#init
+#: answering before the declaration loads. See docs/reference.md#init
 INIT_COMMAND = "init"
 
 #: The other two: options rather than words of their own, and the two that
 #: answer outside a plan tree, because what version this is and where the
 #: tool keeps its files are facts about the tool rather than the workflow.
-#: See docs/method.md#the-version and docs/method.md#the-skills
+#: See docs/reference.md#the-version and docs/reference.md#the-skills
 VERSION_FLAG = "--version"
 SKILLS_FLAG = "--skills"
 
@@ -92,7 +97,7 @@ RESERVED = {
 
 #: The options the `queued` capability puts on a transition into a state that
 #: has it. `--above` and `--below` name another item; `--at` names the place
-#: outright and is the respacing tool. See docs/method.md#the-queue
+#: outright and is the respacing tool. See docs/reference.md#the-queue
 PLACEMENT = (
     ("above", "ITEM", str, "Put the item directly ahead of ITEM."),
     ("below", "ITEM", str, "Put the item directly behind ITEM."),
@@ -100,56 +105,68 @@ PLACEMENT = (
         "at",
         "N",
         int,
-        f"Put the item at place N exactly. Places are {queued.SPACING} apart, "
-        "and --at is how you respace a gap.",
+        (
+            f"Put the item at place N exactly. Places are {queued.SPACING} apart, "
+            "and --at is how you respace a gap."
+        ),
     ),
 )
 
 #: The options an add-bullet takes. `--last`
-#: is the only way the pending bullet leaves. See docs/method.md#bulleted
+#: is the only way the pending bullet leaves. See docs/reference.md#bulleted
 MINTING = (
     (
         "title",
         "TEXT",
         str,
-        "Write a sub-phase with this title into the item's body. The name "
-        "comes from the form the item's state declares, plus the next free "
-        "ordinal.",
+        (
+            "Write a sub-phase with this title into the item's body. The name "
+            "comes from the form the item's state declares, plus the next free "
+            "ordinal."
+        ),
     ),
     (
         "last",
         None,
         None,
-        "This is the final sub-phase. Close the decomposition, leaving "
-        "nothing pending.",
+        (
+            "This is the final sub-phase. Close the decomposition, leaving "
+            "nothing pending."
+        ),
     ),
     (
         AFTER,
         "NAME",
         str,
-        "Write the new sub-phase directly after the bullet named NAME, not at "
-        "the end. The name is still the next free ordinal.",
+        (
+            "Write the new sub-phase directly after the bullet named NAME, not at "
+            "the end. The name is still the next free ordinal."
+        ),
     ),
 )
 
 #: The options a write-bullet takes beside the bullet's name: the text, and
 #: whether it replaces what is under the bullet. `--text` is required, and
-#: `-` reads stdin through `_prose`. See docs/method.md#annotate
+#: `-` reads stdin through `_prose`. See docs/reference.md#annotate
 WRITING = (
     (
         TEXT,
         "TEXT",
         str,
-        "What to write under the bullet. Required. Each line is indented by "
-        "the tool, so text cannot add a bullet. `-` reads the text from "
-        "stdin, so `--text - < notes.md` takes it from a file.",
+        (
+            "What to write under the bullet. Required. Each line is indented by "
+            "the tool, so text cannot add a bullet. `-` reads the text from "
+            "stdin, so `--text - < notes.md` takes it from a file."
+        ),
     ),
     (
         REPLACE,
         None,
         None,
-        "Replace the lines under the bullet with the text. Without it the "
-        "text goes after them. The bullet's own line is never touched.",
+        (
+            "Replace the lines under the bullet with the text. Without it the "
+            "text goes after them. The bullet's own line is never touched."
+        ),
     ),
 )
 
@@ -160,37 +177,41 @@ WRITING = (
 #: mark-bullet's bullet is read back under, `RETITLING` a rename's new title
 #: and `KEEPING` the key `--keep-claims` is read back under. Each is the
 #: executor's name, imported from `fileplan.transition`.
-#: See docs/method.md#the-register
+#: See docs/reference.md#the-register
 
 #: The options a verb that `files` takes: what to call the item it creates from
 #: the bullet it disposes of, and the prose that goes in it. `--title` is
 #: optional and defaults to the bullet's own text; `--body` is required by the
-#: executor rather than by click. See docs/method.md#filing
+#: executor rather than by click. See docs/reference.md#filing
 FILING = (
     (
         "title",
         "TEXT",
         str,
-        "Call the filed item this. Without --title, the filed item takes "
-        "the bullet's own text.",
+        (
+            "Call the filed item this. Without --title, the filed item takes "
+            "the bullet's own text."
+        ),
     ),
     (
         "body",
         "TEXT",
         str,
-        "The filed item's description. Required. `-` reads the description "
-        "from stdin, so `--body - < notes.md` takes it from a file.",
+        (
+            "The filed item's description. Required. `-` reads the description "
+            "from stdin, so `--body - < notes.md` takes it from a file."
+        ),
     ),
 )
 
 #: The second positional a mark-bullet takes: the bullet the run acts on.
 #: Its own click parameter, because `name` is already the item handle's, and
-#: its metavar. See docs/method.md#marking
+#: its metavar. See docs/reference.md#marking
 BULLET, MARKING_METAVAR = "bullet", "NAME"
 
 #: The metavar of a rename's second positional, the item's new title. A
 #: positional, so it cannot collide with the `--title` a mint or a filing
-#: takes. See docs/method.md#retitle
+#: takes. See docs/reference.md#retitle
 RETITLE_METAVAR = TITLE = "TITLE"
 
 #: What a handle naming one item, or several, shows as on the command line,
@@ -200,17 +221,17 @@ ITEM, ITEMS, BODY = "ITEM", "ITEM...", "body"
 
 #: The flag a verb that `claims` takes: hold this claim beside the others this
 #: session already holds. It needs the `sets` collision check.
-#: See docs/method.md#the-claimed-state
+#: See docs/reference.md#the-claimed-state
 KEEP_CLAIMS = "keep-claims"
 
 #: The flag every generated transition carries: run the verb's whole path and
 #: stop at the seam where nothing has been written. A declared key of the same
-#: name refuses by name. See docs/method.md#the-check
+#: name refuses by name. See docs/reference.md#the-check
 CHECK = "check"
 
 #: The options a transition may declare beside its kind, which the
 #: `Declares` block lists after the kind, by name and nothing else: what each
-#: means is a section the `Reading` block points at. See docs/method.md#kinds
+#: means is a section the `Reading` block points at. See docs/reference.md#kinds
 DECLARED = ("claims", "files", "merges", "archives")
 
 #: What the JSON envelope calls this listing, and the noun the text frame
@@ -222,7 +243,7 @@ SHOW_KIND = "item"
 
 #: And what it calls the whole declaration: the states, then one contract per
 #: declared transition. Not a read — it describes the declaration rather than
-#: the tree. See docs/method.md#the-contract
+#: the tree. See docs/reference.md#the-contract
 DECLARATION_KIND = "declaration"
 
 #: And what it calls one bullet: the tool's own noun for them, singular.
@@ -230,7 +251,7 @@ BULLET_KIND = subphase.NAME.removesuffix("s")
 
 #: The one field a bullet read carries that a bullet row does not: the verbatim
 #: lines. Not a row field, because that would put a body in every listing.
-#: See docs/method.md#show
+#: See docs/reference.md#show
 BULLET_TEXT = "text"
 
 
@@ -284,7 +305,7 @@ def _pointer(exc: click.ClickException, declaration: Declaration) -> str | None:
 
     Three dead ends a consumer's sessions hit often enough to count. Each
     keeps click's refusal and adds where to go: nothing about what is
-    accepted changes. See docs/method.md#the-listing
+    accepted changes. See docs/reference.md#the-listing
     """
     ctx = getattr(exc, "ctx", None)
     if ctx is None:
@@ -323,7 +344,7 @@ def _version_option() -> Callable[[Any], Any]:
 
     Two things want it: the group, and the arm in `main` that answers it
     before a declaration exists.
-    See docs/method.md#the-version
+    See docs/reference.md#the-version
     """
     return click.version_option(version("fileplan"), prog_name="fileplan")
 
@@ -410,7 +431,7 @@ def _command(declaration: Declaration, transition: Transition) -> click.Command:
     claiming = transition.claims
     params: list[click.Parameter] = [
         # One positional, variadic only on a merge: several
-        # items can continue as one survivor. See docs/method.md#merge
+        # items can continue as one survivor. See docs/reference.md#merge
         click.Argument(["name"], nargs=-1, required=True, metavar=ITEMS)
         if absorbing
         else click.Argument(["name"], metavar=TITLE if creating else ITEM)
@@ -497,9 +518,7 @@ def _command(declaration: Declaration, transition: Transition) -> click.Command:
             transition,
             name=given.pop("name"),
             body=_drafted(transition, _prose(given.pop(BODY, None))),
-            values={
-                _key(name): _handed_back(value) for name, value in given.items()
-            },
+            values={_key(name): _handed_back(value) for name, value in given.items()},
             asked=asked,
             # stderr, never stdout: a piped run carries the path and nothing else.
             announce=lambda said: click.echo(said, err=True),
@@ -556,7 +575,7 @@ def _check_option(transition: Transition) -> click.Option:
 
     On every generated transition, creating ones included. A `sets` key of the
     same name refuses by name.
-    See docs/method.md#the-check
+    See docs/reference.md#the-check
     """
     if (field := _setting(transition, CHECK)) is not None:
         raise Refusal(
@@ -589,7 +608,7 @@ def contract(declaration: Declaration, transition: Transition) -> dict[str, Any]
     The blocks only. A row's `options` are added by `_contents`, off the built
     command, because this runs before the command exists: `_epilog` renders
     from it while the command is being built.
-    See docs/method.md#the-contract
+    See docs/reference.md#the-contract
     """
     return {
         "name": transition.name,
@@ -619,7 +638,7 @@ def contract(declaration: Declaration, transition: Transition) -> dict[str, Any]
         # keys record where it came from, and under `sets` the keys this verb
         # takes as options and writes onto the filed item rather than the
         # carrier. The epilog's `Files` block says the same in a line.
-        # See docs/method.md#filing
+        # See docs/reference.md#filing
         "files": None if transition.files is None else dict(transition.files),
         "reading": _reading(declaration, transition),
     }
@@ -644,7 +663,7 @@ def _epilog(declaration: Declaration, transition: Transition) -> str:
     tree, which is why it adds no fourth read. An empty block is omitted, and
     that judgment lives here: it is what a person reading help wants and what
     a consumer parsing JSON does not.
-    See docs/method.md#the-contract
+    See docs/reference.md#the-contract
     """
     row = contract(declaration, transition)
     blocks = [("Where the item goes", [_going(row)])]
@@ -668,11 +687,11 @@ def _epilog(declaration: Declaration, transition: Transition) -> str:
         blocks.append(("Writes", writes))
     blocks.append(("Declares", [row["kind"], *row["declares"]]))
     # Which head each key lands on: `sets` is the carrier's, and the keys
-    # named here are the filed item's. See docs/method.md#filing
+    # named here are the filed item's. See docs/reference.md#filing
     if row["files"] is not None:
         blocks.append(("Files", [_filed(row["files"])]))
     # Absent rather than empty where nothing names a section: then the `help`
-    # line is the whole procedure. See docs/method.md#the-contract
+    # line is the whole procedure. See docs/reference.md#the-contract
     if row["reading"]:
         blocks.append(("Reading", _named(row["reading"])))
     return "\n\n".join(
@@ -734,11 +753,11 @@ def _named(pointers: Mapping[str, str]) -> list[str]:
 
 def _places(declaration: Declaration, transition: Transition) -> bool:
     """Whether giving the item a place in an order is something this run does:
-    a kind that places, landing in a queued state. See docs/method.md#the-queue
+    a kind that places, landing in a queued state. See docs/reference.md#the-queue
     """
-    return transition.kind in PLACING and declaration.states[
-        str(transition.to)
-    ].has(queued.NAME)
+    return transition.kind in PLACING and declaration.states[str(transition.to)].has(
+        queued.NAME
+    )
 
 
 def _placement_options(transition: Transition) -> list[click.Parameter]:
@@ -793,7 +812,7 @@ def _writing_options() -> list[click.Parameter]:
 
     `_minting_options`' shape, with no collision check: a write-bullet takes
     no `sets`, so no declared key can be called either. See
-    docs/method.md#annotate
+    docs/reference.md#annotate
     """
     return [
         click.Option(
@@ -814,7 +833,7 @@ def _filing_options(transition: Transition) -> list[click.Parameter]:
     `_minting_options`' shape, and a `sets` key of the same name refuses by
     name. Neither is `required=True` here: `--title` really is optional, and
     `--body` is refused by the executor in the creating verb's own words.
-    See docs/method.md#filing
+    See docs/reference.md#filing
     """
     for flag, *_ in FILING:
         if (field := _setting(transition, flag)) is not None:
@@ -836,7 +855,7 @@ def _record_option(transition: Transition) -> click.Option:
     Required on a close, which deletes the item. Optional on a move, which
     leaves it readable where it went, so the heading can still be filled by
     hand. A move can take `sets`, so a key of the same name refuses by name.
-    `-` reads stdin through `_prose`. See docs/method.md#dissolving
+    `-` reads stdin through `_prose`. See docs/reference.md#dissolving
     """
     if (field := _setting(transition, RECORD)) is not None:
         raise Refusal(
@@ -892,7 +911,7 @@ def _fold_option(transition: Transition) -> click.Option:
 
     Required, and it needs the `sets` collision check, as `--note` does: a
     mark-bullet may declare `sets`. `INTO` is a merge's key too, and the two
-    never sit on one command. See docs/method.md#fold
+    never sit on one command. See docs/reference.md#fold
     """
     if (field := _setting(transition, INTO)) is not None:
         raise Refusal(
@@ -915,7 +934,7 @@ def _keep_claims_option(transition: Transition) -> click.Option:
     """Take this claim though this session holds a claim on another item.
 
     A flag, and it needs the `sets` collision check. Without it the run
-    refuses and names each held item. See docs/method.md#the-claimed-state
+    refuses and names each held item. See docs/reference.md#the-claimed-state
     """
     if (field := _setting(transition, KEEP_CLAIMS)) is not None:
         raise Refusal(
@@ -960,11 +979,11 @@ def _option(
     Optional unless `required`: a key the transition both `sets` and
     `requires`, which the run supplies rather than the head. Otherwise a key
     that must be present is enforced by the next transition's `requires`.
-    See docs/method.md#transitions. A cursor takes a name, so it is ordinary
+    See docs/reference.md#transitions. A cursor takes a name, so it is ordinary
     text. A
     list-valued key's option repeats and says so in its metavar, because click
     renders no marker of its own.
-    See docs/method.md#list-valued
+    See docs/reference.md#list-valued
     """
     key = declaration.keys[key_name]
     return click.Option(
@@ -998,7 +1017,7 @@ def _prose(body: str | None) -> str | None:
 
 
 #: What the editor opens with for a create given no `--body`: lines starting
-#: with `#` are left out of the item. See docs/method.md#idea
+#: with `#` are left out of the item. See docs/reference.md#idea
 EDITOR_TEMPLATE = (
     "\n# Describe the new item here. Lines starting with # are left out,\n"
     "# and an empty description files nothing.\n"
@@ -1009,16 +1028,19 @@ def _drafted(transition: Transition, body: str | None) -> str | None:
     """A create's body, from `$EDITOR` when none was given and a person is at
     a terminal; otherwise the body as given, so a run with no terminal —
     an agent's, a script's — refuses exactly as before.
-    See docs/method.md#idea
+    See docs/reference.md#idea
     """
     if body is not None or transition.source is not None or not _on_a_terminal():
         return body
     edited = click.edit(EDITOR_TEMPLATE)
     if edited is None:
         return None
-    return "\n".join(
-        line for line in edited.splitlines() if not line.startswith("#")
-    ).strip() or None
+    return (
+        "\n".join(
+            line for line in edited.splitlines() if not line.startswith("#")
+        ).strip()
+        or None
+    )
 
 
 def _on_a_terminal() -> bool:
@@ -1064,7 +1086,7 @@ def _init_command() -> click.Command:
     An explicit directory rather than only the working one. No `--check`: it
     is not a transition, and every refusal is already computed before the
     first write.
-    See docs/method.md#init
+    See docs/reference.md#init
     """
 
     def run(directory: str) -> None:
@@ -1175,7 +1197,7 @@ def _list_command(declaration: Declaration) -> click.Command:
     Not a declared transition: it moves nothing, writes nothing and takes no
     lock. Its parameters and its whole body are `_read_params` and
     `_read_run`, which `show` calls too.
-    See docs/method.md#the-listing
+    See docs/reference.md#the-listing
     """
     return click.Command(
         name=LIST_COMMAND,
@@ -1201,8 +1223,7 @@ def _read_params(declaration: Declaration) -> list[click.Parameter]:
             metavar="[OP]STATE",
             multiple=True,
             help=(
-                "Only items in this state. One of: "
-                f"{', '.join(declaration.states)}."
+                f"Only items in this state. One of: {', '.join(declaration.states)}."
             ),
         ),
         click.Option(
@@ -1262,13 +1283,13 @@ def _read_run(
     `show` stays one traversal. `bulleting` mirrors it one level in, narrowing
     to one bullet of that item; given neither, nothing changes. A read that
     names its item takes no filters.
-    See docs/method.md#show
+    See docs/reference.md#show
     """
 
     def run(**given: Any) -> None:
         as_json = given.pop("as_json")
         # Read before `_tests` pops it: any `--state` turns hiding off.
-        # See docs/method.md#listed
+        # See docs/reference.md#listed
         hiding = (
             naming is None and not given.get("state") and bool(declaration.unlisted)
         )
@@ -1319,9 +1340,7 @@ def _read_run(
             chosen, unlisted = read.unlisting(declaration, chosen)
         unsorted: list[dict[str, Any]] = []
         if by_state:
-            chosen, unsorted = read.ordered(
-                chosen, by_state, tuple(declaration.states)
-            )
+            chosen, unsorted = read.ordered(chosen, by_state, tuple(declaration.states))
         # The one narrowing that changes what a row is: after the handle's, and
         # before the renderers.
         reading, verbatim = kind, None
@@ -1369,9 +1388,7 @@ def _read_run(
             click.echo(line)
         # The frame goes to stderr, never stdout, and so does every exception
         # report: they are about the tree rather than rows of it.
-        click.echo(
-            f"\nshowing {len(chosen)} of {found.walked} {LIST_KIND}", err=True
-        )
+        click.echo(f"\nshowing {len(chosen)} of {found.walked} {LIST_KIND}", err=True)
         for one in unlisted:
             click.echo(
                 f"not listed: {one[read.STATE]} ({one[read.COUNT]}). "
@@ -1379,7 +1396,7 @@ def _read_run(
                 err=True,
             )
         # An empty tree says how to file the first item, so a newcomer's first
-        # listing names a command rather than a count. See docs/method.md#the-listing
+        # listing names a command rather than a count. See docs/reference.md#the-listing
         if not found.walked and handle is None:
             for said in _first_item(declaration):
                 click.echo(said, err=True)
@@ -1412,7 +1429,7 @@ def _stranded(one: Mapping[str, Any]) -> str:
 def _unknown(one: Mapping[str, Any]) -> str:
     """One edge naming nothing filed, as the text form's exception line.
 
-    Named rather than read as satisfied. See docs/method.md#dependencies
+    Named rather than read as satisfied. See docs/reference.md#dependencies
     """
     return (
         f"unknown dependency: {one[depends.SLUG]} names "
@@ -1424,7 +1441,7 @@ def _unknown(one: Mapping[str, Any]) -> str:
 def _unresolved(one: Mapping[str, Any]) -> str:
     """One reference naming nothing filed, as the text form's exception line.
 
-    `_unknown`'s shape, for a reference. See docs/method.md#references
+    `_unknown`'s shape, for a reference. See docs/reference.md#references
     """
     return (
         f"unresolved reference: {one[depends.SLUG]} names "
@@ -1436,10 +1453,10 @@ def _unresolved(one: Mapping[str, Any]) -> str:
 def _unfound(one: Mapping[str, Any]) -> str:
     """One filed item naming a bullet its carrier no longer has.
 
-    See docs/method.md#carried
+    See docs/reference.md#carried
     """
     return (
-        f"unfound finding: {one[read.PATH]} carries \"{one[read.VALUE]}\" from "
+        f'unfound finding: {one[read.PATH]} carries "{one[read.VALUE]}" from '
         f"{one[read.CARRIER]}, and no bullet there is named {one[read.VALUE]}"
     )
 
@@ -1462,7 +1479,7 @@ def _gap(one: Mapping[str, Any]) -> str:
 
     Named in the default read rather than only refusing at the next mint, and
     a state is named by its declared name rather than its directory.
-    See docs/method.md#the-register
+    See docs/reference.md#the-register
     """
     return (
         f"register gap: {numbered.KEY} {one[numbered.KEY]} is missing from "
@@ -1533,7 +1550,7 @@ def _unmarkable(one: Mapping[str, Any]) -> str:
     Reported here and refused at the verb, `_gap`'s arrangement: the two
     share the reader rather than the sentence. Named before a session reaches
     for the verb, which is what the offer passing it over would otherwise
-    hide. See docs/method.md#marking
+    hide. See docs/reference.md#marking
     """
     return (
         f"unmarkable bullet: {one[read.BULLET_NAME]} in {one[read.BULLET_ITEM]} "
@@ -1547,7 +1564,7 @@ def _unmarkable(one: Mapping[str, Any]) -> str:
 def _unread(one: Mapping[str, Any]) -> str:
     """One bullet the reader passed over, as the text form's exception line.
 
-    `_unmarkable`'s form. See docs/method.md#sub-phases
+    `_unmarkable`'s form. See docs/reference.md#sub-phases
     """
     name = one[read.BULLET_NAME]
     return (
@@ -1555,7 +1572,6 @@ def _unread(one: Mapping[str, Any]) -> str:
         f"({one[read.PATH]}:{one[read.BULLET_LINE]}) is not read as a "
         f"sub-phase: {one[read.BULLET_REASON]}"
     )
-
 
 
 #: The text line each of `read.REPORTS` prints per record, or `None` for the
@@ -1624,6 +1640,7 @@ def _sorts(declaration: Declaration, given: tuple[str, ...]) -> list[read.Sort]:
 # The read of one item: the same traversal, narrowed by a handle
 # --------------------------------------------------------------------------
 
+
 def _one_bullet(
     declaration: Declaration,
     row: Mapping[str, Any],
@@ -1635,7 +1652,7 @@ def _one_bullet(
     sub-phases refuses by name, and a name the body has not got refuses
     through `subphase.unknown`, the disposition's own sentence. The record is
     not a row, because putting a body in a row would put it in every listing.
-    See docs/method.md#show
+    See docs/reference.md#show
     """
     one = item.read(declaration.root / row[read.PATH], declaration)
     if one.state.sub_phases is None:
@@ -1693,7 +1710,7 @@ def _show_command(declaration: Declaration) -> click.Command:
     Registered unconditionally, unlike `release`: reading one item is not a
     capability anything opts into. Its whole body is `_read_run` with `naming`
     set, and `bulleting` is the second positional every disposition takes.
-    See docs/method.md#show
+    See docs/reference.md#show
     """
     return click.Command(
         name=SHOW_COMMAND,
@@ -1701,9 +1718,7 @@ def _show_command(declaration: Declaration) -> click.Command:
             click.Argument(["name"], metavar=ITEM),
             # The disposition's own second positional, spelled by its own two
             # constants. The brackets are click's own for an optional one.
-            click.Argument(
-                [BULLET], metavar=f"[{MARKING_METAVAR}]", required=False
-            ),
+            click.Argument([BULLET], metavar=f"[{MARKING_METAVAR}]", required=False),
             _json_option(),
         ],
         callback=_read_run(declaration, SHOW_KIND, naming="name", bulleting=BULLET),
@@ -1736,7 +1751,7 @@ def _contents(
     Each row's `options`, and the tool's own `commands`, are read off the
     built `group` rather than the declaration: the same parameters `--help`
     renders, so the two cannot drift.
-    See docs/method.md#the-interpreter and docs/method.md#the-contract
+    See docs/reference.md#the-interpreter and docs/reference.md#the-contract
     """
     if as_json:
         assert isinstance(group, click.Group)
@@ -1824,9 +1839,7 @@ def _described(command: click.Command) -> dict[str, Any]:
         "name": command.name,
         "help": command.short_help or command.help,
         "options": _options(command),
-        "commands": [
-            _described(one) for one in command.commands.values()
-        ]
+        "commands": [_described(one) for one in command.commands.values()]
         if isinstance(command, click.Group)
         else [],
     }

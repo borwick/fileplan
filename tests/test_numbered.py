@@ -127,7 +127,9 @@ def test_a_duplicate_produces_no_gap() -> None:
     leave the arithmetic untouched, so there is no third report. The mint
     still refuses naming both, and two live items carrying one number both
     print it in the default read."""
-    assert numbered.missing(numbered.taken({"one": 3, "two": 3, "three": 1, "x": 2})) == []
+    assert (
+        numbered.missing(numbered.taken({"one": 3, "two": 3, "three": 1, "x": 2})) == []
+    )
 
 
 def test_the_mint_refuses_on_the_arithmetic_the_listing_reports() -> None:
@@ -411,7 +413,7 @@ def test_the_preamble_survives_the_insertion() -> None:
 def test_the_entry_is_the_strict_form_the_register_reads() -> None:
     """The whole reason the writer lives beside the readers. What it writes
     parses, and nothing it writes is a `##` the register cannot read — which
-    is the failure `docs/method.md#the-register` records the old tool having."""
+    is the failure `docs/reference.md#the-register` records the old tool having."""
     written = numbered.entry(FILED, 3, "A middle one")
     assert numbered.heading_errors(numbered.unreadable(written), WHERE) == []
 
@@ -420,13 +422,19 @@ def test_the_result_re_parses_to_a_contiguous_register() -> None:
     """The end-to-end fact the insertion exists for: fill the gap and the next
     mint stops refusing."""
     written = FILED
-    for number, title in ((2, "Two"), (3, "Three"), (4, "Four"), (5, "Five"), (6, "Six")):
+    for number, title in (
+        (2, "Two"),
+        (3, "Three"),
+        (4, "Four"),
+        (5, "Five"),
+        (6, "Six"),
+    ):
         written = numbered.entry(written, number, title)
     numbers = numbered.numbers(written)
     assert numbers == [1, 2, 3, 4, 5, 6, 7]
-    assert numbered.next_number(numbered.taken(
-        {f"§ {one}.": one for one in numbers}
-    )) == 8
+    assert (
+        numbered.next_number(numbered.taken({f"§ {one}.": one for one in numbers})) == 8
+    )
 
 
 def test_exactly_one_blank_line_sits_on_each_side_of_the_entry() -> None:
@@ -472,7 +480,7 @@ def test_a_heading_the_register_cannot_read_is_not_an_insertion_point() -> None:
 def test_a_record_goes_under_the_heading_with_one_blank_line_between() -> None:
     """The half `archive-plan` needs: mint-then-fill cannot work when the run
     deletes the body the record is written from, so the prose comes in with
-    the run (`docs/method.md#dissolving`)."""
+    the run (`docs/reference.md#dissolving`)."""
     written = numbered.entry(FILED, 3, "A middle one", "What it decided.")
     assert "## 3. A middle one\n\nWhat it decided.\n\n## 7." in written
 
@@ -579,4 +587,3 @@ def test_a_register_with_no_declared_floor_starts_at_the_first_number() -> None:
     assert numbered.FIRST == 1
     assert numbered.next_number({}) == numbered.next_number({}, first=numbered.FIRST)
     assert numbered.missing(held(3)) == numbered.missing(held(3), first=numbered.FIRST)
-

@@ -10,6 +10,13 @@ from pathlib import Path
 
 FIXTURE = Path(__file__).parent / "fixtures" / "plan.toml"
 
+#: The worked example, the declaration fileplan ships for a reader to copy
+#: (38-7). Every test that grades the product against a real declaration reads
+#: this one: the vocabulary, the contracts, the orphans and the self-load.
+#: This repo's own `plan.toml` at the root is a different file with a different
+#: job, and a built tree does not have it.
+EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "plan.toml"
+
 os.environ.setdefault("FILEPLAN_PLAN_TOML", str(FIXTURE))
 
 
@@ -35,6 +42,6 @@ FIXTURE_FILES = (
 #: loaded. Imported here, after the environment above is set, so the three
 #: modules that grade "no key is carried and unreachable" share one answer
 #: instead of spelling the flatten three times.
-from fileplan.declaration import DERIVED_KEYS  # noqa: E402
+from fileplan.declaration import DERIVED_KEYS
 
 DERIVABLE_KEYS = tuple(name for group in DERIVED_KEYS for name in group.names)

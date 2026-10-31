@@ -17,26 +17,26 @@ import dataclasses
 import datetime as dt
 import os
 import socket
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import pytest
-from dulwich.repo import Repo
-
 from conftest import DERIVABLE_KEYS, FIXTURE_FILES
-
-from fileplan import claim, depends, numbered, read, stale, subphase
-from fileplan.declaration import Declaration, Refusal, load
-from fileplan.item import Item
+from dulwich.repo import Repo
 
 # A sibling test module, not a package. Imported so that a stamp a record is
 # taken at, and a pid that is honestly dead, have one home rather than a copy
 # in every module that needs them.
 from test_claim import DECLARED, TAKEN, exited
 
+from fileplan import claim, depends, numbered, read, stale, subphase
+from fileplan.declaration import Declaration, Refusal, load
+from fileplan.item import Item
+
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
-READY = '''\
+READY = """\
 +++
 title = "A seedling"
 cultivar = "heirloom"
@@ -44,7 +44,7 @@ tag = "spring"
 +++
 
 The body starts here.
-'''
+"""
 
 
 @pytest.fixture
@@ -152,7 +152,9 @@ def ignoring(tree: Declaration, *names: str) -> Declaration:
     """The fixture declaration reloaded with `[fileplan].ignore` naming
     `names`, so a test says which files a state directory skips."""
     listed = ", ".join(f'"{name}"' for name in names)
-    tree.source.write_text(f"[fileplan]\nignore = [{listed}]\n\n{tree.source.read_text()}")
+    tree.source.write_text(
+        f"[fileplan]\nignore = [{listed}]\n\n{tree.source.read_text()}"
+    )
     return load(tree.source)
 
 
@@ -280,7 +282,7 @@ def test_a_rows_fields_are_in_a_fixed_order(tree: Declaration) -> None:
     assert row[stale.DAYS] is None
 
 
-STEPPED = '''\
+STEPPED = """\
 +++
 title = "A tree"
 {cursor}
@@ -291,7 +293,7 @@ title = "A tree"
 - **graft-1 — the first.**{mark1}
 - **graft-2 — the second.**{mark2}
 - **graft-3 — the third.**{mark3}
-'''
+"""
 
 #: The fixture's marks. **Neither is `done`**: completion is a mark on the
 #: bullet now, so the vocabulary independence this file used to prove over
@@ -477,9 +479,7 @@ def test_a_bullet_in_a_state_nothing_marks_into_is_reported_nowhere(
     unmarking = dataclasses.replace(
         tree,
         transitions={
-            name: one
-            for name, one in tree.transitions.items()
-            if one.marks is None
+            name: one for name, one in tree.transitions.items() if one.marks is None
         },
         # What the verbs mark into is read onto each state at load.
         states={
@@ -534,17 +534,19 @@ def test_a_state_that_counts_no_sub_phases_carries_none_of_the_three_fields(
     assert row[subphase.LEFT] is None
 
 
-WAITING = '''\
+WAITING = """\
 +++
 title = "A tree"
 after = [{edges}]
 +++
 
 Prose.
-'''
+"""
 
 
-def waiting(tree: Declaration, name: str, *edges: str, place: int | None = None) -> None:
+def waiting(
+    tree: Declaration, name: str, *edges: str, place: int | None = None
+) -> None:
     """A tree in the orchard waiting on ``edges``, at ``place`` if given."""
     head = ", ".join(f'"{one}"' for one in edges)
     text = WAITING.format(edges=head)
@@ -579,14 +581,14 @@ def test_a_row_carries_what_waits_on_it(tree: Declaration) -> None:
     ] == ["a-tree", "b-tree"]
 
 
-REPLACING = '''\
+REPLACING = """\
 +++
 title = "A seedling"
 replaces = [{edges}]
 +++
 
 Prose.
-'''
+"""
 
 
 def replacing(tree: Declaration, state: str, name: str, *edges: str) -> None:
@@ -623,7 +625,11 @@ def test_a_reference_naming_nothing_filed_is_unresolved(tree: Declaration) -> No
     replacing(tree, "greenhouse", "b-seedling", "gone-tree")
     found = read.listing(tree)
     assert found.unresolved == [
-        {depends.SLUG: "b-seedling", depends.KEY: "replaces", depends.NAMES: "gone-tree"}
+        {
+            depends.SLUG: "b-seedling",
+            depends.KEY: "replaces",
+            depends.NAMES: "gone-tree",
+        }
     ]
     assert found.unknown == []
 
@@ -675,7 +681,7 @@ def test_an_item_waiting_on_nothing_carries_none(tree: Declaration) -> None:
 def test_an_edge_naming_nothing_filed_is_not_in_blocked_by(
     tree: Declaration,
 ) -> None:
-    """"Waiting on X" and "X does not exist" are different facts. The second
+    """ "Waiting on X" and "X does not exist" are different facts. The second
     is the `unknown` report, and it must not hide inside the first."""
     waiting(tree, "b-tree", "gone-tree")
     found = read.listing(tree)
@@ -809,7 +815,7 @@ def test_a_head_value_keeps_its_toml_type(tree: Declaration) -> None:
         tree,
         "greenhouse",
         "a-seedling.md",
-        "+++\nplanted = 2026-09-01\nafter = [\"b-seedling\"]\n+++\n",
+        '+++\nplanted = 2026-09-01\nafter = ["b-seedling"]\n+++\n',
     )
     (row,) = read.rows(tree, read.items(tree))
     assert row["planted"] == dt.date(2026, 9, 1)
@@ -1232,7 +1238,6 @@ def test_a_contiguous_register_names_nothing(tree: Declaration) -> None:
     assert found.gaps == [] and found.lost == []
 
 
-
 def floored(tree: Declaration, first: int) -> Declaration:
     """``tree`` reloaded with `orchard`'s register declaring a floor.
 
@@ -1244,8 +1249,7 @@ def floored(tree: Declaration, first: int) -> Declaration:
     source.write_text(
         source.read_text(encoding="utf-8").replace(
             'archive           = "orchard-archive.md"',
-            'archive           = "orchard-archive.md"\n'
-            f"first-number      = {first}",
+            f'archive           = "orchard-archive.md"\nfirst-number      = {first}',
         ),
         encoding="utf-8",
     )
@@ -1314,7 +1318,7 @@ def test_a_lost_close_out_that_also_opens_a_gap_produces_both_records(
 def test_a_lost_close_out_at_the_top_of_the_range_is_named_though_it_makes_no_gap(
     tree: Declaration,
 ) -> None:
-    """John's reason for a second report, 2026-09-04, pinned. A loss at the
+    """John's reason for a second report, pinned. A loss at the
     maximum lowers the maximum and leaves what remains gapless, so the gap
     report structurally cannot name it — this is what narrows that hole."""
     archived(tree, "## 1. A felled tree\n\n## Section 2: lost\n")
@@ -1495,7 +1499,10 @@ def test_a_sort_ranks_declared_values_then_numbers_then_text() -> None:
 def test_descending_reverses_the_values_and_a_missing_key_stays_last() -> None:
     rows = [sized("a"), sized("b", "S"), sized("c", "XL"), sized("d", "")]
     assert by_size(rows, read.Sort("size", descending=True, order=SIZES)) == [
-        "c", "b", "a", "d"
+        "c",
+        "b",
+        "a",
+        "d",
     ]
     assert by_size(rows) == ["b", "c", "a", "d"]
 
@@ -1515,12 +1522,18 @@ def test_the_slug_is_the_last_tie_break() -> None:
     rows = [sized("c", "S"), sized("a", "S"), sized("b", "S")]
     assert by_size(rows) == ["a", "b", "c"]
     assert by_size(rows, read.Sort("size", descending=True, order=SIZES)) == [
-        "a", "b", "c"
+        "a",
+        "b",
+        "c",
     ]
 
 
 def test_a_sort_keeps_the_states_in_their_declared_order() -> None:
-    rows = [sized("a", "S", "orchard"), sized("b", "XL"), sized("c", None, "greenhouse")]
+    rows = [
+        sized("a", "S", "orchard"),
+        sized("b", "XL"),
+        sized("c", None, "greenhouse"),
+    ]
     assert by_size(rows) == ["b", "c", "a"]
 
 
@@ -1689,7 +1702,9 @@ INFESTED = [
 def test_drawn_from_asks_the_all_of_question_over_a_list() -> None:
     """The finding, answered: `=aphid` returns `mixed` too, and this does
     not. Both readings of the same three rows, side by side."""
-    assert slugs(read.matching(INFESTED, [read.comparison("pest", "aphid", PESTS)])) == [
+    assert slugs(
+        read.matching(INFESTED, [read.comparison("pest", "aphid", PESTS)])
+    ) == [
         "one",
         "mixed",
         "two",
@@ -1967,7 +1982,6 @@ def test_the_resolver_still_lists_a_duplicated_slug(tree: Declaration) -> None:
     assert len(read.items(tree)) == 2
 
 
-
 # --------------------------------------------------------------------------
 # The rules under the handle: pure, so they grade with no tmp_path
 # --------------------------------------------------------------------------
@@ -2032,7 +2046,9 @@ def test_a_number_as_a_handle_is_told_where_numbers_are_found(handle) -> None:
     with pytest.raises(Refusal) as refusal:
         read.chosen(NAMED, handle)
     said = str(refusal.value)
-    assert f"no live item carries {handle.split('-')[0]}, so it names an archived" in said
+    assert (
+        f"no live item carries {handle.split('-')[0]}, so it names an archived" in said
+    )
     assert "`fileplan show` finds a live section by its number" in said
     assert "a verb that writes takes a slug" in said
 
@@ -2040,8 +2056,14 @@ def test_a_number_as_a_handle_is_told_where_numbers_are_found(handle) -> None:
 @pytest.mark.parametrize(
     "handle, said",
     [
-        ("23-1", "23-1 is a sub-phase of `a-seedling`: `fileplan show a-seedling 23-1`"),
-        ("23-4a", "23-4a is a sub-phase of `a-seedling`: `fileplan show a-seedling 23-4a`"),
+        (
+            "23-1",
+            "23-1 is a sub-phase of `a-seedling`: `fileplan show a-seedling 23-1`",
+        ),
+        (
+            "23-4a",
+            "23-4a is a sub-phase of `a-seedling`: `fileplan show a-seedling 23-4a`",
+        ),
         ("23", "23 is the number `a-seedling` carries: `fileplan show a-seedling`"),
     ],
 )
@@ -2146,9 +2168,7 @@ def test_a_declaration_that_derives_nothing_else_carries_only_the_age(
     """The negative half, graded on a document rather than on the fixture:
     every gate off means every name absent from the row, except the age,
     which arrives unconditionally (31-1) and is `None` outside git."""
-    (tmp_path / "plan.toml").write_text(
-        '[states.greenhouse]\npath = "greenhouse"\n'
-    )
+    (tmp_path / "plan.toml").write_text('[states.greenhouse]\npath = "greenhouse"\n')
     plain = load(tmp_path / "plan.toml")
     (tmp_path / "greenhouse").mkdir()
     (tmp_path / "greenhouse" / "a-seedling.md").write_text(

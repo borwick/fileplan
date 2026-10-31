@@ -14,16 +14,17 @@ arms share no protocol, and each hands back a different kind of thing.
 `release` lives here too, because releasing a claim mutates under the run
 lock.
 
-See docs/method.md#the-check
+See docs/reference.md#the-check
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import re
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
 from fileplan import claim, depends, item, numbered, queued, read, subphase
 from fileplan.declaration import (
@@ -45,7 +46,6 @@ from fileplan.declaration import (
 )
 from fileplan.lock import run_lock
 
-
 # --------------------------------------------------------------------------
 # Preconditions: pure over a head
 # --------------------------------------------------------------------------
@@ -62,7 +62,7 @@ def offer_errors(head: Mapping[str, Any], transition: Transition) -> list[str]:
     so a list is the several values it holds. A key refused on presence
     refuses any value at all.
     Pure: no filesystem, no cwd.
-    See docs/method.md#commands
+    See docs/reference.md#commands
     """
     errors = [
         f'{transition.name} requires "{key}", which this item does not carry'
@@ -96,7 +96,7 @@ def value_errors(
     option, whichever head it lands on: the carrier's `sets`, and the keys a
     verb that files writes onto the filed item. And a required option the run
     was not given, which click refuses too, for a caller that is not the CLI.
-    See docs/method.md#list-valued
+    See docs/reference.md#list-valued
     """
     errors = [
         f'{transition.name} requires "{key}", and this run was not given it'
@@ -131,7 +131,7 @@ def dangle_errors(
     """Every way `owner` is not something `transition` may take away yet.
 
     Fires on a close that `archives`, over every other item read through its
-    own state's `opened-for` key. Pure. See docs/method.md#the-dangle-check
+    own state's `opened-for` key. Pure. See docs/reference.md#the-dangle-check
     """
     if not transition.records:
         return []
@@ -149,7 +149,7 @@ def dangle_errors(
             pending=one.state.pending,
             marks=one.state.marks,
         )
-        # The pending bullet is dropped. See docs/method.md#carrier
+        # The pending bullet is dropped. See docs/reference.md#carrier
         undisposed = [bullet for bullet in carried if bullet.mark is None]
         if not undisposed:
             continue
@@ -173,7 +173,7 @@ def referenced_errors(
     A reference is a record. Clearing the edge would erase it, and leaving it
     would make a record read as a typo, so a close refuses until the edge is
     gone. A merge repoints instead, and is not asked. Pure, and the run and
-    the row's `commands` both call it. See docs/method.md#references
+    the row's `commands` both call it. See docs/reference.md#references
     """
     if transition.kind != CLOSE:
         return []
@@ -193,7 +193,7 @@ def unmarked_errors(owner: item.Item, transition: Transition) -> list[str]:
     """Every sub-phase of `owner` that `transition` would file a record over.
 
     Fires on a close that `archives`, and the pending marker counts here where
-    `dangle_errors` drops it. Pure. See docs/method.md#the-close-check
+    `dangle_errors` drops it. Pure. See docs/reference.md#the-close-check
     """
     heading = owner.state.sub_phases
     if not transition.records or not heading:
@@ -203,9 +203,11 @@ def unmarked_errors(owner: item.Item, transition: Transition) -> list[str]:
     if not (open_ := subphase.unmarked(owner.body, heading, marks)):
         return []
     return [
-        f"it carries {len(open_)} of {len(carried)} {subphase.NAME} with "
-        f"no mark: {', '.join(open_)}. A record filed now would not have "
-        "them in it, and the body it is written from goes away with the run"
+        (
+            f"it carries {len(open_)} of {len(carried)} {subphase.NAME} with "
+            f"no mark: {', '.join(open_)}. A record filed now would not have "
+            "them in it, and the body it is written from goes away with the run"
+        )
     ]
 
 
@@ -224,7 +226,7 @@ def commands(
     mark-bullet, a bullet left to mark. What a run is given is not asked:
     a key the transition `sets` counts as carried, and the refusal over a
     second claim this session holds is `--keep-claims`' to lift. `walked`
-    is the whole tree, read once by the caller. See docs/method.md#commands
+    is the whole tree, read once by the caller. See docs/reference.md#commands
     """
     return [
         transition.name
@@ -259,7 +261,7 @@ def _held_elsewhere(
     The executor's own question, asked under `_claiming`'s own gate: a verb
     that neither enters nor leaves a claimed state never reads a record, so
     neither does the row. Not "is it claimed at all", which would hide the
-    item this session already holds. See docs/method.md#the-claimed-state
+    item this session already holds. See docs/reference.md#the-claimed-state
     """
     if not any(_claimed_ends(declaration, transition)):
         return False
@@ -290,7 +292,7 @@ def _record(declaration: Declaration, slug: str) -> Mapping[str, Any] | None:
 
 def _markable(one: item.Item) -> bool:
     """Whether `one` carries a bullet a mark could still go on: unmarked, and
-    with nothing after its bold run in the way. See docs/method.md#marking"""
+    with nothing after its bold run in the way. See docs/reference.md#marking"""
     if not one.state.sub_phases:
         return False
     return any(
@@ -306,7 +308,7 @@ def _markable(one: item.Item) -> bool:
 
 def _foldable(one: item.Item) -> bool:
     """Whether `one` carries two bullets a fold could take: one to mark, and
-    one unmarked to move its prose under. See docs/method.md#marking"""
+    one unmarked to move its prose under. See docs/reference.md#marking"""
     if not one.state.sub_phases:
         return False
     return (
@@ -325,7 +327,7 @@ def _foldable(one: item.Item) -> bool:
 
 def _writable(one: item.Item) -> bool:
     """Whether `one` carries a named bullet text could go under, marked or
-    not. See docs/method.md#bulleted"""
+    not. See docs/reference.md#bulleted"""
     if not one.state.sub_phases:
         return False
     return bool(
@@ -387,7 +389,7 @@ def execute(
     for, and `announce` is where a run says something it was not asked to do. `check` runs this identical path and
     stops at the seam each arm documents, handing back `_would`'s sentence
     instead of a path.
-    See docs/method.md#the-check
+    See docs/reference.md#the-check
     """
     given = {key: value for key, value in (values or {}).items() if value is not None}
     # Before the lock and before either arm, so `--check` says it in the same words.
@@ -463,7 +465,7 @@ def _would(
     Built from the effects the arm has already resolved, never re-read off the
     declaration, so a clause's absence is meaningful. `dropping` is the keys
     the head actually carries that this verb takes away.
-    See docs/method.md#the-check
+    See docs/reference.md#the-check
     """
     said: list[str] = []
     if entering is not None:
@@ -490,9 +492,7 @@ def _would(
     if filing is not None:
         said.append(f"file {named(filing.path, root)}")
     if archiving is not None:
-        said.append(
-            f"file `{archiving.heading}` in {named(archiving.path, root)}"
-        )
+        said.append(f"file `{archiving.heading}` in {named(archiving.path, root)}")
     if clearing is not None and clearing.edits:
         where = ", ".join(named(one.path, root) for one in clearing.edits)
         said.append(f"clear the edge to it in {where}")
@@ -528,9 +528,7 @@ def _create(running: _Running) -> Path | str:
     claiming = _claiming(running, slug=stem)
     entering = _entering(running)
 
-    destination = (
-        _directory(running, make=not running.check) / f"{stem}{item.SUFFIX}"
-    )
+    destination = _directory(running, make=not running.check) / f"{stem}{item.SUFFIX}"
     if running.check:
         # The seam: the reservation below is a write, partway through this arm.
         return _would(
@@ -562,7 +560,7 @@ def _cursor_errors(
     Graded against the destination state, on the value the run would write and
     the body it would write, not on what is already filed. A mark's cursor
     rests on the bullet just marked, which is the ordinary state after a mark.
-    See docs/method.md#the-cursor
+    See docs/reference.md#the-cursor
     """
     state = running.declaration.states[running.transition.to]
     if not state.cursor or not state.sub_phases:
@@ -636,7 +634,10 @@ def _move(running: _Running) -> Path | str:
     if errors:
         # Nothing written yet, and nothing will be.
         raise Refusal(
-            [f"{named(source, running.declaration.root)} cannot {running.transition.name}", *errors]
+            [
+                f"{named(source, running.declaration.root)} cannot {running.transition.name}",
+                *errors,
+            ]
         )
 
     # Resolved beside the rebuild, so the check can only name what this run
@@ -692,7 +693,11 @@ def _move(running: _Running) -> Path | str:
             # what it changes, never a value the head already holds.
             entering=entering
             if moving
-            else {key: value for key, value in entering.items() if original.head.get(key) != value},
+            else {
+                key: value
+                for key, value in entering.items()
+                if original.head.get(key) != value
+            },
             dropping=dropped,
             claiming=claiming,
             archiving=archiving,
@@ -729,13 +734,15 @@ def _unchanged(running: _Running, claiming: _Claiming) -> str:
     does a bare mint on a section already open. The notice is what tells
     either apart from a run that wrote. Tense-neutral, because the check says
     it too, in the same words.
-    See docs/method.md#bulleted, docs/method.md#the-check and
-    docs/method.md#the-claimed-state
+    See docs/reference.md#bulleted, docs/reference.md#the-check and
+    docs/reference.md#the-claimed-state
     """
     if claiming.take is not None:
         return "the claim is taken, and nothing else is given"
     state = running.declaration.states[running.transition.to]
-    if running.transition.kind == ADD_BULLET and not any(running.asked.get(key) for key in MINTING):
+    if running.transition.kind == ADD_BULLET and not any(
+        running.asked.get(key) for key in MINTING
+    ):
         return f'"{state.sub_phases}" is already open, so a bare run writes nothing'
     return "nothing given changes it"
 
@@ -769,7 +776,9 @@ def _entering(running: _Running, *, moving: str | None = None) -> dict[str, Any]
     given: dict[str, Any] = {}
     if ordered:
         request = {
-            flag: _anchor(running.declaration, state, value) if flag in ANCHORS else value
+            flag: _anchor(running.declaration, state, value)
+            if flag in ANCHORS
+            else value
             for flag in PLACEMENT
             if (value := running.asked.get(flag)) is not None
         }
@@ -793,7 +802,7 @@ def _mint(
     The register's second source, the archive headings, is read here rather
     than in `fileplan.numbered`, which is pure. Under the run lock `execute`
     holds, which makes it a reservation rather than a reading.
-    See docs/method.md#the-register
+    See docs/reference.md#the-register
     """
     archive = read.archive(declaration, state)
     if lost := [
@@ -824,7 +833,7 @@ ANCHORS = ("above", "below")
 PLACEMENT = (*ANCHORS, "at")
 
 #: The bullet a mint goes directly behind, rather than at the end of the
-#: list. See docs/method.md#bulleted
+#: list. See docs/reference.md#bulleted
 AFTER = "after"
 
 #: The same, for the capability that writes a body: a title to mint, whether
@@ -832,41 +841,41 @@ AFTER = "after"
 MINTING = ("title", "last", AFTER)
 
 #: The one a mark-bullet takes: which bullet this run acts on, a positional
-#: on the command line. See docs/method.md#marking
+#: on the command line. See docs/reference.md#marking
 MARKING = "name"
 
 #: The one any disposition may take beside it: why. Optional, unlike every
-#: other half's option. See docs/method.md#marking
+#: other half's option. See docs/reference.md#marking
 NOTE = "note"
 
 #: The two a write-bullet takes beside `MARKING`: the text it writes under
 #: the bullet, and whether that text replaces what is there rather than
-#: following it. See docs/method.md#annotate
+#: following it. See docs/reference.md#annotate
 TEXT, REPLACE = "text", "replace"
 
 #: The one every verb that archives takes: the prose that goes under the
 #: entry's heading. Required on a close, optional on a move.
-#: See docs/method.md#dissolving
+#: See docs/reference.md#dissolving
 RECORD = "record"
 
 #: The one a verb that absorbs takes: the item the work continues as, required
-#: there and resolved tree-wide. See docs/method.md#dissolving
+#: there and resolved tree-wide. See docs/reference.md#dissolving
 INTO = "into"
 
 #: The one a verb that retitles takes: the item's new title, a positional on
-#: the command line. See docs/method.md#retitle
+#: the command line. See docs/reference.md#retitle
 RETITLE = "new_title"
 
 
 #: The one a verb that `claims` takes: hold this claim beside others this
 #: session already holds, rather than refusing over them. A flag, and the
 #: less safe of the two, so the default stays the loud one.
-#: See docs/method.md#the-claimed-state
+#: See docs/reference.md#the-claimed-state
 KEEP_CLAIMS = "keep_claims"
 
 #: The two a verb that files takes: what to call the item it creates, and the
 #: prose that goes in it. `title` is optional, `body` is not.
-#: See docs/method.md#filing
+#: See docs/reference.md#filing
 FILING = ("title", "body")
 
 
@@ -879,7 +888,7 @@ def _unread_errors(
     A mint hands out the highest ordinal it can read plus one, so a hidden
     bullet's name comes out twice, and a mark cannot reach it at all. The
     listing reports the same bullets through `read.unread`.
-    See docs/method.md#sub-phases
+    See docs/reference.md#sub-phases
     """
     if wrong := unread_errors(
         running.declaration, running.transition, original, entering
@@ -895,7 +904,7 @@ def unread_errors(
 ) -> list[str]:
     """Why a mint or a mark into `original` would write beside a bullet the
     reader passes over, or nothing. Pure; the run raises it and a row's
-    `commands` asks it. See docs/method.md#sub-phases
+    `commands` asks it. See docs/reference.md#sub-phases
     """
     if transition.marks is None and transition.kind != ADD_BULLET:
         return []
@@ -904,8 +913,10 @@ def unread_errors(
         return []
     where = named(original.path, declaration.root)
     return [
-        f"{where} carries a bullet the reader passes over, so this run "
-        "would write beside a sub-phase nothing counts",
+        (
+            f"{where} carries a bullet the reader passes over, so this run "
+            "would write beside a sub-phase nothing counts"
+        ),
         *(f"{where}:{original.opening + one.line}: {one.reason}" for one in passed),
     ]
 
@@ -919,7 +930,7 @@ def form_errors(
     """Why an add-bullet has nothing to name a bullet from: a field its
     state's name form needs that `entering` does not carry. Pure; the run
     raises it and a row's `commands` asks it, leaving out the fields the
-    transition `sets`, which a run may be given. See docs/method.md#bulleted
+    transition `sets`, which a run may be given. See docs/reference.md#bulleted
     """
     if transition.kind != ADD_BULLET:
         return []
@@ -928,9 +939,11 @@ def form_errors(
     if not (absent := subphase.absent(state.sub_phase_name, entering)):
         return []
     return [
-        f"{named(original.path, declaration.root)} carries no {', '.join(absent)}, "
-        f'and {state.name} names its bullets "{state.sub_phase_name}" — '
-        "so this run has nothing to name one from"
+        (
+            f"{named(original.path, declaration.root)} carries no {', '.join(absent)}, "
+            f'and {state.name} names its bullets "{state.sub_phase_name}" — '
+            "so this run has nothing to name one from"
+        )
     ]
 
 
@@ -938,7 +951,7 @@ def number_errors(
     declaration: Declaration, transition: Transition, original: item.Item
 ) -> list[str]:
     """Why an archiving run has no number to file `original` under. Pure; the
-    run raises it and a row's `commands` asks it. See docs/method.md#the-register
+    run raises it and a row's `commands` asks it. See docs/reference.md#the-register
     """
     if not transition.archives:
         return []
@@ -948,10 +961,12 @@ def number_errors(
     assert transition.source is not None
     where = declaration.states[transition.source].archive
     return [
-        f"{named(original.path, declaration.root)} carries no {numbered.KEY}, "
-        f"and {transition.name} files it in {where} as `## <number>. "
-        "<title>`. An entry with no number is the record the register cannot "
-        f"read — fix the item's {numbered.KEY} before filing it"
+        (
+            f"{named(original.path, declaration.root)} carries no {numbered.KEY}, "
+            f"and {transition.name} files it in {where} as `## <number>. "
+            "<title>`. An entry with no number is the record the register cannot "
+            f"read — fix the item's {numbered.KEY} before filing it"
+        )
     ]
 
 
@@ -966,7 +981,7 @@ def _disposing(running: _Running, original: item.Item) -> subphase.Bullet | None
     disposition with the wrong sentence. `Bullet.unmarkable` carries that
     second clause itself, and the order is what makes reading it here the
     same question as `found.rest is not None`.
-    See docs/method.md#marking
+    See docs/reference.md#marking
     """
     if running.transition.marks is None:
         return None
@@ -999,7 +1014,7 @@ def _named_bullet(
     The gate a disposition, a write under a bullet, a fold's survivor and a
     mint's anchor share: `bullets`, so an unnamed bullet and the pending
     marker refuse as "no such name", in the words `show ITEM NAME` refuses in
-    too. See docs/method.md#marking
+    too. See docs/reference.md#marking
     """
     state = running.declaration.states[running.transition.to]
     # A `marks`, a write-bullet or a mint into a state that is not `bulleted`
@@ -1015,7 +1030,10 @@ def _named_bullet(
         # One sentence, one home: `show ITEM NAME` refuses in these words too.
         raise Refusal(
             subphase.unknown(
-                named(original.path, running.declaration.root), wanted, carried, state.sub_phases
+                named(original.path, running.declaration.root),
+                wanted,
+                carried,
+                state.sub_phases,
             )
         )
     return found
@@ -1031,7 +1049,7 @@ def _marking_cursor(
     construction rather than by a session remembering the claiming verb. A
     fold puts it on the survivor instead, because the work continues there,
     and `_folding` has already refused a survivor that is not a bullet.
-    See docs/method.md#the-cursor
+    See docs/reference.md#the-cursor
     """
     state = running.declaration.states[running.transition.to]
     if disposing is None or not state.cursor:
@@ -1058,7 +1076,7 @@ def _bulleting(
     announced rather than refused.
 
     The third value is the clause `--check` says about the body.
-    See docs/method.md#bulleted and docs/method.md#marking
+    See docs/reference.md#bulleted and docs/reference.md#marking
     """
     if running.transition.marks is not None:
         assert disposing is not None  # `_disposing` resolves it, or refuses.
@@ -1067,7 +1085,10 @@ def _bulleting(
         note = running.asked.get(NOTE)
         if note is not None and (wrong := subphase.note_errors(note)):
             raise Refusal(
-                [f"{named(original.path, running.declaration.root)} cannot take that note", *wrong]
+                [
+                    f"{named(original.path, running.declaration.root)} cannot take that note",
+                    *wrong,
+                ]
             )
         if running.transition.merges:
             return _folding(running, original, disposing, note=note)
@@ -1099,7 +1120,9 @@ def _bulleting(
         and state.sub_phase_name is not None
     )
     # What the form names, the item has to carry.
-    if wrong := form_errors(running.declaration, running.transition, original, entering):
+    if wrong := form_errors(
+        running.declaration, running.transition, original, entering
+    ):
         raise Refusal(wrong)
 
     title = running.asked.get(MINTING[0])
@@ -1107,7 +1130,10 @@ def _bulleting(
     after = running.asked.get(AFTER)
     if title is not None and (wrong := subphase.title_errors(title)):
         raise Refusal(
-            [f"{named(original.path, running.declaration.root)} cannot take that sub-phase", *wrong]
+            [
+                f"{named(original.path, running.declaration.root)} cannot take that sub-phase",
+                *wrong,
+            ]
         )
     if after is not None:
         if title is None:
@@ -1178,7 +1204,7 @@ def _folding(
     bullet itself, and not marked, and the folded body still reads the bullets
     the marked one does. The note opens with the survivor, so the mark says
     where the prose went. The check says how many lines move and never the
-    text. See docs/method.md#fold
+    text. See docs/reference.md#fold
     """
     state = running.declaration.states[running.transition.to]
     assert state.sub_phases is not None
@@ -1210,7 +1236,10 @@ def _folding(
     )
     if wrong := subphase.write_errors(marked, body, state.sub_phases):
         raise Refusal(
-            [f"{where} cannot move {disposing.name}'s prose under {survivor.name}", *wrong]
+            [
+                f"{where} cannot move {disposing.name}'s prose under {survivor.name}",
+                *wrong,
+            ]
         )
     owned = subphase.text(original.body, state.sub_phases, name=disposing.name)
     assert owned is not None  # `_named_bullet` found it.
@@ -1233,7 +1262,7 @@ def _writing(
     Every refusal is here, before `_move` writes a byte: the bullet, the
     text, and whether the written body still reads the bullets this one does.
     The check clause says how many lines go where and never the text.
-    See docs/method.md#annotate
+    See docs/reference.md#annotate
     """
     found = _named_bullet(running, original)
     state = running.declaration.states[running.transition.to]
@@ -1261,8 +1290,10 @@ def _writing(
     return (
         body,
         None,
-        f"replace {_lines(len(owned.splitlines()) - 1)} under {found.name} "
-        f"with {lines}",
+        (
+            f"replace {_lines(len(owned.splitlines()) - 1)} under {found.name} "
+            f"with {lines}"
+        ),
     )
 
 
@@ -1302,7 +1333,7 @@ def _archiving(
     An archive that is a document gets the entry inserted at its register
     place. One that is a directory gets a new file, `numbered.filename`,
     holding what that insertion would: nothing in any other entry is touched.
-    See docs/method.md#the-register
+    See docs/reference.md#the-register
     """
     if not running.transition.archives:
         return None
@@ -1409,7 +1440,7 @@ def _filing(
     run was given. The head is graded here, against the filing state, so a
     refusal leaves both files as they were. `_place` grades it again, as it
     does every write.
-    See docs/method.md#filing
+    See docs/reference.md#filing
     """
     if running.transition.files is None:
         return None
@@ -1445,7 +1476,9 @@ def _filing(
     errors = item.head_errors(head, running.declaration, state)
     errors += read.edge_errors(running.declaration, state, given)
     if errors:
-        raise Refusal([f"{named(path, running.declaration.root)} cannot be written", *errors])
+        raise Refusal(
+            [f"{named(path, running.declaration.root)} cannot be written", *errors]
+        )
     return _Filing(
         path=path,
         head=head,
@@ -1508,7 +1541,7 @@ def _survivor(running: _Running) -> item.Item | None:
 
     Resolved tree-wide, like every other handle, and neither graded nor
     edited. Resolved once per run, so a bad `--into` refuses at once rather
-    than once per item. See docs/method.md#dissolving
+    than once per item. See docs/reference.md#dissolving
     """
     if running.transition.kind != MERGE:
         return None
@@ -1541,7 +1574,7 @@ def _clearing(
     a value the clearing empties loses the key; a referent another session
     holds is edited anyway; and the referent's head is not graded. `tree` is
     handed in, so several items clear over each other's edits. No writes.
-    See docs/method.md#dissolving and docs/method.md#retitle
+    See docs/reference.md#dissolving and docs/reference.md#retitle
     """
     edits: list[item.Item] = []
     notices: list[str] = []
@@ -1571,7 +1604,9 @@ def _clearing(
             else:
                 notices.append(f'{where}: took "{gone.slug}" out of {key}')
         if head != one.head:
-            edits.append(item.Item(path=one.path, state=one.state, head=head, body=one.body))
+            edits.append(
+                item.Item(path=one.path, state=one.state, head=head, body=one.body)
+            )
     return _Clearing(edits=tuple(edits), notices=tuple(notices))
 
 
@@ -1592,7 +1627,7 @@ def _references(declaration: Declaration, one: item.Item) -> tuple[str, ...]:
 
     Its state's `dependencies`, `references` and `opened-for`, and the key
     each verb that `files` names for where a filed item came from. What a
-    retitle repoints. See docs/method.md#retitle
+    retitle repoints. See docs/reference.md#retitle
     """
     carried = [files["item"] for files in declaration.files]
     named_by = (
@@ -1624,7 +1659,7 @@ def _dissolve(running: _Running, handles: Sequence[str]) -> tuple[Path, ...] | s
     is computed before any of it. Several handles are all or nothing: each is
     checked, the refusal names every one that fails, and one handle's refusal
     is raised as it stands.
-    See docs/method.md#dissolving and docs/method.md#merge
+    See docs/reference.md#dissolving and docs/reference.md#merge
     """
     root = running.declaration.root
     verb = running.transition.name
@@ -1638,7 +1673,9 @@ def _dissolve(running: _Running, handles: Sequence[str]) -> tuple[Path, ...] | s
             original, claiming = _reading(one)
             if any(original.path == seen.path for seen, *_ in taken.values()):
                 raise Refusal(f'"{handle}" is named twice')
-            archiving = _archiving(one, original, record=str(running.asked.get(RECORD) or ""))
+            archiving = _archiving(
+                one, original, record=str(running.asked.get(RECORD) or "")
+            )
             _itself(one, original, survivor)
             taken[index] = (original, claiming, archiving)
         except Refusal as refusal:
@@ -1671,10 +1708,11 @@ def _dissolve(running: _Running, handles: Sequence[str]) -> tuple[Path, ...] | s
                 raise Refusal(refusal)
             failed[index] = refusal
     carried = None
-    if survivor is not None:
-        if not failed:
-            carried = _carrying(running, tree[survivor.path], [one for one, *_ in taken.values()])
-            tree[survivor.path] = carried.survivor
+    if survivor is not None and not failed:
+        carried = _carrying(
+            running, tree[survivor.path], [one for one, *_ in taken.values()]
+        )
+        tree[survivor.path] = carried.survivor
     if failed:
         raise Refusal(
             [
@@ -1757,13 +1795,14 @@ def _carrying(
     session holds, since a carry writes prose into a body that session may be
     rewriting, and a composed body its state's sub-phase check refuses, so
     the next listing cannot. The head is not graded. No writes.
-    See docs/method.md#merge
+    See docs/reference.md#merge
     """
     root = running.declaration.root
     state = survivor.state
-    if state.has(claim.NAME) and (
-        held := _record(running.declaration, survivor.slug)
-    ) is not None:
+    if (
+        state.has(claim.NAME)
+        and (held := _record(running.declaration, survivor.slug)) is not None
+    ):
         _foreign(running, survivor.slug, held)
     if state.sub_phases and state.pending and state.sub_phase_name:
         carried = _bulleted_carry(running, survivor, gone)
@@ -1778,8 +1817,10 @@ def _carrying(
     if state.sub_phases and (errors := subphase.errors(body, state.sub_phases)):
         raise Refusal(
             [
-                f"{running.transition.name} cannot carry into "
-                f"{named(survivor.path, root)}",
+                (
+                    f"{running.transition.name} cannot carry into "
+                    f"{named(survivor.path, root)}"
+                ),
                 *errors,
             ]
         )
@@ -1802,7 +1843,7 @@ def _bulleted_carry(
     survivor's head does not carry; and a body whose text would change the
     bullets the survivor reads, which only a fence can do. Minting into a
     finished decomposition re-opens it, and the notice says so.
-    See docs/method.md#merge
+    See docs/reference.md#merge
     """
     root = running.declaration.root
     state = survivor.state
@@ -1828,18 +1869,21 @@ def _bulleted_carry(
     body = survivor.body
     names: list[str] = []
     for one in gone:
-        minting = dict(
-            heading=state.sub_phases,
-            prefix=prefix,
-            pending=state.pending,
-            title=str(one.get("title")),
-        )
+        minting = {
+            "heading": state.sub_phases,
+            "prefix": prefix,
+            "pending": state.pending,
+            "title": str(one.get("title")),
+        }
         # The bullet alone is what the written body must still read.
         alone, _ = subphase.carry(body, **minting, text="")
         written, name = subphase.carry(body, **minting, text=one.body.strip("\n"))
         if wrong := subphase.write_errors(alone, written, state.sub_phases):
             raise Refusal(
-                [f"{verb} cannot carry {named(one.path, root)} into {where} as {name}", *wrong]
+                [
+                    f"{verb} cannot carry {named(one.path, root)} into {where} as {name}",
+                    *wrong,
+                ]
             )
         body = written
         names.append(name)
@@ -1861,12 +1905,18 @@ def _mentions(
 
     A whole-word match over bodies only, since the heads' edges are the
     clearing's. It warns, and never rewrites what a person wrote. `tail` says
-    what happened to the slug. See docs/method.md#dissolving
+    what happened to the slug. See docs/reference.md#dissolving
     """
-    patterns = {slug: re.compile(rf"(?<![\w-]){re.escape(slug)}(?![\w-])") for slug in gone}
+    patterns = {
+        slug: re.compile(rf"(?<![\w-]){re.escape(slug)}(?![\w-])") for slug in gone
+    }
     said: list[str] = []
     for one in tree:
-        if found := [f'"{slug}"' for slug, pattern in patterns.items() if pattern.search(one.body)]:
+        if found := [
+            f'"{slug}"'
+            for slug, pattern in patterns.items()
+            if pattern.search(one.body)
+        ]:
             said.append(
                 f"{named(one.path, root)}: its prose still names {_listed(found)}, "
                 + tail
@@ -1896,7 +1946,7 @@ def _renaming(
     slug another file holds, in `_taken`'s. A title that keeps the slug is a
     rewrite in place, and repoints nothing. A claim another session holds has
     already refused in `_claiming`, so a record still at the old slug is this
-    session's, or is the one this run takes. See docs/method.md#retitle
+    session's, or is the one this run takes. See docs/reference.md#retitle
     """
     if running.transition.kind != RENAME:
         return None
@@ -1930,7 +1980,7 @@ def _rename(running: _Running, original: item.Item, renaming: _Renaming) -> None
 
     A crash before the claim moves strands it, and one before the referents
     are written leaves `unknown dependency:` lines. The default read names
-    both. See docs/method.md#retitle
+    both. See docs/reference.md#retitle
     """
     if renaming.slug == original.slug:
         return
@@ -1990,7 +2040,7 @@ def _claiming(running: _Running, *, slug: str) -> _Claiming:
     holds is kept rather than re-stamped; only a transition that declares
     `claims` takes one; and taking one while this session holds a claim on
     another item refuses, unless the run was asked to keep them.
-    See docs/method.md#the-claimed-state
+    See docs/reference.md#the-claimed-state
     """
     entering, leaving = _claimed_ends(running.declaration, running.transition)
     if not entering and not leaving:
@@ -2010,7 +2060,7 @@ def _claiming(running: _Running, *, slug: str) -> _Claiming:
         return _Claiming()
     if not running.transition.claims:
         # Arriving in a claimed state is not picking work up.
-        # See docs/method.md#the-claimed-state
+        # See docs/reference.md#the-claimed-state
         return _Claiming()
     if who.pid is None:
         # `pid_names` is never empty here: the empty case refuses in plan.toml.
@@ -2049,7 +2099,7 @@ def _held(running: _Running, who: claim.Identity, slug: str) -> list[str]:
     A record is counted only while its item sits in a claimed state. Any other
     record is stranded, which the listing already names with its own fix.
     Checked by path rather than by reading the tree, so an unrelated malformed
-    item cannot refuse a claim. See docs/method.md#the-listing
+    item cannot refuse a claim. See docs/reference.md#the-listing
     """
     root = running.declaration.root
     claimed = [
@@ -2059,7 +2109,9 @@ def _held(running: _Running, who: claim.Identity, slug: str) -> list[str]:
         one
         for one in claim.mine(running.declaration, who)
         if one != slug
-        and any((root / state.path / f"{one}{item.SUFFIX}").exists() for state in claimed)
+        and any(
+            (root / state.path / f"{one}{item.SUFFIX}").exists() for state in claimed
+        )
     ]
 
 
@@ -2079,13 +2131,13 @@ def _apply(claiming: _Claiming, root: Path) -> None:
 
 def _now() -> dt.datetime:
     """When a claim was taken. Aware, because this tree is shared."""
-    return dt.datetime.now(dt.timezone.utc)
+    return dt.datetime.now(dt.UTC)
 
 
 def _today() -> dt.date:
     """The date `TODAY` stands for: local, because a date a session writes by
     hand is the one on its own calendar."""
-    return dt.date.today()
+    return dt.datetime.now().astimezone().date()
 
 
 # --------------------------------------------------------------------------
@@ -2099,15 +2151,13 @@ def release(declaration: Declaration, handle: str) -> tuple[str, dict[str, Any]]
     Here rather than in `fileplan.claim` because it takes the run lock. Four
     outcomes: your own claim is freed, a dead session's on this host is freed,
     a live session's refuses, and one from another host refuses.
-    See docs/method.md#release
+    See docs/reference.md#release
     """
     with run_lock(declaration.root):
         one = read.resolve(declaration, handle)
         path = claim.path(declaration.root, one.slug)
         if not path.exists():
-            raise Refusal(
-                f"{one.slug} holds no claim, so there is nothing to free"
-            )
+            raise Refusal(f"{one.slug} holds no claim, so there is nothing to free")
 
         held = claim.read(path, declaration.root)
         who = claim.identity(declaration)
@@ -2119,9 +2169,7 @@ def release(declaration: Declaration, handle: str) -> tuple[str, dict[str, Any]]
         return one.slug, held
 
 
-def _unfreeable(
-    slug: str, held: Mapping[str, Any], status: str, path: Path
-) -> str:
+def _unfreeable(slug: str, held: Mapping[str, Any], status: str, path: Path) -> str:
     described = claim.describe(held, status)
     if status == claim.ELSEWHERE:
         return (
@@ -2153,19 +2201,26 @@ def _place(
     state = state or running.declaration.states[running.transition.to]
     errors = item.head_errors(head, running.declaration, state)
     if errors:
-        raise Refusal([f"{named(path, running.declaration.root)} cannot be written", *errors])
+        raise Refusal(
+            [f"{named(path, running.declaration.root)} cannot be written", *errors]
+        )
     if running.check:
         return
     item.write(item.Item(path=path, state=state, head=head, body=body))
 
 
-def _directory(running: _Running, *, state: State | None = None, make: bool = True) -> Path:
+def _directory(
+    running: _Running, *, state: State | None = None, make: bool = True
+) -> Path:
     """The destination state's directory, made if it is not there.
 
     `make` is what a check turns off: creating the directory is itself a
     write. `state` defaults to the transition's `to`, as in `_place`.
     """
-    directory = running.declaration.root / (state or running.declaration.states[running.transition.to]).path
+    directory = (
+        running.declaration.root
+        / (state or running.declaration.states[running.transition.to]).path
+    )
     if make:
         directory.mkdir(parents=True, exist_ok=True)
     return directory

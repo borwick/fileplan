@@ -10,7 +10,7 @@ The identity's variable names come from ``tests/fixtures/plan.toml``'s
 purpose, so the suite's existing control means something here too. Beside it
 is a **new** control: no agent vendor's variable appears under ``src/`` at
 all. That is the direct test of the decision that ``[identity]`` is declared
-rather than compiled in (John, 2026-09-02) — if a vendor's name ever creeps
+rather than compiled in (John) — if a vendor's name ever creeps
 back into the code, it fails.
 
 ``[identity]``'s own refusal table lives in ``tests/test_declaration.py``,
@@ -27,8 +27,7 @@ import sys
 from pathlib import Path
 
 import pytest
-
-from conftest import FIXTURE_FILES
+from conftest import EXAMPLE, FIXTURE_FILES
 
 from fileplan import claim
 from fileplan.claim import ALIVE, DEAD, ELSEWHERE, UNKNOWN, Identity
@@ -40,11 +39,11 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 #: The names the fixture declares, in the order it declares them.
 DECLARED = ("GREENHOUSE_PID", "SPROUT_PID")
 
-#: Names a real agent sets. Declared in this repo's own `plan.toml` as the
-#: worked example, and read from `src/` never.
+#: Names a real agent sets. Declared in the worked example,
+#: `examples/plan.toml`, and read from `src/` never.
 VENDOR = ("CLAUDE_PID", "CLAUDE_CODE_SESSION_ID")
 
-TAKEN = dt.datetime(2026, 9, 2, 14, 30, tzinfo=dt.timezone.utc)
+TAKEN = dt.datetime(2026, 9, 2, 14, 30, tzinfo=dt.UTC)
 
 HERE = Identity(host="this-host", pid=4213)
 
@@ -158,7 +157,7 @@ def test_an_identity_with_no_pid_writes_a_record_without_one() -> None:
 
 def test_a_naive_taken_refuses_because_the_record_is_read_elsewhere() -> None:
     with pytest.raises(Refusal, match="aware datetime"):
-        claim.record(HERE, taken=dt.datetime(2026, 9, 2, 14, 30))
+        claim.record(HERE, taken=dt.datetime(2026, 9, 2, 14, 30))  # noqa: DTZ001 — the naive input is what must refuse
 
 
 def test_the_slug_is_the_records_location_and_never_a_field_in_it() -> None:
@@ -691,8 +690,10 @@ def test_a_pid_that_is_not_a_positive_whole_number_refuses(pid: object) -> None:
 
 def test_an_unknown_field_refuses_by_name() -> None:
     record = {"host": "this-host", "pid": 4213, "taken": TAKEN, "session": "abc"}
-    assert any('"session" is not a claim record field' in error
-               for error in claim.errors(record))
+    assert any(
+        '"session" is not a claim record field' in error
+        for error in claim.errors(record)
+    )
 
 
 def test_every_defect_is_reported_at_once() -> None:
@@ -711,7 +712,7 @@ def source() -> str:
 
 def test_no_agents_variable_names_appear_anywhere_under_src() -> None:
     """The direct test of the decision that `[identity]` is declared rather
-    than hard-coded (John, 2026-09-02). A tool whose premise is that the
+    than hard-coded (John). A tool whose premise is that the
     workflow is declared cannot bake one vendor into its own source — and
     `CLAUDE_PID` in `src/` is exactly that. If a name ever creeps back in,
     this is what fails."""
@@ -730,5 +731,5 @@ def test_the_vendor_control_reads_the_files_it_claims_to() -> None:
 def test_the_repos_own_declaration_is_where_the_vendors_names_live() -> None:
     """And the other half: the control passes because the names moved to
     `plan.toml`, not because nothing uses them."""
-    declaration = load(REPO / "plan.toml")
+    declaration = load(EXAMPLE)
     assert declaration.pid_names == ("CLAUDE_PID", "FILEPLAN_PID")

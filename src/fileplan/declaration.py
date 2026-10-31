@@ -14,11 +14,12 @@ from __future__ import annotations
 import os
 import re
 import tomllib
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any, Callable, Iterable, Iterator, Mapping, NamedTuple
+from typing import Any, NamedTuple
 
 from fileplan import depends, subphase
 
@@ -41,19 +42,19 @@ IDENTITY = "identity"
 #: The single-entry table naming the oldest tool a plan.toml was written for,
 #: and its one field. Graded before every other load error, so an old tool
 #: says "upgrade" rather than blaming the declaration.
-#: See docs/method.md#the-version
+#: See docs/reference.md#the-version
 TOOL = "fileplan"
 MINIMUM = "minimum"
 
 #: The `[fileplan]` field naming the directory a state's default `path` sits
 #: under: `root = "docs"` puts a state called `plan` at `docs/plan`. A state
-#: that writes its own `path` is not moved by it. See docs/method.md#states
+#: that writes its own `path` is not moved by it. See docs/reference.md#states
 ROOT = "root"
 
 #: The `[fileplan]` field listing the exact file names no state directory
 #: reads as items, such as the file an agent tool reads from the directory it
 #: works in. Every other `*.md` there is still claimed to be an item.
-#: See docs/method.md#ignore
+#: See docs/reference.md#ignore
 IGNORE = "ignore"
 
 #: An item file's suffix. The traversal reads only files carrying it, which is
@@ -66,7 +67,7 @@ KNOWN_TABLES = (*TABLES, IDENTITY, TOOL)
 
 #: What the tool no longer reads, and what to do instead, each refused by
 #: name: a table, a transition field and a capability that something simpler
-#: replaced. See docs/method.md#kinds
+#: replaced. See docs/reference.md#kinds
 RETIRED_TABLES: Mapping[str, str] = MappingProxyType(
     {
         "templates": "Copy a document into a new item's body with "
@@ -98,36 +99,36 @@ ARCHIVE = "archive"
 
 #: And the state field saying where that register begins: the first number it
 #: may hold, inclusive, and its default, the number a legibly empty register
-#: mints first. See docs/method.md#the-register
+#: mints first. See docs/reference.md#the-register
 FIRST_NUMBER = "first-number"
 FIRST = 1
 
 #: The state field naming which declared key holds the item a carrier was
-#: opened for. See docs/method.md#the-dangle-check
+#: opened for. See docs/reference.md#the-dangle-check
 OPENED_FOR = "opened-for"
 
 #: The state field naming the keys an item here holds references in, each a
 #: table whose one field names the row field the edge is read back as on the
 #: item it names. A reference is an edge that blocks nothing.
-#: See docs/method.md#references
+#: See docs/reference.md#references
 REFERENCES = "references"
 INVERSE = "inverse"
 
 #: The state field naming the order its items list in when no `--sort` is
-#: given: one key, in `--sort`'s spelling. See docs/method.md#the-listing
+#: given: one key, in `--sort`'s spelling. See docs/reference.md#the-listing
 SORT = "sort"
 
 #: The state field that, set false, leaves the state's rows out of a `list`
 #: given no `--state`. Absent means listed, so a forgotten field hides
-#: nothing. See docs/method.md#listed
+#: nothing. See docs/reference.md#listed
 LISTED = "listed"
 
 #: The key field saying a head value is several.
-#: See docs/method.md#list-valued
+#: See docs/reference.md#list-valued
 LIST_VALUED = "list-valued"
 
 #: The key field naming the directory a key's values are files in.
-#: See docs/method.md#directory
+#: See docs/reference.md#directory
 DIRECTORY = "directory"
 
 #: Every field where the tool writes or reads exactly one value of a declared
@@ -160,7 +161,7 @@ KEY_FIELDS = frozenset({"doc", "help", "values", LIST_VALUED, DIRECTORY})
 TRANSITION_FIELDS = frozenset({"kind", "doc", "help"})
 
 #: The ten kinds' names, each spelled once. Everything that asks what a
-#: transition does asks its kind by one of these. See docs/method.md#kinds
+#: transition does asks its kind by one of these. See docs/reference.md#kinds
 CREATE, MOVE, REORDER, EDIT, RENAME = "create", "move", "reorder", "edit", "rename"
 CLOSE, MERGE, ADD_BULLET, MARK_BULLET = "close", "merge", "add-bullet", "mark-bullet"
 WRITE_BULLET = "write-bullet"
@@ -170,16 +171,16 @@ WRITE_BULLET = "write-bullet"
 #: nowhere else, and a field its kind does not take refuses by name.
 #: `from` and `to` are in it too: a create has no `from`, a move has both,
 #: and every other kind stays where it is or takes the item away, so it has
-#: only a `from`. See docs/method.md#kinds
+#: only a `from`. See docs/reference.md#kinds
 #: The fields an edit writes, at least one of which it must name: an edit
 #: naming none writes nothing. Read by the kind table, by the edit's refusal
-#: and by `_suggested_kind`. See docs/method.md#kinds
+#: and by `_suggested_kind`. See docs/reference.md#kinds
 EDIT_WRITES = ("sets", "drops", "claims")
 
 #: The one substitution a fixed value in `sets` takes: the run's local date,
 #: in the `YYYY-MM-DD` shape a date given as an option is written in. Any other brace in a fixed
 #: value refuses at load, so there is no escape syntax. See
-#: docs/method.md#transitions
+#: docs/reference.md#transitions
 TODAY = "{today}"
 
 KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
@@ -222,7 +223,7 @@ KIND_REQUIRES: Mapping[str, tuple[str, ...]] = MappingProxyType(
 
 #: What a transition's `help` says when the declaration writes none: the
 #: kind, said with the states it names. A repo writes `help` only to say
-#: something better. See docs/method.md#kinds
+#: something better. See docs/reference.md#kinds
 KIND_HELP: Mapping[str, str] = MappingProxyType(
     {
         CREATE: "Create an item in {to}.",
@@ -261,7 +262,7 @@ STAYING = frozenset(
 #: The kinds that give an item a place, when the state it lands in is
 #: `queued`: the two that bring it there, and the one that only moves it in
 #: the order. Every other kind leaves the place alone.
-#: See docs/method.md#the-queue
+#: See docs/reference.md#the-queue
 PLACING = frozenset({CREATE, MOVE, REORDER})
 
 #: The fields whose only job was to say which kind a transition is, which
@@ -273,7 +274,7 @@ IDENTITY_FIELDS = frozenset({"doc", "pid"})
 
 #: The capability whose state lives outside the item file, in `local/claims/`.
 #: Named here because this is where it has to be graded against `[identity]`.
-#: See docs/method.md#the-claimed-state
+#: See docs/reference.md#the-claimed-state
 CLAIMED = "claimed"
 
 #: The capability that orders a state's items. `fileplan.queued` reads it
@@ -282,21 +283,21 @@ QUEUED = "queued"
 
 #: The capability whose state is the item's body: an add-bullet writes a
 #: sub-phase into it. Named here because this is where its two halves
-#: have to be graded against each other. See docs/method.md#bulleted
+#: have to be graded against each other. See docs/reference.md#bulleted
 BULLETED = "bulleted"
 
 #: The three roles a `files` table names, and the whole roster: which state the
 #: second item is filed into, which declared key records the item it was filed
 #: from, and which records the bullet. Filing is a transition half with no
 #: state half, so no capability name joins `CAPABILITIES` beside them and
-#: there is no cross-check here. See docs/method.md#filing
+#: there is no cross-check here. See docs/reference.md#filing
 FILING_ROLES = ("state", "item", "name")
 
 #: Every field a `files` table may hold: the three roles, which it must, and
 #: `sets`, which it may. `sets` is not a fourth role, because a filing with no
 #: key of its own is complete. It names the declared keys the run takes as
 #: options and writes onto the filed item's head, never the carrier's.
-#: See docs/method.md#filing
+#: See docs/reference.md#filing
 FILING_FIELDS = (*FILING_ROLES, "sets")
 
 #: Capabilities implemented so far. Every other name a state might opt into is
@@ -314,26 +315,27 @@ CAPABILITY_KEYS = {QUEUED: "position", NUMBERED: "number"}
 #: liveness probe said of that holder, and whether the holder is the session
 #: reading the row. Read off `local/claims/` rather than out of any head, so a
 #: key of any of the three names refuses unconditionally.
-#: See docs/method.md#the-listing
+#: See docs/reference.md#the-listing
 CLAIM_KEYS = ("claimed-by", "claim-status", "claim-holder")
 
 #: The key every row carries: whole days since the item file's last commit,
 #: or `None` where git does not answer. Derived from git, so a key of that name
-#: refuses unconditionally. See docs/method.md#stale-days
+#: refuses unconditionally. See docs/reference.md#stale-days
 STALE_KEYS = ("stale-days",)
 
 #: The key a row carries wherever some transition starts from an item: the
 #: commands that could take this item right now, in declared order, or `None`
 #: where none could. Read off the transitions' own refusals when the listing
 #: runs, so a key of that name refuses unconditionally.
-#: See docs/method.md#commands
+#: See docs/reference.md#commands
 COMMAND_KEYS = ("commands",)
+
 
 class Derived(NamedTuple):
     """One group of keys a row carries from outside the head."""
 
     #: Whether a declaration carries the group at all.
-    gate: Callable[["Declaration"], bool]
+    gate: Callable[[Declaration], bool]
     names: tuple[str, ...]
     #: Whether a state's raw entry carries the group, which is what a state's
     #: `sort` may name, or `None` where the group is no sort key at all.
@@ -408,7 +410,7 @@ def named(path: Path, root: Path) -> str:
     """`path` as a message names it: relative to `root`, the way a row's
     `path` is, and as given where it is not under `root`. Resolved on the
     second try, because a `/tmp` can be a symlink.
-    See docs/method.md#the-listing
+    See docs/reference.md#the-listing
     """
     for under, above in ((path, root), (path.resolve(), root.resolve())):
         try:
@@ -445,22 +447,22 @@ class State:
     capabilities: tuple[str, ...] = ()
     #: The heading a section's sub-phase bullets are counted under, or `None`
     #: where this state counts none. There is no default.
-    #: See docs/method.md#sub-phases
+    #: See docs/reference.md#sub-phases
     sub_phases: str | None = None
     #: Which declared key holds the cursor, and which holds the status, or `None`
-    #: where this state has neither. See docs/method.md#the-cursor
+    #: where this state has neither. See docs/reference.md#the-cursor
     cursor: str | None = None
     status: str | None = None
     #: The bullet an unfinished decomposition leaves behind, as its content after
     #: `- `, or `None` where this state mints none. It must parse as a strict
-    #: named bullet, graded at load. See docs/method.md#bulleted
+    #: named bullet, graded at load. See docs/reference.md#bulleted
     pending: str | None = None
     #: What this state's bullets are called: the whole ident form, with
     #: `{ordinal}` where the tool supplies the number and every other field
     #: naming a value the item carries. `None` where this state mints none.
     sub_phase_name: str | None = None
     #: Which declared key holds the slugs an item here waits on, or `None` where
-    #: this state reads none. See docs/method.md#dependencies
+    #: this state reads none. See docs/reference.md#dependencies
     dependencies: str | None = None
     #: Which declared key holds the item an item here was opened for, or `None`
     #: where this state names none. On the state rather than on a transition,
@@ -468,12 +470,12 @@ class State:
     opened_for: str | None = None
     #: The keys holding references, each mapped to its inverse, in declared
     #: order. Empty where this state declares none.
-    #: See docs/method.md#references
+    #: See docs/reference.md#references
     references: Mapping[str, str] = MappingProxyType({})
     #: The document this state's closed items are recorded in, or `None` where it
     #: holds none. The second source of the `numbered` register, and on the state
     #: rather than on the verb that archives, because the register needs it
-    #: whether or not any verb archives. See docs/method.md#the-register
+    #: whether or not any verb archives. See docs/reference.md#the-register
     archive: str | None = None
     #: Where this state's register begins: the first number it may hold,
     #: inclusive. Unlike `archive` it has a correct default, so absence grades
@@ -482,14 +484,14 @@ class State:
     first_number: int = FIRST
     #: The key this state's items list by when no `--sort` is given, in
     #: `--sort`'s spelling, or `None` where they list by slug. A `queued` state
-    #: must declare one. See docs/method.md#the-listing
+    #: must declare one. See docs/reference.md#the-listing
     sort: str | None = None
     #: Whether a `list` given no `--state` shows this state's rows. Absent in
-    #: the declaration means it does. See docs/method.md#listed
+    #: the declaration means it does. See docs/reference.md#listed
     listed: bool = True
     #: The words the declared verbs mark into this state, or `None` where
     #: none does. A second bold run holding any other word is not a mark.
-    #: Derived from the transitions at load. See docs/method.md#marking
+    #: Derived from the transitions at load. See docs/reference.md#marking
     marks: frozenset[str] | None = None
 
     def has(self, capability: str) -> bool:
@@ -515,7 +517,7 @@ class Key:
 
     name: str
     #: The section that says what the key means, or `None` where the
-    #: declaration names none. See docs/method.md#the-contract
+    #: declaration names none. See docs/reference.md#the-contract
     doc: str | None = None
     help: str | None = None
     #: `None` means free text; a tuple means a closed set.
@@ -524,7 +526,7 @@ class Key:
     #: `values`, which is the set one of them may come from.
     list_valued: bool = False
     #: The repo-relative directory each value names a file directly inside,
-    #: or `None` where the values are not paths. See docs/method.md#directory
+    #: or `None` where the values are not paths. See docs/reference.md#directory
     directory: str | None = None
 
 
@@ -535,14 +537,14 @@ class Transition:
     name: str
     #: The section that says what this transition means, or `None` where the
     #: declaration names none: then the `help` line is the whole of it.
-    #: See docs/method.md#the-contract
+    #: See docs/reference.md#the-contract
     doc: str | None
     help: str
     #: Where the item lands, or `None` when it lands nowhere: a close or a
     #: merge. A kind that stays in its state declares no `to`, and this holds
     #: its `from`, filled in at load.
     to: str | None
-    #: Which of `KINDS` this verb is. See docs/method.md#kinds
+    #: Which of `KINDS` this verb is. See docs/reference.md#kinds
     kind: str
     #: `None` means the transition creates content rather than moving it.
     source: str | None = None
@@ -553,27 +555,27 @@ class Transition:
     refuses: Mapping[str, tuple[str, ...]] = MappingProxyType({})
     #: The keys refused on presence alone, written `key = true` in the same
     #: table: an item carrying any value of one is refused. How a verb that
-    #: stays in its state says it runs once. See docs/method.md#commands
+    #: stays in its state says it runs once. See docs/reference.md#commands
     refuses_any: tuple[str, ...] = ()
     #: The keys the run takes as options, in declared order: every name in the
     #: list form of `sets`, and each key written `true` in the table form.
     sets: tuple[str, ...] = ()
     #: The values the run writes of its own, from the table form of `sets`:
     #: `{today}` not yet substituted, which `execute` does. Never an option,
-    #: and never a default a run could override. See docs/method.md#transitions
+    #: and never a default a run could override. See docs/reference.md#transitions
     fixed: Mapping[str, Any] = MappingProxyType({})
     drops: tuple[str, ...] = ()
     #: Whether running this verb picks the item up: the transition half of
     #: `CLAIMED`. A state says items here are claimable; a verb says this is the
     #: one that takes a claim. Default `False`, so arriving takes nothing.
-    #: See docs/method.md#the-claimed-state
+    #: See docs/reference.md#the-claimed-state
     claims: bool = False
     #: The word this verb writes onto one bullet of the item's body, or `None`
     #: when it writes none. A verb that carries one is a disposition: its subject
     #: is a finding rather than the item. A string rather than a flag, because
     #: the word itself is the workflow's, and there is no third field listing a
     #: state's vocabulary. Only a mark-bullet takes one, and it must.
-    #: See docs/method.md#marking
+    #: See docs/reference.md#marking
     marks: str | None = None
     #: Where this verb files a second item, and which of its keys record where it
     #: came from, or `None` when it files none. A table rather than three flat
@@ -581,19 +583,19 @@ class Transition:
     #: `FILING_ROLES` is the whole roster. The table may also hold `sets`, the
     #: keys written onto the filed item, which `files_sets` reads. All of it is
     #: the verb's, not a state's, because only the writer needs to know. Only a
-    #: mark-bullet takes one. Default `None`. See docs/method.md#filing
+    #: mark-bullet takes one. Default `None`. See docs/reference.md#filing
     files: Mapping[str, Any] | None = None
     #: Whether running this verb folds the bullet it marks into another: the
     #: marked bullet's prose moves under the bullet `--into` names, and the
     #: cursor goes there. A rider on `marks`, as `files` is, and never beside
     #: it: a disposition does one second write. Only a mark-bullet takes it.
-    #: Default `False`. See docs/method.md#marking
+    #: Default `False`. See docs/reference.md#marking
     merges: bool = False
     #: Whether running this verb files the item's archive entry: the number and
     #: title it carried, written into the document its source state's `archive`
     #: names. A different half from the deletion, so a verb that wants both says
     #: both. Default `False`. Only a move or a close takes it, and its source
-    #: must be `NUMBERED`. See docs/method.md#the-register
+    #: must be `NUMBERED`. See docs/reference.md#the-register
     archives: bool = False
 
     @property
@@ -607,7 +609,7 @@ class Transition:
         """Whether this run files a record and takes the file away: a close
         that `archives`. The shape that requires `--record`, which every verb
         that archives takes, and the one the close and dangle checks guard.
-        See docs/method.md#dissolving"""
+        See docs/reference.md#dissolving"""
         return self.kind == CLOSE and self.archives
 
     @property
@@ -622,7 +624,7 @@ class Transition:
 
         Empty where the verb files nothing, or files an item with no key of
         its own. `sets` is the carrier's, and a verb that files refuses one.
-        See docs/method.md#filing
+        See docs/reference.md#filing
         """
         if self.files is None:
             return ()
@@ -722,7 +724,7 @@ class Declaration:
     @property
     def unlisted(self) -> tuple[str, ...]:
         """The states a `list` given no `--state` leaves out, in declared
-        order. Corpus-independent. See docs/method.md#listed"""
+        order. Corpus-independent. See docs/reference.md#listed"""
         return tuple(name for name, state in self.states.items() if not state.listed)
 
     @property
@@ -731,7 +733,7 @@ class Declaration:
 
         The roster in `DERIVED_KEYS` holds fixed names, and an inverse is the
         workflow's, so `derived` appends these after it. They are no sort
-        key: a list of slugs orders nothing. See docs/method.md#references
+        key: a list of slugs orders nothing. See docs/reference.md#references
         """
         return tuple(
             dict.fromkeys(
@@ -747,7 +749,7 @@ class Declaration:
 
         What a retitle repoints through and the listing's unfound report reads
         through, asked once. Empty where no verb files. See
-        docs/method.md#filing
+        docs/reference.md#filing
         """
         return tuple(
             one.files for one in self.transitions.values() if one.files is not None
@@ -761,11 +763,9 @@ class Declaration:
         unmarkable report is present or absent on, asked once rather than at
         the read layer and the CLI separately. A `bulleted` state nothing
         marks into is a legal shape, and a bullet there waits on nothing.
-        See docs/method.md#marking
+        See docs/reference.md#marking
         """
-        return frozenset(
-            name for name, state in self.states.items() if state.marks
-        )
+        return frozenset(name for name, state in self.states.items() if state.marks)
 
     def state_at(self, path: str | os.PathLike[str]) -> State | None:
         """The declared state whose directory holds `path`, or `None`.
@@ -810,7 +810,7 @@ class _Corpus:
     #: Whether the document declares an `[identity]` table at all.
     identified: bool
 
-    def at(self, where: str, entry: Mapping[str, Any]) -> "_Entry":
+    def at(self, where: str, entry: Mapping[str, Any]) -> _Entry:
         """This vocabulary, pointed at one entry of one table."""
         return _Entry(where, entry, self.keys, self.closed_values, self.list_valued)
 
@@ -945,9 +945,7 @@ def _two_halves_errors(
             errors.append(on_verb(name, to))
 
     errors += [
-        on_state(name)
-        for name in states
-        if name in opted_in and name not in targeted
+        on_state(name) for name in states if name in opted_in and name not in targeted
     ]
     return errors
 
@@ -993,7 +991,7 @@ def _mark_errors(
 
     A `bulleted` state nothing marks into has no inert-half rule: it is a
     real shape, and loads clean.
-    See docs/method.md#marking
+    See docs/reference.md#marking
     """
     bulleted = {
         name
@@ -1024,7 +1022,7 @@ def _mark_errors(
         spoken.setdefault((to, word), []).append(name)
 
     errors += [
-        f'transitions.{" and ".join(sorted(named))} both mark {to} with '
+        f"transitions.{' and '.join(sorted(named))} both mark {to} with "
         f'"{word}". A bullet carrying "{word}" cannot say which of the two '
         "transitions ran. Give each transition its own word"
         for (to, word), named in spoken.items()
@@ -1042,7 +1040,7 @@ def _write_errors(
     `BULLETED`, because that is what declares the heading the bullets live
     under. It is not the second half of the capability: a `bulleted` state
     still needs an add-bullet, which `_mint_errors` asks.
-    See docs/method.md#bulleted
+    See docs/reference.md#bulleted
     """
     errors: list[str] = []
     for name, entry in transitions.items():
@@ -1069,7 +1067,7 @@ def _merge_errors(transitions: Mapping[str, Any]) -> list[str]:
     One rule here: `merges` beside `files`, because each is a second write a
     disposition does, and a disposition does one. A `merges` that is not a
     boolean, and one on a kind that is not a mark-bullet, are complaints the
-    field checks and the kind table already make. See docs/method.md#marking
+    field checks and the kind table already make. See docs/reference.md#marking
     """
     return [
         f"transitions.{name} declares both merges and files. Each is the second "
@@ -1077,9 +1075,7 @@ def _merge_errors(transitions: Mapping[str, Any]) -> list[str]:
         "bullet, the other files it as an item of its own. A disposition does "
         f"one of them. Drop merges or files from {name}"
         for name, entry in transitions.items()
-        if isinstance(entry, dict)
-        and entry.get("merges") is True
-        and "files" in entry
+        if isinstance(entry, dict) and entry.get("merges") is True and "files" in entry
     ]
 
 
@@ -1097,7 +1093,7 @@ def _filing_errors(corpus: _Corpus) -> list[str]:
     of strings, each a key that can be written and neither of the two the
     tool writes itself. And `sets` beside `files`, which would say nothing
     about which head its keys land on.
-    See docs/method.md#filing
+    See docs/reference.md#filing
     """
     # Every capability that writes a head key on arrival, read off the roster.
     placing = tuple(CAPABILITY_KEYS)
@@ -1212,7 +1208,7 @@ def _archiving_errors(
     way out must archive: a move or a close without `archives` would drop the
     number with no entry, and the next mint refuses on the gap, or reuses the
     number when it was the highest. A merge cannot archive, so a merge out of
-    a numbered state refuses outright. See docs/method.md#the-register
+    a numbered state refuses outright. See docs/reference.md#the-register
 
     A `numbered` state nothing leaves at all has no inert-half rule: the
     `archive` field has a second reader in the register itself, so the state
@@ -1273,7 +1269,7 @@ def _claim_errors(
         capability=CLAIMED,
         takes=lambda entry: entry.get("claims") is True,
         on_verb=lambda name, to: (
-            f'transitions.{name}.claims is true, and states.{to} does not '
+            f"transitions.{name}.claims is true, and states.{to} does not "
             f'name "{CLAIMED}" in its capabilities. A claim lives in the state '
             f'the item is claimed into. Name "{CLAIMED}" in '
             f"states.{to}.capabilities, or drop the claims"
@@ -1307,7 +1303,7 @@ def _list_valued(keys: Mapping[str, Any]) -> set[str]:
 
     A flag that is not a boolean is one complaint, already made in
     `_key_errors`, and the key stays out of this set.
-    See docs/method.md#list-valued
+    See docs/reference.md#list-valued
     """
     return {
         name
@@ -1355,7 +1351,7 @@ def _reading_errors(transitions: Mapping[str, Any]) -> list[str]:
     pointer, then one per key it `sets`. Two pointers under one name is one
     line, and the key's wins. So the collision is refused here rather than
     read as a verb with no program.
-    See docs/method.md#the-contract
+    See docs/reference.md#the-contract
     """
     errors: list[str] = []
     for name, entry in transitions.items():
@@ -1395,16 +1391,20 @@ def _identity_errors(entry: Any) -> list[str]:
 
     if "pid" not in entry:
         return errors + [
-            f"{IDENTITY} has no pid — an ordered list of the environment "
-            "variable names a session's pid may be read from"
+            (
+                f"{IDENTITY} has no pid — an ordered list of the environment "
+                "variable names a session's pid may be read from"
+            )
         ]
     declared = entry["pid"]
     if not _is_string_list(declared):
         return errors + [f"{IDENTITY}.pid must be a list of strings"]
     if not declared:
         return errors + [
-            f"{IDENTITY}.pid is empty, so no name could ever supply a pid. "
-            "Name at least one environment variable, or drop the table"
+            (
+                f"{IDENTITY}.pid is empty, so no name could ever supply a pid. "
+                "Name at least one environment variable, or drop the table"
+            )
         ]
 
     seen: set[str] = set()
@@ -1430,10 +1430,12 @@ def _tool_errors(entry: Any) -> list[str]:
     errors = _unknown_fields(TOOL, entry, frozenset({MINIMUM, ROOT, IGNORE}), "tool")
     if not entry:
         return errors + [
-            f"{TOOL} is empty — name the {MINIMUM} fileplan release this "
-            'plan.toml reads under, such as "1.2.3", the root its states '
-            "sit under, or the file names a state directory does not read "
-            "as items, or drop the table"
+            (
+                f"{TOOL} is empty — name the {MINIMUM} fileplan release this "
+                'plan.toml reads under, such as "1.2.3", the root its states '
+                "sit under, or the file names a state directory does not read "
+                "as items, or drop the table"
+            )
         ]
     errors += _string_field(TOOL, entry, ROOT)
     if IGNORE in entry:
@@ -1442,8 +1444,7 @@ def _tool_errors(entry: Any) -> list[str]:
         return errors
     if not (isinstance(entry[MINIMUM], str) and DOTTED_RE.match(entry[MINIMUM])):
         errors.append(
-            f"{TOOL}.{MINIMUM} must be a version of dotted integers, "
-            'such as "1.2.3"'
+            f'{TOOL}.{MINIMUM} must be a version of dotted integers, such as "1.2.3"'
         )
     return errors
 
@@ -1457,8 +1458,10 @@ def _ignore_errors(value: Any) -> list[str]:
         return [f"{where} must be a list of strings"]
     if not value:
         return [
-            f"{where} is empty — name the files a state directory does not "
-            'read as items, such as "AGENTS.md", or drop it'
+            (
+                f"{where} is empty — name the files a state directory does not "
+                'read as items, such as "AGENTS.md", or drop it'
+            )
         ]
     errors: list[str] = []
     seen: set[str] = set()
@@ -1541,7 +1544,7 @@ def _sort_errors(at: _Entry) -> list[str]:
     A key no row here can carry would put every item under `unsorted` on
     every read, which is a declaration defect, so it refuses here. A `queued`
     state that names none sorts by `position`, `_sorted`'s default, and the
-    overview says so. See docs/method.md#the-queue
+    overview says so. See docs/reference.md#the-queue
     """
     where, entry = at.where, at.entry
     declared = _declared_capabilities(entry)
@@ -1561,9 +1564,11 @@ def _sort_errors(at: _Entry) -> list[str]:
     if named.removeprefix("-") in carried:
         return []
     return [
-        f'{where}.{SORT} names "{named.removeprefix("-")}", which no item in '
-        f"this state carries, so every item would list as unsorted "
-        f"(this state carries: {', '.join(carried)})"
+        (
+            f'{where}.{SORT} names "{named.removeprefix("-")}", which no item in '
+            f"this state carries, so every item would list as unsorted "
+            f"(this state carries: {', '.join(carried)})"
+        )
     ]
 
 
@@ -1576,7 +1581,7 @@ def _bulleted_errors(at: _Entry) -> list[str]:
     bullet or a form on a state that mints nothing is a sentence nothing
     reads. Both are graded through `fileplan.subphase`, the reader that has to
     find them again.
-    See docs/method.md#bulleted
+    See docs/reference.md#bulleted
     """
     where, entry = at.where, at.entry
     declared = _declared_capabilities(entry)
@@ -1633,9 +1638,7 @@ def _bulleted_errors(at: _Entry) -> list[str]:
             "the capability"
         )
     else:
-        errors += subphase.pending_errors(
-            pending, f"{where}.{subphase.PENDING}"
-        )
+        errors += subphase.pending_errors(pending, f"{where}.{subphase.PENDING}")
     return errors
 
 
@@ -1697,17 +1700,21 @@ def _archive_errors(where: str, entry: Mapping[str, Any]) -> list[str]:
         return [f"{where}.{ARCHIVE} must be a string"]
     if mints and named is None:
         return [
-            f'{where}.capabilities names "{NUMBERED}", and this state '
-            f"declares no {ARCHIVE}. An item's file is deleted when it closes, "
-            "so the next number would be minted over a closed item's. Add "
-            f"{where}.{ARCHIVE}, or drop the capability"
+            (
+                f'{where}.capabilities names "{NUMBERED}", and this state '
+                f"declares no {ARCHIVE}. An item's file is deleted when it closes, "
+                "so the next number would be minted over a closed item's. Add "
+                f"{where}.{ARCHIVE}, or drop the capability"
+            )
         ]
     if named is not None and not mints:
         return [
-            f"{where}.{ARCHIVE} names where closed items are recorded, and "
-            f'this state does not opt into "{NUMBERED}". Nothing reads the '
-            f'archive this state names. Add "{NUMBERED}" to '
-            f"{where}.capabilities, or drop the field"
+            (
+                f"{where}.{ARCHIVE} names where closed items are recorded, and "
+                f'this state does not opt into "{NUMBERED}". Nothing reads the '
+                f'archive this state names. Add "{NUMBERED}" to '
+                f"{where}.capabilities, or drop the field"
+            )
         ]
     return []
 
@@ -1725,23 +1732,29 @@ def _first_number_errors(where: str, entry: Mapping[str, Any]) -> list[str]:
     named = entry[FIRST_NUMBER]
     if not isinstance(named, int) or isinstance(named, bool):
         return [
-            f"{where}.{FIRST_NUMBER} holds {named!r}, which is not a whole "
-            'number. A floor is compared as a number, and "10" sorts ahead of '
-            '"9" when a number is read as text. Write the floor as a bare '
-            "integer"
+            (
+                f"{where}.{FIRST_NUMBER} holds {named!r}, which is not a whole "
+                'number. A floor is compared as a number, and "10" sorts ahead of '
+                '"9" when a number is read as text. Write the floor as a bare '
+                "integer"
+            )
         ]
     if named < 1:
         return [
-            f"{where}.{FIRST_NUMBER} is {named}, and a register begins at 1 "
-            "or above. The floor names the first number this state may hold, "
-            "and there is no section 0"
+            (
+                f"{where}.{FIRST_NUMBER} is {named}, and a register begins at 1 "
+                "or above. The floor names the first number this state may hold, "
+                "and there is no section 0"
+            )
         ]
     if NUMBERED not in _declared_capabilities(entry):
         return [
-            f"{where}.{FIRST_NUMBER} says where this state's register "
-            f'begins, and this state does not opt into "{NUMBERED}". Nothing '
-            f'reads the floor this state names. Add "{NUMBERED}" to '
-            f"{where}.capabilities, or drop the field"
+            (
+                f"{where}.{FIRST_NUMBER} says where this state's register "
+                f'begins, and this state does not opt into "{NUMBERED}". Nothing '
+                f'reads the floor this state names. Add "{NUMBERED}" to '
+                f"{where}.capabilities, or drop the field"
+            )
         ]
     return []
 
@@ -1756,7 +1769,7 @@ def _sub_phase_errors(at: _Entry) -> list[str]:
     The cursor fields name declared keys, so each is graded against the keys
     table. The status's key must declare `values`: a status that can hold
     anything makes a typo'd one a silent wrong state.
-    See docs/method.md#the-cursor
+    See docs/reference.md#the-cursor
     """
     where, entry = at.where, at.entry
     errors: list[str] = []
@@ -1817,7 +1830,7 @@ def _key_field_errors(at: _Entry, field: str) -> list[str]:
 
 
 def _references_errors(at: _Entry) -> list[str]:
-    """One state's `references`, entry by entry. See docs/method.md#references
+    """One state's `references`, entry by entry. See docs/reference.md#references
 
     Each key is graded as a reference, like `dependencies`, and may not be a
     key this state already reads slugs out of: one key, one meaning. Each
@@ -1846,7 +1859,7 @@ def _references_errors(at: _Entry) -> list[str]:
             errors.append(
                 f'{field} names "{key}", which {where}.{read_by[key]} already '
                 "reads slugs out of. One key holds one kind of edge, or what "
-                f'the tool does with it depends on which field you read. Name '
+                f"the tool does with it depends on which field you read. Name "
                 f"another key in {field}"
             )
         if not isinstance(value, dict):
@@ -1901,7 +1914,7 @@ def _inverse_errors(states: Mapping[str, Any]) -> list[str]:
     states is one reference, and is legal. An inverse naming a reference key
     needs no rule here: a reference key is a declared key, and
     `_references_errors` already refuses an inverse that is one. Entries it
-    refuses for their shape are skipped. See docs/method.md#references
+    refuses for their shape are skipped. See docs/reference.md#references
     """
     declared: list[tuple[str, str, str]] = []
     for name, entry in states.items():
@@ -2072,7 +2085,7 @@ def _key_errors(
         errors += _unknown_fields(where, entry, KEY_FIELDS, "key")
 
         # `doc` is optional, as on a state: a key whose meaning needs no
-        # section of its own says so by naming none. See docs/method.md#the-contract
+        # section of its own says so by naming none. See docs/reference.md#the-contract
         errors += _string_field(where, entry, "doc")
         errors += _string_field(where, entry, "help")
 
@@ -2210,14 +2223,16 @@ def _kind_errors(corpus: _Corpus, where: str, entry: Mapping[str, Any]) -> list[
     """The three rules a kind's own field list cannot say: a move that does
     not leave, a reorder in a state with no order, and an edit that writes
     nothing. Each would be a verb that does not do what its kind says.
-    See docs/method.md#kinds
+    See docs/reference.md#kinds
     """
     kind, source = entry["kind"], entry.get("from")
     if kind == MOVE and source is not None and source == entry.get("to"):
         return [
-            f'{where} is a move from "{source}" to itself. A move leaves its '
-            f'state. Write kind = "{EDIT}", or kind = "{REORDER}" for one that '
-            "only changes the item's place"
+            (
+                f'{where} is a move from "{source}" to itself. A move leaves its '
+                f'state. Write kind = "{EDIT}", or kind = "{REORDER}" for one that '
+                "only changes the item's place"
+            )
         ]
     if (
         kind == REORDER
@@ -2226,17 +2241,19 @@ def _kind_errors(corpus: _Corpus, where: str, entry: Mapping[str, Any]) -> list[
         and QUEUED not in _declared_capabilities(corpus.state_table[source])
     ):
         return [
-            f'{where} is a reorder, and states.{source} does not name "{QUEUED}" '
-            "in its capabilities, so its items have no order to change. Name "
-            f'"{QUEUED}" in states.{source}.capabilities, or give {where} '
-            "another kind"
+            (
+                f'{where} is a reorder, and states.{source} does not name "{QUEUED}" '
+                "in its capabilities, so its items have no order to change. Name "
+                f'"{QUEUED}" in states.{source}.capabilities, or give {where} '
+                "another kind"
+            )
         ]
-    if kind == EDIT and not any(
-        field in entry for field in EDIT_WRITES
-    ):
+    if kind == EDIT and not any(field in entry for field in EDIT_WRITES):
         return [
-            f"{where} is an edit, and it writes nothing: it names no sets, no "
-            "drops and no claims. Name what it writes, or drop the transition"
+            (
+                f"{where} is an edit, and it writes nothing: it names no sets, no "
+                "drops and no claims. Name what it writes, or drop the transition"
+            )
         ]
     return []
 
@@ -2248,7 +2265,7 @@ def _suggested_kind(entry: Mapping[str, Any]) -> str:
     the migration a refusal names: no `from` creates, `dissolves` closes or,
     with `absorbs`, merges, `mints`, `marks` and `retitles` each name their
     kind, a `to` elsewhere moves, and a verb staying put edits if it writes a
-    key or a claim and reorders if it does not. See docs/method.md#kinds
+    key or a claim and reorders if it does not. See docs/reference.md#kinds
     """
     if "from" not in entry:
         return CREATE
@@ -2324,7 +2341,8 @@ def _fixed_values(entry: Mapping[str, Any]) -> dict[str, Any]:
     return {
         key: value
         for key, value in sets.items()
-        if isinstance(value, str) or (isinstance(value, list) and _is_string_list(value))
+        if isinstance(value, str)
+        or (isinstance(value, list) and _is_string_list(value))
     }
 
 
@@ -2335,7 +2353,7 @@ def _fixed_errors(at: _Entry) -> list[str]:
     Anything else is the value the run writes: a non-empty string for a key
     that holds one, a non-empty list of them for a list-valued key, each in
     the key's `values` where it declares some, and no brace but `TODAY`.
-    See docs/method.md#transitions
+    See docs/reference.md#transitions
     """
     where, table = at.where, at.entry["sets"]
     errors: list[str] = []
@@ -2565,7 +2583,7 @@ def _directory_pointer_errors(document: Mapping[str, Any], root: Path) -> list[s
     directory two keys name.
 
     Paths compare as `PurePosixPath`, so a trailing slash names the same
-    directory. See docs/method.md#directory
+    directory. See docs/reference.md#directory
     """
     errors: list[str] = []
     claimed: dict[PurePosixPath, str] = {}
@@ -2706,7 +2724,8 @@ def load(path: str | os.PathLike[str] | None = None) -> Declaration:
 
 def _discover(path: str | os.PathLike[str] | None) -> Path:
     named, origin = (
-        (path, "") if path is not None
+        (path, "")
+        if path is not None
         else (os.environ.get(PLAN_TOML_ENV), f" ({PLAN_TOML_ENV})")
     )
     if named is not None:
@@ -2813,7 +2832,9 @@ def _transitions(entries: Mapping[str, Any]) -> dict[str, Transition]:
                 if values is not True
             },
             refuses_any=tuple(
-                key for key, values in entry.get("refuses", {}).items() if values is True
+                key
+                for key, values in entry.get("refuses", {}).items()
+                if values is True
             ),
             sets=_option_keys(entry),
             fixed=MappingProxyType(_fixed_values(entry)),

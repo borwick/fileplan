@@ -1,6 +1,7 @@
 # The method
 
-What every word in this repo's `plan.toml` means. Each section below is the
+What every word in the worked example, `examples/plan.toml`, means. Each
+section below is the
 **one home** for one meaning. Something names every one of them: a `doc =`
 pointer, or an anchored citation from the code that implements it. Nothing
 here restates what is written elsewhere.
@@ -571,8 +572,8 @@ Coupling the halves — claiming on arrival — makes claiming a consequence of
 *moving*, and work then has to move to a directory to be worked on.
 [`queue`](#queue) would stamp a claim on every freshly-committed idea, in the
 queueing session's name, and nothing would ever release it. Where a file lives
-is this workflow's business rather than a mechanism the tool imposes (John,
-2026-09-03). So [`plan`](#plan) claims a section **where it stands**.
+is this workflow's business rather than a mechanism the tool imposes (John).
+So [`plan`](#plan) claims a section **where it stands**.
 
 A workflow that does want claim-on-arrival writes `claims = true` on the
 transition that arrives. Arriving takes nothing by default. Both halves are
@@ -633,7 +634,7 @@ The refusal is rc 2, and it names each item this session holds beside the
 `--check` refuses in the same words. This is the loud polarity. A session that
 ended without `release`, or a conversation that was cleared, is found out at
 the next claim, which is the moment the forgotten claim matters. Freeing the
-old claim silently was turned down (John, 2026-09-29). It would act on an item
+old claim silently was turned down (John). It would act on an item
 the command did not name, and it would hide the mistake the refusal exists to
 show.
 
@@ -1341,9 +1342,9 @@ Declares
   claims
 
 Reading
-  work              docs/method.md#work
-  sub-phase         docs/method.md#the-cursor
-  sub-phase-status  docs/method.md#sub-phase-status
+  work              docs/reference.md#work
+  sub-phase         docs/reference.md#the-cursor
+  sub-phase-status  docs/reference.md#sub-phase-status
 ```
 
 The contract is generated from the same `Transition` the command itself is
@@ -1562,7 +1563,7 @@ Every transition says what kind of transition it is, in one field:
 ```toml
 [transitions.decompose]
 kind = "add-bullet"
-doc  = "docs/method.md#decompose"
+doc  = "docs/reference.md#decompose"
 help = "Write the next sub-phase into a section."
 from = "plan"
 ```
@@ -1805,7 +1806,7 @@ on the item it names:
 references = { supersedes = { inverse = "superseded-by" } }
 
 [keys.supersedes]
-doc         = "method.md#supersedes"
+doc         = "records.md#supersedes"
 list-valued = true
 ```
 
@@ -1843,7 +1844,7 @@ waits on a record, and its place in an order means nothing about the record
 it names.
 
 **A close refuses while a filed item references the item it would take
-away** (John, 2026-10-18). A dependency's edge is cleared at a close, because
+away** (John). A dependency's edge is cleared at a close, because
 the wait is over. A reference is history, so clearing it would erase the
 record. Leaving it would turn history into a permanent `unresolved
 reference:` line that looks the same as a typo. So the close refuses, naming
@@ -1866,8 +1867,8 @@ should go, or merge the item into the one that continues it.
 A transition cannot name an inverse in `requires`, `sets`, `drops` or
 `refuses`. It is not a declared key, so it refuses as an undeclared one.
 
-**Why it is built beside `dependencies` and not folded into it** (John,
-2026-10-18). `dependencies = "after"` keeps its spelling, and no `plan.toml`
+**Why it is built beside `dependencies` and not folded into it** (John).
+`dependencies = "after"` keeps its spelling, and no `plan.toml`
 changes. The two share one implementation of what an edge is, so each rule
 still has one writer. Folding the two declarations together can be an item of
 its own later.
@@ -1879,7 +1880,7 @@ Every row carries **`stale-days`**: the whole days between the item file's
 
 **Nothing is stored to make that number.** There is no head key, no stamp a
 transition writes, no counter anywhere. The anchor is already in git, and git
-is read when the listing runs. (John settled that on 2026-09-04, asked as: the
+is read when the listing runs. (John settled that, asked as: the
 file's last commit, its first commit, or a sha a transition stamps.) A stored
 grade would be true on the day it was written, and true-looking forever after.
 The rule this repo keeps is that stale data is worse than none, and that
@@ -2066,7 +2067,7 @@ item in the state carries its own `number`. And the document the state's
 ```toml
 [states.plan]
 capabilities = ["queued", "claimed", "numbered"]
-archive      = "docs/plan-archive.md"
+archive      = "archive.md"
 ```
 
 A `numbered` state with no `archive` refuses. An `archive` on a state that
@@ -2082,7 +2083,7 @@ the state may hold, **inclusive**, and it defaults to 1:
 ```toml
 [states.plan]
 capabilities = ["queued", "claimed", "numbered"]
-archive      = "docs/plan-archive.md"
+archive      = "archive.md"
 first-number = 192
 ```
 
@@ -2361,7 +2362,7 @@ the clearing's job. The notice warns and never rewrites. Rewriting would be
 the tool editing what a person wrote. The exit stays 0. A `--check` prints no
 such line, because the check says what the run would do.
 
-**The listing does not report a slug cited in prose** (John, 2026-10-18). A
+**The listing does not report a slug cited in prose** (John). A
 consumer asked for that report, and for the citations to be repointed when a
 merge or a [retitle](#retitle) takes a slug away. Prose has no citation form, so the
 listing cannot tell a slug from an ordinary word that happens to match one.
@@ -2391,7 +2392,7 @@ and the tool owns no judgment about where work continues. The survivor's head
 is neither graded nor edited, so its state is unconstrained. Its body gains
 the absorbed bodies ([merge](#merge)), so the run grades the body it composes
 and refuses a survivor another session holds. The survivor's head carries
-**no record of what it absorbed** (John, 2026-09-04): every reference now
+**no record of what it absorbed** (John): every reference now
 points at the survivor. Two more refusals, both computed before any write: a
 handle naming nothing, and a survivor that *is* the item. Merging an item
 into itself would delete it and leave every edge pointing at something gone.
@@ -2409,7 +2410,7 @@ The second is the **self-edge**. The survivor may be in a state that declares
 section may wait on a `someday-maybe` idea. Repointing that entry would write
 an item waiting on itself. That one entry is **dropped** instead, and stderr
 says which item and which key. Refusing the whole run on the self-edge was
-offered and declined (John, 2026-09-04). The self-edge has one correct answer,
+offered and declined (John). The self-edge has one correct answer,
 and the tool applies it rather than stopping a close-out. An entry whose value
 the drop empties loses the key, `without`'s rule unchanged. And a referent
 that already named the survivor keeps one entry rather than two, because an
@@ -2424,8 +2425,8 @@ deleting are one kind rather than two settings.
 
 **A referent another session holds is edited anyway.** Refusing would let an
 unrelated claim on an unrelated item block a close-out. Skipping would leave
-the dangling edge the invariant forbids. The edit is mechanical (John,
-2026-09-04). The referent's head is not graded either. The edit only removes a
+the dangling edge the invariant forbids. The edit is mechanical (John).
+The referent's head is not graded either. The edit only removes a
 value, so it cannot introduce a defect. Grading would let a stranger's
 pre-existing defect refuse a close-out that has nothing to do with it. The
 listing is still where that defect shows.
@@ -2652,12 +2653,13 @@ standing on its own is the ordinary case rather than a defect. Neither fact
 was ever the cursor's to hold twice.
 
 The two keys are the **workflow's**, declared like any other, and the state
-says which is which. This repo's own declaration is the worked example:
+says which is which. The worked example, `examples/plan.toml`, declares them
+so:
 
 ```toml
 [states.plan]
 path             = "plan"
-doc              = "docs/method.md#plan"
+doc              = "../docs/reference.md#plan"
 capabilities     = ["queued", "claimed"]
 sort             = "position"
 sub-phases       = "Sub-phases"
@@ -2665,11 +2667,11 @@ sub-phase-cursor = "sub-phase"
 sub-phase-status = "sub-phase-status"
 
 [keys.sub-phase]
-doc  = "docs/method.md#the-cursor"
+doc  = "../docs/reference.md#the-cursor"
 help = "Which sub-phase is current, by the name its bullet carries."
 
 [keys.sub-phase-status]
-doc    = "docs/method.md#sub-phase-status"
+doc    = "../docs/reference.md#sub-phase-status"
 help   = "How far the current sub-phase has got."
 values = ["open", "planned", "in progress"]
 ```
@@ -2774,7 +2776,7 @@ the cursor key. Three sections in a row marked every sub-phase without a
 session ever running [`work`](#work), and each was locked out of the close
 until somebody ran it by hand. A process step is a flag you have to know to
 pass. The mark is the run every sub-phase ends with, so writing the cursor
-there keeps it current by construction (2026-10-06). The cursor then says
+there keeps it current by construction. The cursor then says
 which sub-phase a session last picked up **or** last finished.
 
 The refusal above does not catch a mark, and cannot. A cursor resting on a
@@ -3345,8 +3347,9 @@ A fixed value is graded at load. A key holding one value takes a string, and
 a list-valued key takes a list of strings. Neither may be empty, and each
 value must be in the key's `values` where it declares some. `{today}` is the
 one substitution: the run writes its local date there, in the shape
-`--decided 2026-10-18` writes. Any other brace refuses at load, so there is
-no escape syntax to learn.
+`--decided 2026-10-18` writes. It is a calendar date, not a timestamp, so it
+names the writer's day rather than a UTC instant. Any other brace refuses at
+load, so there is no escape syntax to learn.
 
 **A fixed value is never an option, and never a default.** A session cannot
 override it. If it could, `deprecate` could write `status = "accepted"`, and
@@ -3720,7 +3723,7 @@ It takes **no claim**. The ownership check still runs.
 Without it an idea could be committed to or absorbed and never simply set
 aside. [`queue`](#queue) and [`merge`](#merge) were the only ways out, so the
 one state whose whole job is holding what nobody has committed to had no way
-of letting go. That gap stood until 2026-09-11.
+of letting go.
 
 Any state may declare a transition of this shape. `discard` is out of
 [`someday-maybe`](#someday-maybe) here because that is where this workflow's

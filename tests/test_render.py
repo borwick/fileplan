@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from fileplan import render
 
 ROWS = [
@@ -135,7 +133,7 @@ def test_the_envelope_is_an_object_so_meta_has_somewhere_to_live() -> None:
 
 
 def test_a_toml_date_goes_out_as_its_iso_spelling() -> None:
-    """A head's `planted = 2026-09-01` reads back as a `datetime.date`, which
+    """A head's TOML date reads back as a `datetime.date`, which
     JSON has no spelling for. It goes out as text rather than refusing the
     whole listing over one field."""
     import datetime as dt

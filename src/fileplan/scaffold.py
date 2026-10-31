@@ -22,7 +22,7 @@ the tree above it.
 `skills` is here for the resolution rather than for `init`, which writes no
 skills.
 
-See docs/method.md#init and docs/method.md#the-skills
+See docs/reference.md#init and docs/reference.md#the-skills
 """
 
 from __future__ import annotations
@@ -37,12 +37,12 @@ from fileplan.declaration import PLAN_TOML_NAME, Refusal, load
 STARTER = "starter"
 
 #: What `init` writes beside the example: the directory the tool keeps
-#: session state in, ignored by git whole. See docs/method.md#init
+#: session state in, ignored by git whole. See docs/reference.md#init
 LOCAL_IGNORE = (Path("local") / ".gitignore", "*\n")
 
 #: And the one the interpreter skills ship in. Named for what ships rather
 #: than after any agent vendor's directory: where a consumer puts it is their
-#: harness's business. See docs/method.md#the-skills
+#: harness's business. See docs/reference.md#the-skills
 SKILLS = "skills"
 
 

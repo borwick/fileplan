@@ -15,12 +15,13 @@ neighbour instead would move places a person has already cited.
 A place is a bare integer, never a quoted one. As text, `"1000"` sorts ahead
 of `"200"`.
 
-See docs/method.md#the-queue
+See docs/reference.md#the-queue
 """
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from fileplan.declaration import CAPABILITY_KEYS, QUEUED, Refusal
 
@@ -73,9 +74,7 @@ def place(
             "place. Say where it goes once"
         )
 
-    held = sorted(
-        position for position in taken.values() if isinstance(position, int)
-    )
+    held = sorted(position for position in taken.values() if isinstance(position, int))
     if at is not None:
         return _at(taken, at)
     if above is not None or below is not None:
@@ -145,8 +144,9 @@ def errors(head: Mapping[str, Any]) -> list[str]:
     if value is None or (isinstance(value, int) and not isinstance(value, bool)):
         return []
     return [
-        f"{KEY} holds {value!r}, which is not a whole number. A place is "
-        f'arithmetic — "1000" sorts ahead of "200" as text — so it is '
-        "written as a bare integer"
+        (
+            f"{KEY} holds {value!r}, which is not a whole number. A place is "
+            f'arithmetic — "1000" sorts ahead of "200" as text — so it is '
+            "written as a bare integer"
+        )
     ]
-

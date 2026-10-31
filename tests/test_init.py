@@ -129,7 +129,9 @@ def test_init_writes_only_what_the_first_run_needs(tmp_path: Path) -> None:
     else: no document stubs, because nothing in the starter points at one."""
     assert main(["init", str(tmp_path)]) == 0
     files = sorted(
-        str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*") if path.is_file()
+        str(path.relative_to(tmp_path))
+        for path in tmp_path.rglob("*")
+        if path.is_file()
     )
     assert files == ["archive.md", "local/.gitignore", "plan.toml"]
     assert sorted(
@@ -293,7 +295,9 @@ def test_a_transition_named_init_refuses_by_name(
     first time somebody runs the verb."""
     assert main(["init", str(tmp_path)]) == 0
     plan = tmp_path / PLAN_TOML_NAME
-    plan.write_text(plan.read_text().replace(f"[transitions.{CAPTURE}]", "[transitions.init]"))
+    plan.write_text(
+        plan.read_text().replace(f"[transitions.{CAPTURE}]", "[transitions.init]")
+    )
 
     with pytest.raises(Refusal) as refusal:
         from fileplan.cli import _build_group
@@ -325,7 +329,7 @@ def test_the_skills_flag_refuses_an_extra_argument_before_the_declaration_loads(
     from *outside* a plan tree — the arm runs before the declaration loads, so a
     refusal that only fired where a `plan.toml` exists would be the wrong one.
     Found by section 10's pysmelly pass rather than by a check: the arm shipped
-    with no test reaching it, which is the shape `docs/method.md#the-skills`'s
+    with no test reaching it, which is the shape `docs/reference.md#the-skills`'s
     "answers before the declaration loads" makes easy to leave uncovered."""
     monkeypatch.delenv(PLAN_TOML_ENV, raising=False)
     monkeypatch.chdir(tmp_path)
@@ -350,6 +354,7 @@ def test_init_runs_outside_a_plan_tree_through_the_console_script(
     refused = subprocess.run(
         ["fileplan", "list"],
         capture_output=True,
+        check=False,
         text=True,
         cwd=tmp_path,
         env=environment,
@@ -360,6 +365,7 @@ def test_init_runs_outside_a_plan_tree_through_the_console_script(
     result = subprocess.run(
         ["fileplan", "init"],
         capture_output=True,
+        check=False,
         text=True,
         cwd=tmp_path,
         env=environment,

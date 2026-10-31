@@ -14,13 +14,14 @@ number it found. A number lost at the top is a loss the walk cannot catch.
 
 Everything here is pure and raises nothing but `Refusal`.
 
-See docs/method.md#the-register
+See docs/reference.md#the-register
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from fileplan.declaration import (
     ARCHIVE,
@@ -76,7 +77,7 @@ def missing(held: Mapping[int, Iterable[str]], *, first: int = FIRST) -> list[in
     register with no gaps rather than one with 191. One arithmetic, two
     readers — `next_number` refuses on it at the mint, the listing reports it
     on every read. The walk bounds itself by `max`, so a number lost at the
-    top leaves what remains gapless. See docs/method.md#the-register
+    top leaves what remains gapless. See docs/reference.md#the-register
     """
     if not held:
         return []
@@ -106,7 +107,7 @@ def unreadable_entry(text: str) -> list[tuple[int, str]]:
     is a lost close-out, named at line 1 with the file's first line. A stray
     `README.md` is reported rather than ignored, which is the loud polarity.
     A file whose only `##` is unreadable is already named by `unreadable`, so
-    it is not named twice. See docs/method.md#the-register
+    it is not named twice. See docs/reference.md#the-register
     """
     found = unreadable(text)
     if found or numbers(text):
@@ -118,7 +119,7 @@ def unreadable_entry(text: str) -> list[tuple[int, str]]:
 def lost(state: str, archive: str, line: int, text: str) -> dict[str, Any]:
     """One heading the register cannot read as the record a listing carries.
 
-    Named for the defect, the word docs/method.md#the-register already uses. A
+    Named for the defect, the word docs/reference.md#the-register already uses. A
     second record shape rather than a discriminator on the gap record.
     """
     return {STATE: state, ARCHIVE: archive, LINE: line, TEXT: text}
@@ -231,9 +232,11 @@ def errors(head: Mapping[str, Any]) -> list[str]:
     if value is None or (isinstance(value, int) and not isinstance(value, bool)):
         return []
     return [
-        f"{KEY} holds {value!r}, which is not a whole number. A number is "
-        f'arithmetic — "10" sorts ahead of "9" as text — so it is written as '
-        "a bare integer"
+        (
+            f"{KEY} holds {value!r}, which is not a whole number. A number is "
+            f'arithmetic — "10" sorts ahead of "9" as text — so it is written as '
+            "a bare integer"
+        )
     ]
 
 
@@ -264,7 +267,7 @@ def entry(text: str, number: int, title: str, record: str = "") -> str:
     `record` is the prose that goes under the heading, stripped of its blank
     lines and separated by one. Empty — the default — writes the heading
     alone, which is what a verb that moves the item files; a verb that
-    dissolves it hands the record in with the run (docs/method.md#dissolving).
+    dissolves it hands the record in with the run (docs/reference.md#dissolving).
 
     Inserted, never appended: before the first readable heading whose number
     is greater, and at the end when there is none, so the archive stays in

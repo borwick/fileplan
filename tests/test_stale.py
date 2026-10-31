@@ -77,7 +77,7 @@ def commit(repo: Repo, *names: str, ago: int, message: bytes = b"a commit") -> N
     other, whatever zone the suite runs in."""
     when = int(
         dt.datetime.combine(
-            TODAY - dt.timedelta(days=ago), dt.time(12), tzinfo=dt.timezone.utc
+            TODAY - dt.timedelta(days=ago), dt.time(12), tzinfo=dt.UTC
         ).timestamp()
     )
     worktree = repo.get_worktree()

@@ -28,7 +28,7 @@ Four subjects.
   that at the unit. What is left is the operator's contract, and a traceback is a thing a *process* prints — so this drives the
   console script in a tree that is not a repo and has none above it.
 
-`docs/method.md#the-version` is where the one-declaration rule these controls
+`docs/reference.md#the-version` is where the one-declaration rule these controls
 exist to keep honest is written down.
 """
 
@@ -44,8 +44,8 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from conftest import EXAMPLE, FIXTURE_FILES
 
-from conftest import FIXTURE_FILES
 from fileplan.declaration import PLAN_TOML_ENV, PLAN_TOML_NAME, load
 
 REPO = Path(__file__).resolve().parent.parent
@@ -119,13 +119,14 @@ def test_the_wheel_carries_what_the_tool_reads_at_runtime(wheel: Path) -> None:
 
 
 def test_the_wheel_carries_the_interpreter_skills(wheel: Path) -> None:
-    """The skills are the **interpreter** (`docs/method.md#the-skills`), and a
+    """The skills are the **interpreter** (`docs/reference.md#the-skills`), and a
     consumer's harness reads them out of a directory this tool knows nothing
     about — so the package is the only thing that can carry them to a stranger.
-    The repo keeps one home for each: the real files are here, and
-    `.claude/skills` is a symlink at them. This is the control that goes red if
-    that link is ever made the other way round, when the wheel would carry an
-    empty directory and nobody would notice until an install was tried."""
+    The real files are here. `.claude/skills/` holds the roots fileplan
+    module's skills, which a session working in this tree runs, and nothing
+    there ships (38-2). This is the control that goes red if the package's
+    copy is ever moved out of `src/`, when the wheel would carry an empty
+    directory and nobody would notice until an install was tried."""
     carried = set(zipfile.ZipFile(wheel).namelist())
 
     shipped = {
@@ -168,6 +169,7 @@ def test_the_skills_flag_prints_a_directory_that_holds_them(
         ["uvx", "--from", str(wheel), "fileplan", "--skills"],
         cwd=tmp_path,
         capture_output=True,
+        check=False,
         text=True,
         env=without_the_override(),
     )
@@ -187,17 +189,18 @@ def test_the_skills_flag_prints_a_directory_that_holds_them(
 
 
 def test_the_installed_wheel_prints_the_transitions(wheel: Path) -> None:
-    """The done line's own sentence, run against this repo's declaration."""
+    """The done line's own sentence, run against the worked example."""
     result = subprocess.run(
         ["uvx", "--from", str(wheel), "fileplan"],
-        cwd=REPO,
+        cwd=EXAMPLE.parent,
         capture_output=True,
+        check=False,
         text=True,
         env=without_the_override(),
     )
 
     assert result.returncode == 0, result.stderr
-    declared = load(REPO / PLAN_TOML_NAME).transitions
+    declared = load(EXAMPLE).transitions
     for name in declared:
         assert name in result.stdout
 
@@ -208,18 +211,32 @@ def test_the_installed_wheel_scaffolds_and_then_runs(
     """The stranger's whole walk, from a directory with nothing in it."""
     environment = without_the_override()
 
-    assert subprocess.run(
-        ["uvx", "--from", str(wheel), "fileplan", "init", "."],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        env=environment,
-    ).returncode == 0
+    assert (
+        subprocess.run(
+            ["uvx", "--from", str(wheel), "fileplan", "init", "."],
+            cwd=tmp_path,
+            capture_output=True,
+            check=False,
+            text=True,
+            env=environment,
+        ).returncode
+        == 0
+    )
 
     filed = subprocess.run(
-        ["uvx", "--from", str(wheel), "fileplan", CAPTURE, "A thing", "--body", "Prose."],
+        [
+            "uvx",
+            "--from",
+            str(wheel),
+            "fileplan",
+            CAPTURE,
+            "A thing",
+            "--body",
+            "Prose.",
+        ],
         cwd=tmp_path,
         capture_output=True,
+        check=False,
         text=True,
         env=environment,
     )
@@ -237,6 +254,7 @@ def test_the_module_entry_point_reaches_the_same_cli(wheel: Path) -> None:
     result = subprocess.run(
         ["uvx", "--from", str(wheel), "python", "-m", "fileplan", "--version"],
         capture_output=True,
+        check=False,
         text=True,
         env=without_the_override(),
     )
@@ -270,8 +288,11 @@ def test_the_wheel_declares_the_licence(wheel: Path, metadata: str) -> None:
     lines = metadata.splitlines()
     assert "License-Expression: BSD-3-Clause" in lines
 
-    named = [one.removeprefix("License-File: ") for one in lines
-             if one.startswith("License-File: ")]
+    named = [
+        one.removeprefix("License-File: ")
+        for one in lines
+        if one.startswith("License-File: ")
+    ]
     assert "LICENSE" in named, named
 
     carried = zipfile.ZipFile(wheel)
@@ -305,8 +326,7 @@ def test_no_license_classifier_rides_beside_the_expression(metadata: str) -> Non
     `License-Expression`; the build refuses one. It is the kind of line
     somebody adds out of habit while adding the others, so it is asserted
     rather than remembered. Non-empty first, for the reason above."""
-    declared = [one for one in metadata.splitlines()
-                if one.startswith("Classifier: ")]
+    declared = [one for one in metadata.splitlines() if one.startswith("Classifier: ")]
     assert declared, "no classifiers are declared, so this guard proves nothing"
 
     forbidden = [one for one in declared if one.startswith("Classifier: License ::")]
@@ -337,9 +357,7 @@ def declared_version() -> str:
 
 
 def source() -> str:
-    return "\n".join(
-        path.read_text() for path in sorted(SRC.rglob("*.py"))
-    )
+    return "\n".join(path.read_text() for path in sorted(SRC.rglob("*.py")))
 
 
 def test_the_version_is_declared_in_exactly_one_place() -> None:
@@ -358,7 +376,9 @@ def test_the_version_control_catches_a_second_declaration() -> None:
     assert len(VERSION_LINE.findall(twice)) == 2
     assert VERSION_IN_SOURCE.search('__version__ = "0.1.0"') is not None
     assert VERSION_IN_SOURCE.search('option(version = "0.1.0")') is not None
-    assert len(VERSION_OPTION.findall("click.version_option(\nclick.version_option(")) == 2
+    assert (
+        len(VERSION_OPTION.findall("click.version_option(\nclick.version_option(")) == 2
+    )
 
 
 def test_both_entry_points_report_the_number_pyproject_declares() -> None:
@@ -376,11 +396,12 @@ def test_the_version_answers_outside_a_plan_tree(tmp_path: Path) -> None:
     """A stranger's first command after installing. The number is a fact about
     the tool; which states exist is a fact about the workflow, and refusing the
     first because the second has no answer yet would read as a broken install.
-    See docs/method.md#the-version."""
+    See docs/reference.md#the-version."""
     result = subprocess.run(
         ["fileplan", "--version"],
         cwd=tmp_path,
         capture_output=True,
+        check=False,
         text=True,
         env=without_the_override(),
     )
@@ -399,6 +420,7 @@ def test_the_help_still_refuses_outside_a_plan_tree(tmp_path: Path) -> None:
         ["fileplan", "--help"],
         cwd=tmp_path,
         capture_output=True,
+        check=False,
         text=True,
         env=without_the_override(),
     )
@@ -434,6 +456,7 @@ def unversioned(tmp_path: Path) -> Path:
             ["fileplan", *argv],
             cwd=tmp_path,
             capture_output=True,
+            check=False,
             text=True,
             env=environment,
         )
@@ -466,6 +489,7 @@ def test_no_invocation_outside_a_git_repo_raises_a_traceback(
             ["fileplan", *argv],
             cwd=unversioned,
             capture_output=True,
+            check=False,
             text=True,
             env=environment,
         )
@@ -477,6 +501,7 @@ def test_no_invocation_outside_a_git_repo_raises_a_traceback(
         ["fileplan", "list", "--json"],
         cwd=unversioned,
         capture_output=True,
+        check=True,
         text=True,
         env=environment,
     )

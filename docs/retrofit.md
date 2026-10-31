@@ -91,7 +91,7 @@ there, and it writes only `plan.toml`, `archive.md` and `local/.gitignore`. In
 a tree you are retrofitting it will almost never refuse. Run `fileplan init`
 somewhere empty if you want a working example to crib from, and copy the
 lines you want out of it. The example declares one small loop, and
-[the method](method.md) describes everything past it. Do not run
+[the method](reference.md) describes everything past it. Do not run
 `fileplan init` in the tree you are retrofitting.
 
 ## naming the directories you already have
@@ -104,19 +104,19 @@ start with. Here is the fixture's `plan.toml`, written by hand:
 $ cat plan.toml
 [states.someday-maybe]
 path = "someday-maybe"
-doc  = "docs/method.md#someday-maybe"
+doc  = "docs/reference.md#someday-maybe"
 
 [states.adr]
 path = "adr"
-doc  = "docs/method.md#adr"
+doc  = "docs/reference.md#adr"
 
 [keys.decided]
-doc  = "docs/method.md#decided"
+doc  = "docs/reference.md#decided"
 help = "The date the decision was taken."
 
 [transitions.decide]
 kind = "move"
-doc  = "docs/method.md#decide"
+doc  = "docs/reference.md#decide"
 help = "Promote a someday-maybe note to a decision record."
 from = "someday-maybe"
 to   = "adr"
@@ -132,10 +132,10 @@ headings:
 ```
 $ fileplan list
 ERROR: /private/tmp/fileplan-retrofit/plan.toml is not a usable plan.toml
-  states.someday-maybe.doc names docs/method.md, which does not exist
-  states.adr.doc names docs/method.md, which does not exist
-  keys.decided.doc names docs/method.md, which does not exist
-  transitions.decide.doc names docs/method.md, which does not exist
+  states.someday-maybe.doc names docs/reference.md, which does not exist
+  states.adr.doc names docs/reference.md, which does not exist
+  keys.decided.doc names docs/reference.md, which does not exist
+  transitions.decide.doc names docs/reference.md, which does not exist
 ```
 
 Create the document and the refusal gets narrower rather than going away. A
@@ -144,10 +144,10 @@ missing heading is the same broken pointer as a missing document:
 ```
 $ fileplan list
 ERROR: /private/tmp/fileplan-retrofit/plan.toml is not a usable plan.toml
-  states.someday-maybe.doc names anchor "#someday-maybe", which is not a heading in docs/method.md
-  states.adr.doc names anchor "#adr", which is not a heading in docs/method.md
-  keys.decided.doc names anchor "#decided", which is not a heading in docs/method.md
-  transitions.decide.doc names anchor "#decide", which is not a heading in docs/method.md
+  states.someday-maybe.doc names anchor "#someday-maybe", which is not a heading in docs/reference.md
+  states.adr.doc names anchor "#adr", which is not a heading in docs/reference.md
+  keys.decided.doc names anchor "#decided", which is not a heading in docs/reference.md
+  transitions.decide.doc names anchor "#decide", which is not a heading in docs/reference.md
 ```
 
 **This is the retrofit's chicken-and-egg, and it reads like a bug until you
@@ -157,7 +157,7 @@ those sentences for the person who has to decide which directory something
 belongs in, and that is usually you in six months.
 
 ```
-$ cat docs/method.md
+$ cat docs/reference.md
 # The method
 
 What the words in `plan.toml` mean here.
@@ -376,8 +376,8 @@ Options:
     move
 
   Reading
-    decide   docs/method.md#decide
-    decided  docs/method.md#decided
+    decide   docs/reference.md#decide
+    decided  docs/reference.md#decided
 ```
 
 `--check` takes the same path as the run and stops before the first write.
@@ -452,6 +452,6 @@ claim one session at a time takes, and minted numbers are each a line in
 `plan.toml`. So are bullets cut into an item's body, and dependencies. The example `plan.toml` that
 `fileplan init` writes shows an ordered, numbered state and a command that
 closes an item out. That is the pair most retrofits want next.
-[The method](method.md) describes the rest. Add what your work actually has,
+[The method](reference.md) describes the rest. Add what your work actually has,
 write the section its `doc` field names, and ask `fileplan COMMAND --help`
 what the command now takes.

@@ -10,14 +10,14 @@ answer.
 
 Staleness reports and never gates.
 
-See docs/method.md#stale-days
+See docs/reference.md#stale-days
 """
 
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from dulwich.errors import NotGitRepository
 from dulwich.object_store import tree_lookup_path
@@ -147,4 +147,4 @@ def _zone(offset: int | None) -> dt.timezone:
     try:
         return dt.timezone(dt.timedelta(seconds=offset or 0))
     except ValueError:
-        return dt.timezone.utc
+        return dt.UTC

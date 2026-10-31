@@ -171,7 +171,7 @@ A transition's `kind` decides what the transition does:
   - `close` deletes the plan file, which is why `archive` declares no `to`.
 
 `archives = true` writes the closing entry into an archive document.
-[The method](https://github.com/borwick/fileplan/blob/main/docs/method.md#kinds) lists every kind.
+[The method](https://github.com/borwick/fileplan/blob/main/docs/reference.md#kinds) lists every kind.
 
 Capabilities give a state extra behaviour. The `plan` state above declares
 `queued` and `numbered`, which is why the plan file picked up a position and a
@@ -253,7 +253,7 @@ rather than for a person.
     run and its output pasted.
   - [Retrofitting fileplan](https://github.com/borwick/fileplan/blob/main/docs/retrofit.md) — the walk for a tree that
     already has work in it, where `init` is the wrong first command.
-  - [The method](https://github.com/borwick/fileplan/blob/main/docs/method.md) — the reference for every word a `plan.toml`
+  - [The method](https://github.com/borwick/fileplan/blob/main/docs/reference.md) — the reference for every word a `plan.toml`
     can hold.
   - [The documents](https://github.com/borwick/fileplan/blob/main/docs/index.md) — everything under `docs/`, plus the two
     skills an agent reads.

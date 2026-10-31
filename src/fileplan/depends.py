@@ -22,12 +22,13 @@ here refuses and nothing gates.
 
 Everything is pure.
 
-See docs/method.md#dependencies and docs/method.md#references
+See docs/reference.md#dependencies and docs/reference.md#references
 """
 
 from __future__ import annotations
 
-from typing import Any, Container, Iterable, Mapping
+from collections.abc import Container, Iterable, Mapping
+from typing import Any
 
 # The import runs one way: `fileplan.declaration` imports this module, so
 # this module imports nothing from the package.
@@ -85,7 +86,7 @@ def without(value: Any, slug: str) -> Any | None:
 
     Shape in, shape out: a list stays a list and a bare string stays one. A
     value the clearing empties comes back `None`, and the caller drops the key
-    rather than writing an empty one. See docs/method.md#dissolving
+    rather than writing an empty one. See docs/reference.md#dissolving
     """
     entries = value if isinstance(value, list) else [value]
     kept = [entry for entry in entries if str(entry) != slug]
@@ -103,7 +104,7 @@ def repoint(value: Any, slug: str, into: str, *, own: str) -> Any | None:
     write a self-edge, and an `into` already among the entries, since a
     referent that waited on both still waits on one thing. Everything else is
     kept verbatim, and `without`'s shape rules hold. See
-    docs/method.md#dissolving
+    docs/reference.md#dissolving
     """
     entries = value if isinstance(value, list) else [value]
     present = {str(entry) for entry in entries if str(entry) != slug}
@@ -184,4 +185,3 @@ def misordered(
                 }
             )
     return found
-

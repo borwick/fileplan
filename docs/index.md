@@ -15,8 +15,9 @@ the first five minutes. These are the rest.
 
 ## the vocabulary
 
-- [method.md](method.md) — the reference. One section per word a plan file can
-  hold, and the one home for each. Every `doc =` points here.
+- [reference.md](reference.md) — the reference. One section per word a plan file can
+  hold, and the one home for each. Every `doc =` in the worked example points
+  here.
 - [procedures.md](procedures.md) — what a session *does* around a run, which
   the reference leaves out on purpose. A transition's section of the method
   links here where it has a procedure.
@@ -30,13 +31,12 @@ the first five minutes. These are the rest.
   example of composing runs. `do-next` picks an arm, then hands each
   transition to the skill above.
 
-## what the plan file names
+## the worked example
 
-- [plan-archive.md](plan-archive.md) — the register's home, and the one entry
-  here that is not for reading. A closed section's record goes there: what it
-  decided, and what it shipped. A **record, not a reference** — it is listed so
-  you know what the file is, not so you go and read it, and a rule still worth
-  citing lives above.
+- [examples/plan.toml](../examples/plan.toml) — fileplan's own workflow, as a
+  declaration to read or copy. Every word it holds has its section in the
+  reference. Its register, [examples/plan-archive.md](../examples/plan-archive.md),
+  sits beside it, empty, as a fresh tree's is.
 - [templates/simplify-code.md](templates/simplify-code.md) — the pass that
   keeps the code easy to change. File it as an item with
   `fileplan idea "Simplify the code" --body - < docs/templates/simplify-code.md`.

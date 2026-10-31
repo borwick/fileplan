@@ -12,8 +12,8 @@ Every `*.md` in a declared state directory is claimed to be an item. So a
 `README.md` filed among them refuses the listing by name. Every defect is
 collected and reported at once.
 
-See docs/method.md#the-listing for the traversal and its filters.
-See docs/method.md#the-handle for the prefix rule `resolve` applies.
+See docs/reference.md#the-listing for the traversal and its filters.
+See docs/reference.md#the-handle for the prefix rule `resolve` applies.
 """
 
 from __future__ import annotations
@@ -22,17 +22,18 @@ import datetime as dt
 import difflib
 import operator as operators
 import re
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
 from fileplan import claim, depends, item, numbered, queued, stale, subphase
 from fileplan.declaration import (
     CAPABILITY_KEYS,
     CLAIM_KEYS,
-    COMMAND_KEYS,
     CLAIMED,
+    COMMAND_KEYS,
     INTRINSIC_KEYS,
     RESERVED_KEYS,
     Declaration,
@@ -49,55 +50,55 @@ from fileplan.item import Item
 SLUG, STATE, PATH = RESERVED_KEYS
 
 #: The row field naming the commands that could take an item right now.
-#: See docs/method.md#commands
+#: See docs/reference.md#commands
 COMMANDS = COMMAND_KEYS[0]
 
 #: The fields of a bullet, as `show ITEM NAME`'s record spells them first and
 #: the `unmarkable` and `unread` reports carry them. `mark` is present and
-#: `null` on an unmarked bullet. See docs/method.md#show
+#: `null` on an unmarked bullet. See docs/reference.md#show
 BULLET_NAME, BULLET_ITEM, BULLET_TITLE, BULLET_MARK = "name", "item", "title", "mark"
 
 #: What a bullet carries after its name's bold run, spelled after
 #: `subphase.Bullet.rest` — one spelling for one meaning, and the refusal
 #: quotes the same value. It appears in the `unmarkable` report's records
-#: rather than in a row. See docs/method.md#marking
+#: rather than in a row. See docs/reference.md#marking
 BULLET_REST = "rest"
 
 #: The 1-based line a bullet is on in its item file, head included, so a
 #: record's `path` and this are where an editor opens. Report-only, like
-#: `BULLET_REST`. See docs/method.md#the-listing
+#: `BULLET_REST`. See docs/reference.md#the-listing
 BULLET_LINE = "line"
 
 #: The two fields an `undeclared` record adds to the item's slug and path:
 #: which key, and the entry it carries that the key does not declare.
-#: See docs/method.md#the-listing
+#: See docs/reference.md#the-listing
 KEY, VALUE = "key", "value"
 
 #: The field a `missing` or `orphaned` record adds: the directory the key
-#: declares. See docs/method.md#directory
+#: declares. See docs/reference.md#directory
 DIRECTORY = "directory"
 
 #: The field an `unfound` record adds to those two: the carrier the filed
-#: item names, which no longer has the bullet. See docs/method.md#carried
+#: item names, which no longer has the bullet. See docs/reference.md#carried
 CARRIER = "carrier"
 
 #: Why the reader passed a bullet over, in the `unread` report's records.
-#: Report-only, like `BULLET_REST`. See docs/method.md#sub-phases
+#: Report-only, like `BULLET_REST`. See docs/reference.md#sub-phases
 BULLET_REASON = "reason"
 
 #: The field an `unlisted` record adds to the state it names: how many rows
-#: this read left out of it. See docs/method.md#listed
+#: this read left out of it. See docs/reference.md#listed
 COUNT = "count"
 
 #: How many candidates an ambiguous prefix names, one per line, before it
-#: says how many more there are. See docs/method.md#the-handle
+#: says how many more there are. See docs/reference.md#the-handle
 CANDIDATES = 10
 
 #: How like a slug's start a handle has to be to be offered as a near miss.
 NEAR = 0.6
 
 #: A number-shaped handle: a section's number, then perhaps a sub-phase's
-#: rest. See docs/method.md#the-handle
+#: rest. See docs/reference.md#the-handle
 NUMBERED = re.compile(r"^(\d+)(-\S+)?$")
 
 #: The comparison operators a filter value may carry, longest first so `>=`
@@ -111,7 +112,7 @@ DRAWN = ":"
 
 #: `contains`: a case-insensitive substring of a value's text, or of any entry
 #: of a list. Over a key with declared values it refuses, since those compare
-#: by order. See docs/method.md#the-listing
+#: by order. See docs/reference.md#the-listing
 CONTAINS = "~"
 
 #: The two tests that ask about presence rather than value. They come from
@@ -165,12 +166,14 @@ def items(declaration: Declaration) -> list[Item]:
             continue
         here: list[Item] = []
         paths = sorted(
-            (p for p in directory.glob(f"*{item.SUFFIX}") if p.name not in declaration.ignore),
+            (
+                p
+                for p in directory.glob(f"*{item.SUFFIX}")
+                if p.name not in declaration.ignore
+            ),
             key=lambda p: p.stem,
         )
-        for path, one in collecting(
-            lambda p: item.read(p, declaration), paths, errors
-        ):
+        for path, one in collecting(lambda p: item.read(p, declaration), paths, errors):
             here.append(one)
             if state.sub_phases:
                 errors += [
@@ -201,7 +204,7 @@ def archive(declaration: Declaration, state: State) -> list[Archived]:
     every `*.md` directly inside it, sorted by name, with no recursion and any
     other extension left alone. There a file with no readable heading is a
     lost close-out (`fileplan.numbered.unreadable_entry`). The load check
-    guarantees the path exists. See docs/method.md#the-register
+    guarantees the path exists. See docs/reference.md#the-register
     """
     # A `numbered` state with no `archive` refuses at load.
     assert state.archive is not None
@@ -272,16 +275,16 @@ def rows(
     declares. A `0` sub-phase count is a section nobody has decomposed,
     where `None` is a state that counts none, and the pair is what tells a
     finished decomposition from a state with no bullets at all. See
-    docs/method.md#the-listing and docs/method.md#the-cursor
+    docs/reference.md#the-listing and docs/reference.md#the-cursor
 
     `claimed`, `blocking` and `ages` are the facts read from outside the item
     file, each a mapping by slug, and `referenced` is one such mapping per
     inverse. Working them out is `listing`'s, so this
     function stays pure over what it is handed. `blocked-by` names only what
     is still filed, because "waiting on X" and "X does not exist" are
-    different facts (docs/method.md#dependencies). A slug git could not answer
+    different facts (docs/reference.md#dependencies). A slug git could not answer
     about is absent from `ages`, so the `None` is spelled once, here
-    (docs/method.md#stale-days).
+    (docs/reference.md#stale-days).
     """
     given = head_keys(declaration)
     held = CLAIM_KEYS if declaration.has(CLAIMED) else ()
@@ -366,11 +369,11 @@ class Listing:
     walked: int
     #: The slugs of started sections carrying no sub-phases at all. An
     #: exception report about the tree rather than a row of it, said by both
-    #: renderings and narrowed by no filter. See docs/method.md#the-cursor
+    #: renderings and narrowed by no filter. See docs/reference.md#the-cursor
     undecomposed: list[str] = field(default_factory=list)
     #: The edges naming nothing filed, and the edges pointing later in the
     #: order — one record each, naming the item, the key and what it named.
-    #: Exception reports like the one above. See docs/method.md#dependencies
+    #: Exception reports like the one above. See docs/reference.md#dependencies
     #:
     #: Separate reports and no merged `notices` array: each carries a different
     #: shape, and the envelope key is how a consumer selects one. A merged
@@ -379,46 +382,46 @@ class Listing:
     misordered: list[dict[str, Any]] = field(default_factory=list)
     #: The references naming nothing filed, in `unknown`'s three fields. A
     #: report of its own, because `unknown` says dependency in its gate, its
-    #: line and its docs. See docs/method.md#references
+    #: line and its docs. See docs/reference.md#references
     unresolved: list[dict[str, Any]] = field(default_factory=list)
     #: The two register reports, one record each: a number in neither the
     #: state nor the document its `archive` names, and a `##` in that document
     #: the register cannot read. The arithmetic is
     #: `fileplan.numbered.missing`, the same one the mint refuses on. See
-    #: docs/method.md#the-register
+    #: docs/reference.md#the-register
     gaps: list[dict[str, Any]] = field(default_factory=list)
     lost: list[dict[str, Any]] = field(default_factory=list)
     #: The bullets no verb could mark: unmarked, in a state some verb marks
     #: into, and carrying text after the name's bold run. One record each,
     #: naming the item, the bullet, where it is and what is in the way. See
-    #: docs/method.md#marking
+    #: docs/reference.md#marking
     unmarkable: list[dict[str, Any]] = field(default_factory=list)
     #: The bullets that look named and that the reader passes over: a bold run
     #: it cannot read, or a name in the state's form after the heading that
     #: ended the span. One record each, naming the item, what the name would
-    #: be, where it is and why. See docs/method.md#sub-phases
+    #: be, where it is and why. See docs/reference.md#sub-phases
     unread: list[dict[str, Any]] = field(default_factory=list)
     #: The head values outside their key's declared `values`, one record per
     #: entry. A value is graded when a verb writes it and never again, so a
     #: hand edit is found here. It gates nothing: grading at read would break
-    #: the whole listing over one item. See docs/method.md#the-listing
+    #: the whole listing over one item. See docs/reference.md#the-listing
     undeclared: list[dict[str, Any]] = field(default_factory=list)
     #: The two reports of a key declaring a `directory`, one record each: an
     #: entry naming no file directly inside the key's directory, and a `*.md`
     #: there that no filed item names in that key. They gate nothing, for the
-    #: reason `unknown` gives. See docs/method.md#directory
+    #: reason `unknown` gives. See docs/reference.md#directory
     missing: list[dict[str, Any]] = field(default_factory=list)
     orphaned: list[dict[str, Any]] = field(default_factory=list)
     #: The filed items naming a bullet their carrier no longer has, one record
     #: per entry: what a split leaves behind until each is repointed. Only
     #: while the carrier is filed, because provenance outlives its carrier.
-    #: It gates nothing. See docs/method.md#carried
+    #: It gates nothing. See docs/reference.md#carried
     unfound: list[dict[str, Any]] = field(default_factory=list)
     #: **Not** an exception report. One record per numbered state, saying what
     #: the register holds rather than what is wrong with it: its name, its
     #: archive, its floor and the highest number it holds. A report is silent
     #: when nothing is wrong; this prints on every read. See
-    #: docs/method.md#the-register
+    #: docs/reference.md#the-register
     register: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -426,7 +429,7 @@ class Listing:
 #: order, each with the gate it is present under: whenever the declaration
 #: could fill it, empty or not, and absent otherwise. One roster, read by the
 #: JSON envelope and by the text form's reports, so a report added to
-#: `Listing` is added here or reaches neither. See docs/method.md#the-listing
+#: `Listing` is added here or reaches neither. See docs/reference.md#the-listing
 REPORTS: tuple[tuple[str, Callable[[Declaration], bool]], ...] = (
     ("stranded", lambda one: one.has(CLAIMED)),
     # Started means a status key on a state that counts sub-phases, which is
@@ -470,7 +473,7 @@ def listing(
     rule by path rather than by traversal, so one malformed item cannot
     refuse a claim; the listing reads the tree it has already walked. A stranded claim is
     named, never filtered and never removed. A declaration with no claimed
-    state reads no records at all. See docs/method.md#the-listing
+    state reads no records at all. See docs/reference.md#the-listing
 
     `taking` says which commands could take an item, handed the item and the
     whole tree. The predicate is the caller's, so this module goes on knowing
@@ -479,9 +482,9 @@ def listing(
     would pass everything. Without it, `commands` is `None` on every row.
 
     This is where the clock is read, once, beside `local/claims/`
-    (docs/method.md#stale-days), and where each numbered state's archive is
+    (docs/reference.md#stale-days), and where each numbered state's archive is
     read, for the two reports and the register record `_register` builds
-    (docs/method.md#the-register).
+    (docs/reference.md#the-register).
     """
     found = items(declaration)
     blocking, unknown, misordered = _dependencies(found)
@@ -495,7 +498,7 @@ def listing(
     ages = stale.ages(
         declaration.root,
         [(one.slug, one.path) for one in found],
-        dt.date.today(),
+        dt.datetime.now().astimezone().date(),
     )
     # Started means the item carries the status key at all, never that its
     # status has passed some particular word: the words are the workflow's.
@@ -571,7 +574,7 @@ def _unmarkable(
     `subphase.Bullet.unmarkable` is the question, so the report and the
     refusal that stops the run cannot disagree about where a bold run ends.
     A state nothing marks into contributes nothing: a bullet there is not
-    waiting on a verb. See docs/method.md#marking
+    waiting on a verb. See docs/reference.md#marking
     """
     marked = declaration.marked_states
     said: list[dict[str, Any]] = []
@@ -667,7 +670,7 @@ def _paths(
     item in every state counts as naming, because the reports cover the whole
     tree. The directory holds `archive`'s documents: every `*.md` directly
     inside it, no recursion, other extensions left alone. The load check
-    guarantees each directory exists. See docs/method.md#directory
+    guarantees each directory exists. See docs/reference.md#directory
     """
     missing: list[dict[str, Any]] = []
     orphaned: list[dict[str, Any]] = []
@@ -709,15 +712,13 @@ def _paths(
     return missing, orphaned
 
 
-def _unfound(
-    declaration: Declaration, found: Sequence[Item]
-) -> list[dict[str, Any]]:
+def _unfound(declaration: Declaration, found: Sequence[Item]) -> list[dict[str, Any]]:
     """The `unfound` report: every name a filed item carries that its carrier's
     bullets do not.
 
     Read through each verb's `files` table, so the two keys are the ones that
     verb wrote. A carrier that is gone, or that sits where no bullets are
-    counted, contributes nothing. See docs/method.md#carried
+    counted, contributes nothing. See docs/reference.md#carried
     """
     by_slug = {one.slug: one for one in found}
     said: list[dict[str, Any]] = []
@@ -751,7 +752,8 @@ def _unfound(
 
 
 def _register(
-    declaration: Declaration, found: Sequence[Item],
+    declaration: Declaration,
+    found: Sequence[Item],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """The two register reports and the register itself, over one read of
     each archive.
@@ -817,9 +819,7 @@ def _register(
 
 def _dependencies(
     found: Sequence[Item],
-) -> tuple[
-    dict[str, tuple[str, ...]], list[dict[str, Any]], list[dict[str, Any]]
-]:
+) -> tuple[dict[str, tuple[str, ...]], list[dict[str, Any]], list[dict[str, Any]]]:
     """The three facts an edge gives, over one traversal: blocked, unknown,
     misordered.
 
@@ -860,7 +860,7 @@ def _references(
 
     `_dependencies`' sibling, without the blocking. An edge resolves against
     any filed item in any state, so an item is read back as a referent
-    wherever it sits. See docs/method.md#references
+    wherever it sits. See docs/reference.md#references
     """
     filed = {one.slug for one in found}
     held: dict[str, dict[str, tuple[str, ...]]] = {}
@@ -875,7 +875,9 @@ def _references(
                 {depends.SLUG: one.slug, depends.KEY: key, depends.NAMES: named}
                 for named in depends.unknown(edges, filed)
             ]
-    referenced = {inverse: depends.inverse(holders) for inverse, holders in held.items()}
+    referenced = {
+        inverse: depends.inverse(holders) for inverse, holders in held.items()
+    }
     return referenced, unresolved
 
 
@@ -928,7 +930,7 @@ def comparison(
             if one not in values:
                 raise Refusal(
                     f'{option} names "{one}", which is not a declared value of '
-                    f'{key} (declared: {", ".join(values)})'
+                    f"{key} (declared: {', '.join(values)})"
                 )
     return Test(key=key, operator=found, value=wanted, order=values)
 
@@ -1006,7 +1008,7 @@ def unlisting(
 
     The count is of the rows given, so taken after the filters it is what the
     hiding took from this read. A state that lost nothing gets no record.
-    See docs/method.md#listed
+    See docs/reference.md#listed
     """
     hidden = set(declaration.unlisted)
     counts = {name: 0 for name in declaration.unlisted}
@@ -1055,7 +1057,7 @@ def carries(value: Any, wanted: str) -> bool:
     Public, and read by `fileplan.transition` too: `refuses` asks exactly this
     of a head, and a second copy of the rule is how the filter and the
     precondition come to disagree about what a value is. See
-    docs/method.md#the-listing
+    docs/reference.md#the-listing
     """
     return any(str(entry) == wanted for entry in _entries(value))
 
@@ -1090,21 +1092,18 @@ def _drawn_from(value: Any, wanted: str) -> bool:
     A key the item does not carry is **false**, unlike `!=`: `--has` is the
     presence word, and a guard has to be conservative about an item that says
     nothing. Over a single-valued key this degenerates to "is one of", which
-    is the same rule rather than a second one. See docs/method.md#the-listing
+    is the same rule rather than a second one. See docs/reference.md#the-listing
     """
     if empty(value):
         return False
     named = _drawn(wanted)
-    return all(
-        any(carries(entry, one) for one in named) for entry in _entries(value)
-    )
+    return all(any(carries(entry, one) for one in named) for entry in _entries(value))
 
 
 def _compares(value: Any, test: Test) -> bool:
     entries = _entries(value)
     return any(
-        (pair := _pair(entry, test)) is not None
-        and _ORDERED[test.operator](*pair)
+        (pair := _pair(entry, test)) is not None and _ORDERED[test.operator](*pair)
         for entry in entries
         if entry is not None
     )
@@ -1197,7 +1196,7 @@ def ordered(
     tie-break, so the passes run from the slug up. A row missing a key follows
     the others in either direction, since the point of putting it there is
     that it is seen. The states keep their declared order.
-    See docs/method.md#the-listing
+    See docs/reference.md#the-listing
     """
     result: list[dict[str, Any]] = []
     unsorted: list[dict[str, Any]] = []
@@ -1242,7 +1241,7 @@ def resolve(declaration: Declaration, handle: str) -> Item:
     Three rules: a full slug always names itself, ahead of a longer slug it
     prefixes; an ambiguous prefix names its candidates; one matching nothing
     names its near misses. The arithmetic is `chosen`, so `show` applies them
-    to the rows it already has. See docs/method.md#the-handle
+    to the rows it already has. See docs/reference.md#the-handle
     """
     found = items(declaration)
     slug = chosen(
@@ -1279,7 +1278,7 @@ def chosen(
     if exact:
         raise Refusal(
             f'the slug "{handle}" is held by {len(exact)} files — '
-            f'{", ".join(exact)}. A slug is unique '
+            f"{', '.join(exact)}. A slug is unique "
             "across every state, because it is the one handle an item answers to"
         )
 
@@ -1324,7 +1323,7 @@ def numbered_handle(
 
     `named` and `carrying` are `chosen`'s. A slug outranks a number, so this
     finds something only where no slug starts with `handle`, and the slug
-    rules would have found nothing. See docs/method.md#the-handle
+    rules would have found nothing. See docs/reference.md#the-handle
     """
     numeric = NUMBERED.match(handle)
     if numeric is None or any(slug.startswith(handle) for slug, _ in named):
@@ -1343,8 +1342,8 @@ def edge_errors(
 
     A run's check on a value it was handed, so nothing is resolved or
     rewritten: an exact slug is required. An edge that dangles later, after a
-    rename or an abandon, is still only reported. See docs/method.md#dependencies
-    and docs/method.md#references
+    rename or an abandon, is still only reported. See docs/reference.md#dependencies
+    and docs/reference.md#references
     """
     keys = [key for key in (state.dependencies, *state.references) if key is not None]
     handed = {key: depends.edges(given, key) for key in keys}
@@ -1353,8 +1352,7 @@ def edge_errors(
     named = [(one.slug, "") for one in items(declaration)]
     filed = {slug for slug, _ in named}
     return [
-        f'{key} names "{edge}", and no item carries that '
-        f"slug{_nearest(named, edge)}"
+        f'{key} names "{edge}", and no item carries that slug{_nearest(named, edge)}'
         for key, edges in handed.items()
         for edge in depends.unknown(edges, filed)
     ]

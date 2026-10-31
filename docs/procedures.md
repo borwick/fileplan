@@ -2,14 +2,14 @@
 
 What a session **does** around a run: the questions to ask before it, what a
 value commits you to, what the run costs that nothing else warns you about.
-`docs/method.md` says what each transition and key *means*. This document says
+`docs/reference.md` says what each transition and key *means*. This document says
 what to do. A transition reaches its section through a link from its own
-section of the method ([the interpreter](method.md#the-interpreter)).
+section of the method ([the interpreter](reference.md#the-interpreter)).
 
 Sections are named after the **procedure**, not after the transition that
 links to one. A consumer's workflow has different transitions and the same
 procedures. The link is what joins the two, so nothing here is titled with a word out of
-this repo's own `plan.toml`.
+the worked example, `examples/plan.toml`.
 
 ## decomposing a section
 
@@ -44,7 +44,7 @@ out is a body of bullets, each one session's worth.
 4. **Mint the bullets with the command**, one run per sub-phase, and mark the
    final one `--last`. The heading, the names and the *pending* bullet all
    come from the tool, in the strict form it counts and reads
-   ([bulleted](method.md#bulleted)). The names take the form the state
+   ([bulleted](reference.md#bulleted)). The names take the form the state
    declares, `<number>-<ordinal>` here. Until `--last` lands the section goes
    on reading as pending, and a decomposition stopped half way says so.
 5. **Then fill each bullet in by hand.** `--title` mints only the bold line,
@@ -57,13 +57,13 @@ out is a body of bullets, each one session's worth.
 sub-phase sometimes shows it was cut wrong. Re-cut it with the commands, not
 by hand. **To split one sub-phase in two**, mint the new half with `decompose
 --title … --after` the old one, so it lands beside it rather than at the end
-([bulleted](method.md#bulleted)). Then `annotate --replace` each half, so each
+([bulleted](reference.md#bulleted)). Then `annotate --replace` each half, so each
 says only its own part and carries its own *done when*. **To merge two**,
-`fold` the absorbed one `--into` the survivor ([fold](method.md#fold)). Its
+`fold` the absorbed one `--into` the survivor ([fold](reference.md#fold)). Its
 prose moves under the survivor, and it is marked `merged` rather than deleted,
 so nothing naming it is left dangling. Then `annotate --replace` the survivor,
 if the two texts read better as one. **Ideas merged into the section**
-arrive as sub-phases at the end ([merge](method.md#merge)), so re-cut them
+arrive as sub-phases at the end ([merge](reference.md#merge)), so re-cut them
 the same way, with `fold` and `annotate`. Commit the item, staging that one
 path.
 
@@ -105,7 +105,7 @@ code the sub-phase touches.
 
 **`planned` means exactly that**: a plan is saved in `local/plans/` and is
 waiting for a session to pick it up
-([sub-phase-status](method.md#sub-phase-status)). Say the plan is saved, and
+([sub-phase-status](reference.md#sub-phase-status)). Say the plan is saved, and
 **stop**. The plan surviving a `/clear` is what stopping buys.
 
 **Running it.** The plan is the spec. If it turns out to be wrong mid-flight,
@@ -118,17 +118,17 @@ with its count, the listing in the shape the plan predicted, and
 **Then update the item body**: record the decisions made along the way in
 that sub-phase's own bullet, **with the command** rather than by hand. It is
 the transition the bare `fileplan` listing shows as a `write-bullet`, given
-`--text -` and a heredoc ([annotate](method.md#annotate)). The tool indents
+`--text -` and a heredoc ([annotate](reference.md#annotate)). The tool indents
 the lines and refuses a write that would change the sub-phases counted. This
 is the durable record. The section's archive entry is assembled from it.
 
 **Then mark the bullet with the command, never by hand.** It is the transition
 the bare `fileplan` listing shows declaring `marks`, whose subject is the
 *bullet* rather than the item. Pass `--note` for why, where the word alone
-does not say it ([marking](method.md#marking)). The run takes the status key
+does not say it ([marking](reference.md#marking)). The run takes the status key
 off the head as it goes, so the next listing shows a cursor and no status.
 That is where the last session was, with nothing claiming it is still at work
-([sub-phase-status](method.md#sub-phase-status)).
+([sub-phase-status](reference.md#sub-phase-status)).
 
 **The cursor moves with the command, never by hand**, and it moves *before*
 the commit. The head change then rides in the sub-phase's own commit rather
@@ -137,7 +137,7 @@ cover it. That is how a cursor goes stale, left naming one sub-phase while two
 more are planned and shipped. **A stale key is worse than an absent one.** The
 listing presents it with the same authority as the fields the tool writes and
 cannot get wrong. Nothing auto-releases, and ending the session is its own run
-([release](method.md#release)). Afterwards, `rm` the saved plan: it is spent,
+([release](reference.md#release)). Afterwards, `rm` the saved plan: it is spent,
 and its content is in the item body and the commit now.
 
 ## when a handle changes
@@ -153,14 +153,14 @@ named the old slug, and it names each file it edited. What is left is prose.
 2. Rename any saved plan for the item, `local/plans/<old-slug>--N.md`, to
    the new slug.
 3. Stage the new path, the removed old path and each edited file. A run never
-   stages anything ([the head](method.md#the-head)).
+   stages anything ([the head](reference.md#the-head)).
 
 **Splitting a bullet** is a hand edit, because it is rare and each item
 pointing at the bullet has to be decided one by one.
 
 1. Edit the bullet into two, and give **both** halves new names: `f12`
    becomes `f12a` and `f12b`. A letter after the number is safe, because the
-   mint still counts `f12a` as 12 ([sub-phases](method.md#sub-phases)).
+   mint still counts `f12a` as 12 ([sub-phases](reference.md#sub-phases)).
 2. Run `fileplan list`. No bullet is named `f12` any more, so every item whose
    `carried` names it is an `unfound` line. Keeping `f12` as one half would
    leave those items quietly pointing at whichever half kept the name.
@@ -171,7 +171,7 @@ pointing at the bullet has to be decided one by one.
 
 Closing out is the **last** sub-phase's job, whether or not that sub-phase is
 only the close-out. Where it is only the close-out it is **not a writing
-session**. Each `docs/method.md` section lands in the sub-phase that
+session**. Each `docs/reference.md` section lands in the sub-phase that
 introduced its vocabulary. The one-home guards run at every commit, so a
 `doc =` written before its section is a red suite in between. A section of one
 sub-phase satisfies that rule the same way. Its vocabulary and its close-out
@@ -192,7 +192,7 @@ What the run costs, so the next close-out does not rediscover it:
 
 - the record is **required** and the item body is **deleted by the same run**,
   so compose the entry in full *before* running the command. Mint-then-fill
-  cannot work here ([dissolving](method.md#dissolving));
+  cannot work here ([dissolving](reference.md#dissolving));
 - the command mints the `## <number>. <title>` heading itself, so the record
   is **prose only**, with no `##` line of its own. `###` subheadings inside it
   are safe: the register grades `##` alone;
@@ -200,12 +200,12 @@ What the run costs, so the next close-out does not rediscover it:
   no referent is hand-edited;
 - **every named sub-phase has to carry a mark first**, the close-out's own
   included, and the run names the ones that do not. Where the cursor sits
-  gates nothing ([the close check](method.md#the-close-check)). So `fileplan
+  gates nothing ([the close check](reference.md#the-close-check)). So `fileplan
   list --has commands=VERB`, for the transition whose section links here, is
   the read that says whether a section is closeable. A forgotten sub-phase blocks the close
   rather than passing it;
 - the claim is freed by the run itself, so nothing is released afterwards;
 - `git add` the deleted path to stage the removal; there is no `git rm`,
-  and a run never stages anything ([the head](method.md#the-head));
+  and a run never stages anything ([the head](reference.md#the-head));
 - if the entry needs fixing afterwards, edit the archive document. The item
   body is gone from the tree, and only git has it.

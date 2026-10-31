@@ -13,12 +13,11 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from conftest import FIXTURE_FILES
 
 from fileplan import item
 from fileplan.declaration import Declaration, Refusal, load
-from fileplan.lock import LOCK_NAME, LOCAL_DIR, run_lock
+from fileplan.lock import LOCAL_DIR, LOCK_NAME, run_lock
 from fileplan.transition import execute
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -62,7 +61,9 @@ def lock_file(root: Path) -> Path:
 
 def held(root: Path) -> bool:
     """Whether another process would have to wait for the lock right now."""
-    probe = subprocess.run([sys.executable, "-c", PROBE, str(lock_file(root))])
+    probe = subprocess.run(
+        [sys.executable, "-c", PROBE, str(lock_file(root))], check=False
+    )
     return probe.returncode == 1
 
 
@@ -73,9 +74,8 @@ def test_the_lock_is_held_inside_the_block_and_released_after(tmp_path: Path) ->
 
 
 def test_the_lock_is_released_when_the_body_raises(tmp_path: Path) -> None:
-    with pytest.raises(ZeroDivisionError):
-        with run_lock(tmp_path):
-            1 / 0
+    with pytest.raises(ZeroDivisionError), run_lock(tmp_path):
+        raise ZeroDivisionError
     assert not held(tmp_path)
 
 

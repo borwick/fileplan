@@ -15,7 +15,6 @@ import datetime as dt
 from pathlib import Path
 
 import pytest
-
 from conftest import FIXTURE_FILES
 
 from fileplan.declaration import Declaration, Refusal, load
@@ -23,7 +22,7 @@ from fileplan.item import Item, head_errors, parse, read, render, slug, table, w
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
-CANONICAL = '''\
+CANONICAL = """\
 +++
 cultivar = "heirloom"
 planted = 2026-09-01
@@ -33,7 +32,7 @@ after = ["decompose-section-1"]
 # A seedling
 
 The body starts here.
-'''
+"""
 
 
 @pytest.fixture
@@ -95,7 +94,7 @@ def test_the_head_holds_whatever_toml_says_it_holds() -> None:
     assert head["ratio"] == 1.5
     assert head["ready"] is True
     assert head["day"] == dt.date(2026, 9, 1)
-    assert head["moment"] == dt.datetime(2026, 9, 1, 12, 30)
+    assert head["moment"] == dt.datetime(2026, 9, 1, 12, 30)  # noqa: DTZ001 — TOML's local date-time parses naive
     assert head["clock"] == dt.time(12, 30)
     assert head["list"] == ["a", "b"]
 
@@ -122,8 +121,8 @@ def test_unparseable_toml_carries_tomllibs_own_message() -> None:
     "head_text",
     [
         '[section]\nkey = "value"',
-        'nested = { a = 1 }',
-        '[[rows]]\na = 1',
+        "nested = { a = 1 }",
+        "[[rows]]\na = 1",
     ],
 )
 def test_a_nested_table_refuses_by_name(head_text: str) -> None:
@@ -392,11 +391,13 @@ def test_an_undeclared_head_key_refuses_naming_it(declaration: Declaration) -> N
     """The typo detector: `cultivarr` is caught rather than read as unset."""
     errors = head_errors({"cultivarr": "heirloom"}, declaration, None)
     assert errors == [
-        '"cultivarr" is not a declared key '
-        "(declared: cultivar, rootstock, tag, notebook, pest, planted, after, "
-        "replaces, batch, "
-        "cutting, for-tree, for-step, graft, "
-        "graft-status; intrinsic: title)"
+        (
+            '"cultivarr" is not a declared key '
+            "(declared: cultivar, rootstock, tag, notebook, pest, planted, after, "
+            "replaces, batch, "
+            "cutting, for-tree, for-step, graft, "
+            "graft-status; intrinsic: title)"
+        )
     ]
 
 
@@ -507,7 +508,9 @@ def test_a_quoted_place_refuses_in_the_state_that_gives_it(
 
 
 def test_an_item_in_a_queued_state_reads_with_its_place(tree: Declaration) -> None:
-    path = item_at(tree, "orchard", "a.md", '+++\ntitle = "A tree"\nposition = 100\n+++\n')
+    path = item_at(
+        tree, "orchard", "a.md", '+++\ntitle = "A tree"\nposition = 100\n+++\n'
+    )
     assert read(path, tree)["position"] == 100
 
 

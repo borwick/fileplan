@@ -11,15 +11,16 @@ Everything is pure: a string in, a value out, and no filesystem. Nothing here
 raises `Refusal`. A defect comes back as a list of complaints. The executor is
 what refuses with the list.
 
-See docs/method.md#sub-phases for the counting, and docs/method.md#bulleted
+See docs/reference.md#sub-phases for the counting, and docs/reference.md#bulleted
 for the writing.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 # The import runs one way: `fileplan.declaration` imports this module, so
 # this module imports nothing from the package and raises no `Refusal`.
@@ -49,11 +50,11 @@ NAME_END = re.compile(r"[\s\u2014\u2013]")
 #: The strict marked form: a named bullet whose bold run is followed by a
 #: second one, holding the disposition. Where the state declares its marks,
 #: that run is a mark only if its word is one of them. See
-#: docs/method.md#marking
+#: docs/reference.md#marking
 MARKED = re.compile(r"^-\s+\*\*[^*]+?\*\*\s+\*\*(?P<mark>[^*]+?)\*\*")
 
 #: The two state fields naming which declared keys hold the cursor and the
-#: status riding with it. See docs/method.md#the-cursor
+#: status riding with it. See docs/reference.md#the-cursor
 CURSOR, STATUS = "sub-phase-cursor", "sub-phase-status"
 
 #: The row field saying which sub-phase to pick up next. In the default record
@@ -63,7 +64,7 @@ NEXT = "next-sub-phase"
 
 #: The row field counting the named bullets that carry no mark, so a forgotten
 #: sub-phase is a number that will not go down. `fileplan.transition` refuses
-#: with the same `unmarked`. See docs/method.md#the-listing
+#: with the same `unmarked`. See docs/reference.md#the-listing
 LEFT = "sub-phases-left"
 
 #: The three fields a row carries off the item's own body, in the order a row
@@ -77,7 +78,7 @@ PENDING = "sub-phase-pending"
 
 #: The state field holding the whole ident form a state's bullets are named
 #: by, separator included, with the ordinal's place marked. It is what lets a
-#: state with no register carry bullets at all. See docs/method.md#bulleted
+#: state with no register carry bullets at all. See docs/reference.md#bulleted
 FORM = "sub-phase-name"
 
 #: The one field of a `FORM` the tool supplies; every other names a value the
@@ -117,7 +118,7 @@ INDENT = " " * (len(COUNTED) + 1)
 #: The line that heads a folded bullet's prose under the bullet it moves to:
 #: the absorbed bullet's name and title, as `DASH` joins them on its own
 #: line. Italic and unbulleted, so it is the tool's prose and counts as
-#: nothing. See docs/method.md#marking
+#: nothing. See docs/reference.md#marking
 FROM = "*From {}:*"
 
 #: The ordinal a body with no bullets under the heading mints first.
@@ -134,7 +135,7 @@ class Bullet:
 
     `mark` is `None` where the bullet carries none, which is what an offer
     narrows on. An unnamed bullet is not one of these: it counts like any
-    other, and nothing can point at it. See docs/method.md#marking
+    other, and nothing can point at it. See docs/reference.md#marking
     """
 
     name: str
@@ -160,7 +161,7 @@ class Bullet:
         read immediately after that run, so a word written past the prose
         would land where nothing finds it. The one home of the question, read
         by the refusal that stops the run, by the offer that passes the bullet
-        over, and by the listing's report. See docs/method.md#marking
+        over, and by the listing's report. See docs/reference.md#marking
         """
         return self.mark is None and self.rest is not None
 
@@ -171,7 +172,7 @@ class Unread:
 
     `name` is what the name would be, or `None` where even that is empty.
     `line` counts within the body, as `Bullet.line` does.
-    See docs/method.md#sub-phases
+    See docs/reference.md#sub-phases
     """
 
     line: int
@@ -256,9 +257,7 @@ def text(body: str, heading: str, *, name: str) -> str | None:
     return "\n".join(lines[start : _owned(lines, _unfenced(lines), start)])
 
 
-def unmarked(
-    body: str, heading: str, marks: frozenset[str] | None = None
-) -> list[str]:
+def unmarked(body: str, heading: str, marks: frozenset[str] | None = None) -> list[str]:
     """The names of the bullets under `heading` carrying no mark. Pure.
 
     The one home of which sub-phases are still open, asked by four callers
@@ -289,7 +288,7 @@ def upcoming(
     Two arms over `unmarked`: a cursor naming a bullet that carries no mark is
     itself what comes next, and otherwise it is the first unmarked bullet. So
     a body marked out of order answers with the open one in between. See
-    docs/method.md#the-cursor
+    docs/reference.md#the-cursor
 
     `None` means no next sub-phase and never "this state counts none", which
     is `count` returning `None` beside it in the row. A cursor the body does
@@ -315,9 +314,11 @@ def errors(body: str, heading: str) -> list[str]:
     found = _headings(body, heading)
     if len(found) > 1:
         return [
-            f'the body carries {len(found)} "{heading}" headings '
-            f"({_lines(found, offset=1)}), so which "
-            "one holds the sub-phases has no answer"
+            (
+                f'the body carries {len(found)} "{heading}" headings '
+                f"({_lines(found, offset=1)}), so which "
+                "one holds the sub-phases has no answer"
+            )
         ]
 
     lines = body.splitlines()
@@ -368,7 +369,7 @@ def unread(body: str, heading: str, *, prefix: str | None) -> list[Unread]:
         Unread(
             number,
             found["token"] or None,
-            "its bold run holds a lone \"*\" or never closes, so no name can "
+            'its bold run holds a lone "*" or never closes, so no name can '
             "be read from it",
         )
         for number, line, name in _counted(body, heading)
@@ -424,9 +425,11 @@ def cursor_errors(
     counted = _counted(body, heading)
     if not counted:
         return [
-            f'{key} names sub-phase "{cursor}", and the body carries none at '
-            f'all under "{heading}" — there is nothing yet for a cursor to '
-            "point at"
+            (
+                f'{key} names sub-phase "{cursor}", and the body carries none at '
+                f'all under "{heading}" — there is nothing yet for a cursor to '
+                "point at"
+            )
         ]
 
     named = [name for _, _, name in counted if name]
@@ -439,9 +442,11 @@ def cursor_errors(
         if (mark := _mark(line, marks)) is None:
             return []
         return [
-            f'{key} names sub-phase "{cursor}", and that bullet already '
-            f"carries the mark **{mark}** — a cursor may only point at a "
-            "sub-phase that is still open"
+            (
+                f'{key} names sub-phase "{cursor}", and that bullet already '
+                f"carries the mark **{mark}** — a cursor may only point at a "
+                "sub-phase that is still open"
+            )
         ]
 
     said = (
@@ -468,7 +473,7 @@ def unknown(where: str, wanted: str, carried: Sequence[Bullet], heading: str) ->
     byte for byte: a disposition resolving the bullet it acts on, and
     `show ITEM NAME` resolving the bullet it reads. Both gate on `bullets`, so
     an unnamed bullet and the pending marker refuse through here as "no such
-    name". See docs/method.md#marking
+    name". See docs/reference.md#marking
 
     `carried` is what `bullets` returned, empty or not, and an empty list is
     said differently. Pure: the caller is what raises.
@@ -505,37 +510,47 @@ def form_errors(form: str, where: str) -> list[str]:
     """
     if not form:
         return [
-            f"{where} is empty, so every bullet here would be named nothing at "
-            f'all. A form is the ident a bullet carries, with "{{{SLOT}}}" '
-            "where the tool supplies the number"
+            (
+                f"{where} is empty, so every bullet here would be named nothing at "
+                f'all. A form is the ident a bullet carries, with "{{{SLOT}}}" '
+                "where the tool supplies the number"
+            )
         ]
     literal = FIELD.sub("", form)
     if "{" in literal or "}" in literal:
         return [
-            f'{where} is "{form}", which leaves a brace unclosed. A field is '
-            f'written "{{name}}", and anything else is spelled literally into '
-            "every bullet"
+            (
+                f'{where} is "{form}", which leaves a brace unclosed. A field is '
+                f'written "{{name}}", and anything else is spelled literally into '
+                "every bullet"
+            )
         ]
 
     named = fields(form)
     if SLOT not in named:
         return [
-            f'{where} is "{form}", which carries no "{{{SLOT}}}". Without it '
-            "every bullet here would be named the same thing, and a name that "
-            "answers to two bullets points at neither"
+            (
+                f'{where} is "{form}", which carries no "{{{SLOT}}}". Without it '
+                "every bullet here would be named the same thing, and a name that "
+                "answers to two bullets points at neither"
+            )
         ]
     if named.count(SLOT) > 1:
         return [
-            f'{where} is "{form}", which carries "{{{SLOT}}}" '
-            f"{named.count(SLOT)} times. Which part of the name the ordinal is "
-            "would have two answers"
+            (
+                f'{where} is "{form}", which carries "{{{SLOT}}}" '
+                f"{named.count(SLOT)} times. Which part of the name the ordinal is "
+                "would have two answers"
+            )
         ]
     if not form.endswith(f"{{{SLOT}}}"):
         return [
-            f'{where} is "{form}", and "{{{SLOT}}}" is not the end of it. The '
-            "prefix is what comes before the ordinal and the ordinal is read "
-            "off what is left, so a form with a suffix has nothing to strip "
-            "the suffix with"
+            (
+                f'{where} is "{form}", and "{{{SLOT}}}" is not the end of it. The '
+                "prefix is what comes before the ordinal and the ordinal is read "
+                "off what is left, so a form with a suffix has nothing to strip "
+                "the suffix with"
+            )
         ]
     return []
 
@@ -574,8 +589,7 @@ def next_ordinal(names: Iterable[str], prefix: str) -> int:
     ordinals = [
         int(found["ordinal"])
         for name in names
-        if name.startswith(prefix)
-        and (found := ORDINAL.match(name[len(prefix) :]))
+        if name.startswith(prefix) and (found := ORDINAL.match(name[len(prefix) :]))
     ]
     return max(ordinals, default=FIRST - 1) + 1
 
@@ -795,13 +809,8 @@ def absorb(body: str, *, heading: str, name: str, into: str) -> str:
             del lines[number + 1 : cut]
             title = _title(line)
             headed = FROM.format(f"{name} {DASH} {title}" if title else name)
-            text = "\n".join(
-                [headed]
-                + [one.removeprefix(INDENT) for one in moved]
-            )
-            return write(
-                "\n".join(lines) + "\n", heading=heading, name=into, text=text
-            )
+            text = "\n".join([headed] + [one.removeprefix(INDENT) for one in moved])
+            return write("\n".join(lines) + "\n", heading=heading, name=into, text=text)
     return body
 
 
@@ -833,8 +842,10 @@ def write_errors(body: str, written: str, heading: str) -> list[str]:
     if lost := [name for name in names(body, heading) if name not in kept]:
         said += f", and {', '.join(lost)} would no longer be read"
     return [
-        f"{said}. Text under a bullet is indented, so only a fence can do "
-        "that: an odd number of fence lines hides every line after them"
+        (
+            f"{said}. Text under a bullet is indented, so only a fence can do "
+            "that: an odd number of fence lines hides every line after them"
+        )
     ]
 
 
@@ -847,9 +858,11 @@ def text_errors(text: str) -> list[str]:
     if text.strip():
         return []
     return [
-        "the text is empty, and a write under a bullet needs something to "
-        "write. An append of nothing writes nothing, and a replace with "
-        "nothing would delete the bullet's prose without saying so"
+        (
+            "the text is empty, and a write under a bullet needs something to "
+            "write. An append of nothing writes nothing, and a replace with "
+            "nothing would delete the bullet's prose without saying so"
+        )
     ]
 
 
@@ -884,9 +897,13 @@ def title_errors(title: str) -> list[str]:
     bold run, so `note_errors` has no fourth case.
     """
     lone = (
-        ['a sub-phase title carries a lone "*", and the bold run its name is '
-         "read from cannot hold one — the bullet would count and could not be "
-         "pointed at"]
+        [
+            (
+                'a sub-phase title carries a lone "*", and the bold run its name is '
+                "read from cannot hold one — the bullet would count and could not be "
+                "pointed at"
+            )
+        ]
         if "*" in title.replace("**", "")
         else []
     )
@@ -966,15 +983,19 @@ def pending_errors(pending: str, where: str) -> list[str]:
     """
     if "\n" in pending:
         return [
-            f"{where} carries a newline, and a sub-phase is one line — the "
-            "second would be continuation rather than part of the bullet"
+            (
+                f"{where} carries a newline, and a sub-phase is one line — the "
+                "second would be continuation rather than part of the bullet"
+            )
         ]
     if _pending_name(pending) is None:
         return [
-            f'{where} is "{pending}", which is not a named sub-phase. It is '
-            f'the bullet\'s content after "{COUNTED} ", and it is found again '
-            f'by the name it opens with, so it is written "**<name> {DASH} '
-            '…**"'
+            (
+                f'{where} is "{pending}", which is not a named sub-phase. It is '
+                f'the bullet\'s content after "{COUNTED} ", and it is found again '
+                f'by the name it opens with, so it is written "**<name> {DASH} '
+                '…**"'
+            )
         ]
     return []
 
@@ -1181,7 +1202,7 @@ def _pending_line(pending: str) -> str:
 
     What plan.toml declares is the content after `- ` (`PENDING`), so every
     reader and the writer have to put the marker back the same way. A second
-    marker composer is the drift docs/method.md#bulleted refuses.
+    marker composer is the drift docs/reference.md#bulleted refuses.
     """
     return f"{COUNTED} {pending}"
 

@@ -15,7 +15,7 @@ A comment in a head is dropped on write, because `tomllib` does not surface
 one. The head is data. Commentary goes in the body, which is kept byte for
 byte.
 
-See docs/method.md#the-head
+See docs/reference.md#the-head
 """
 
 from __future__ import annotations
@@ -25,15 +25,16 @@ import os
 import re
 import tempfile
 import tomllib
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
 from fileplan import numbered, queued
 from fileplan.declaration import (
     CAPABILITY_KEYS,
     INTRINSIC_KEYS,
-    SUFFIX,
+    SUFFIX,  # noqa: F401 — re-exported, read elsewhere as `item.SUFFIX`
     Declaration,
     Refusal,
     State,
@@ -226,12 +227,18 @@ def _string(value: str) -> str:
     Escaping only `\\` and `"` would let a title carrying a newline write a
     head this reader then refused. Unicode passes through raw: TOML is UTF-8.
     """
-    return '"' + "".join(
-        _ESCAPES[character] if character in _ESCAPES
-        else f"\\u{ord(character):04x}"
-        if character < " " or character == "\x7f" else character
-        for character in value
-    ) + '"'
+    return (
+        '"'
+        + "".join(
+            _ESCAPES[character]
+            if character in _ESCAPES
+            else f"\\u{ord(character):04x}"
+            if character < " " or character == "\x7f"
+            else character
+            for character in value
+        )
+        + '"'
+    )
 
 
 #: Which module grades each capability key's value. A mapping rather than an
@@ -287,8 +294,8 @@ def _stray(name: str, declaration: Declaration, state: State | None) -> str:
         )
     return (
         f'"{name}" is not a declared key '
-        f'(declared: {", ".join(declaration.keys)}; '
-        f'intrinsic: {", ".join(INTRINSIC_KEYS)})'
+        f"(declared: {', '.join(declaration.keys)}; "
+        f"intrinsic: {', '.join(INTRINSIC_KEYS)})"
     )
 
 
@@ -387,7 +394,7 @@ def replace(path: Path, text: str) -> None:
     writes the archive this way too — one copy of the dance rather than a
     second that could learn a different answer about modes or cleanup.
     """
-    handle = tempfile.NamedTemporaryFile(
+    handle = tempfile.NamedTemporaryFile(  # noqa: SIM115 — closed by the `with` inside the `try`, so the cleanup also covers a failed write
         "w",
         encoding="utf-8",
         newline="",

@@ -1,8 +1,8 @@
 # The orchard's archive
 
 *The suite's archive, in the fixture's vocabulary. Deliberately NOT this
-repo's `docs/plan-archive.md` — the register must be graded against a corpus
-that is not the host repo's, the same reason `plan.toml` is a fixture.*
+repo's own archive — the register must be graded against a corpus that is not
+the host repo's, the same reason `plan.toml` is a fixture.*
 
 ## 1. A felled tree
 

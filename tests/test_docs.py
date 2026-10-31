@@ -19,7 +19,7 @@ and a row's `commands` answers it once. A guard over a thing that is not there i
 only kind that can keep it from coming back.
 
 The fourth is 6-1's, and it grades **output** rather than source: no verb's
-[contract](../docs/method.md#the-contract) names another verb this repo
+[contract](../docs/reference.md#the-contract) names another verb this repo
 declares. `test_cli.py`'s control says no per-verb *code* exists; this says
 no per-verb *line* reached the help text either, which is what the epilog
 being generated from the `Transition` buys.
@@ -27,7 +27,7 @@ being generated from the `Transition` buys.
 `declaration.pointer_errors` already grades the `doc =` fields at *every*
 invocation. What it structurally cannot see is a citation in a comment or a
 docstring, which is not a `doc =` field — `plan.toml`'s `# See
-docs/method.md#title` is exactly that, and so is every `docs/method.md#…` in
+docs/reference.md#title` is exactly that, and so is every `docs/reference.md#…` in
 `src/`. Both readers ask `declaration.heading_slugs` what headings a
 document has, so there is one answer to that question rather than two.
 
@@ -48,35 +48,78 @@ from pathlib import Path
 
 import click
 import pytest
-
-from conftest import FIXTURE_FILES
+from conftest import EXAMPLE, FIXTURE_FILES
 
 from fileplan import read
 from fileplan.cli import DECLARED, LIST_HELP, _build_group, contract, main
-from fileplan.declaration import KINDS, _slug
-from fileplan.declaration import heading_slugs, load
+from fileplan.declaration import KINDS, _slug, heading_slugs, load
 
 REPO = Path(__file__).resolve().parent.parent
-METHOD = Path("docs/method.md")
+METHOD = Path("docs/reference.md")
 
-#: The filed items. They cite prose two ways — a `draft` pointer in the head
-#: and `§`-style references in the body — and both are the same kind of
-#: pointer as a `doc =`: a claim that this repo ships a document. The tool
-#: deliberately does not grade a head value at read time (one bad value would
-#: break a whole listing rather than one item), so this is where a `draft`
-#: naming a document the repo does not ship is caught.
-#:
-#: **Every declared state, not `plan/` alone** (8-5, 2026-09-06). The scope
-#: was `plan/` for as long as `plan/` was where the items were, and section 8
-#: closing emptied it — which turned the mutation check below vacuous and, in
-#: doing so, named the hole it had been standing next to all along: a
-#: `someday-maybe/` item's pointers were graded by nothing, and one of them
-#: names a document under `docs/templates/`. The directories come out of
-#: `load()` rather than being listed here, for `scaffold.py`'s reason: a
-#: second reader of the declaration is what the contract exists to prevent.
-ITEMS = tuple(
-    Path(state.path) for state in load(REPO / "plan.toml").states.values()
+#: This repo's own declaration, which is not the worked example (38-7). It
+#: says where this tree keeps its items and its archive, so the guards that
+#: read *this repo's* tree read it. A built tree does not have it, the way it
+#: does not have `OWN_SOURCES`, so those guards skip there rather than raise.
+#: Every guard that grades the product reads `EXAMPLE` instead.
+OWN_PLAN = REPO / "plan.toml"
+
+#: Marks a guard that reads this repo's own tree through `OWN_PLAN`.
+own_tree = pytest.mark.skipif(
+    not OWN_PLAN.exists(),
+    reason="this repo's own plan.toml does not ship; the built tree has none",
 )
+
+
+#: The roots manifest. Every `[modules.*.files]` key in it names a path a
+#: roots module delivered, which this repo did not write and does not index
+#: (38-2). A built tree has no manifest and nothing delivered, so it reads
+#: nothing there.
+ROOTS = REPO / "roots.toml"
+
+
+def _delivered() -> tuple[Path, ...]:
+    """Every path a roots module delivered into this tree, resolved. A key
+    ending in `/` is a directory the module owns whole."""
+    if not ROOTS.exists():
+        return ()
+    modules = tomllib.loads(ROOTS.read_text()).get("modules", {})
+    return tuple(
+        (REPO / key).resolve()
+        for module in modules.values()
+        for key in module.get("files", {})
+    )
+
+
+def _items() -> tuple[Path, ...]:
+    """Every state directory this repo's own declaration names.
+
+    The filed items cite prose two ways — a `draft` pointer in the head and
+    `§`-style references in the body — and both are the same kind of pointer
+    as a `doc =`: a claim that this repo ships a document. The tool
+    deliberately does not grade a head value at read time (one bad value would
+    break a whole listing rather than one item), so this is where a `draft`
+    naming a document the repo does not ship is caught.
+
+    **Every declared state, not `plan/` alone** (8-5). The scope
+    was `plan/` for as long as `plan/` was where the items were, and section 8
+    closing emptied it — which turned the mutation check below vacuous and, in
+    doing so, named the hole it had been standing next to all along: a
+    `someday-maybe/` item's pointers were graded by nothing, and one of them
+    names a document under `docs/templates/`. The directories come out of
+    `load()` rather than being listed here, for `scaffold.py`'s reason: a
+    second reader of the declaration is what the contract exists to prevent.
+
+    **Read when a guard asks, not at import** (38-7). Three other modules
+    import this one, so a load at import would turn a broken pointer in this
+    repo's own `plan.toml` into a collection error across all four, product
+    guards included. Read late, it fails only the guards that read this
+    repo's tree.
+    """
+    if not OWN_PLAN.exists():
+        return ()
+    return tuple(Path(state.path) for state in load(OWN_PLAN).states.values())
+
 
 #: The head line an item spells its draft on. Read as text rather than
 #: through the loader: this module grades the repo's artifacts as documents,
@@ -97,10 +140,10 @@ CITATION = re.compile(r"docs/[A-Za-z0-9_./-]+\.md(?:#([A-Za-z0-9_-]+))?")
 #: because its comments cite too, and while it was not a citation shipped a
 #: pointer to a document this repo keeps for itself.
 SOURCES = (
-    "plan.toml",
+    "examples/plan.toml",
     "pyproject.toml",
     "README.md",
-    "docs/method.md",
+    "docs/reference.md",
     "docs/procedures.md",
     "docs/initialization.md",
     "docs/retrofit.md",
@@ -108,7 +151,7 @@ SOURCES = (
     "docs/ai-disclosure.md",
 )
 
-#: The four that may cite and do **not** ship. This module ships, so in a
+#: The ones that may cite and do **not** ship. This module ships, so in a
 #: built tree they are simply absent — and `read_text()` on an absent file
 #: raises rather than failing a claim. They are graded where they are and
 #: skipped where they are not.
@@ -118,47 +161,33 @@ SOURCES = (
 #: run in the built tree. The control that these two lists agree with what is
 #: shipped lives on the side of the fence that has both.
 OWN_SOURCES = (
+    "plan.toml",
     "CLAUDE.md",
-    "docs/pysmelly-adjudication.md",
     "docs/publishing.md",
-    "docs/releasing.md",
-    "docs/writing-style.md",
 )
 
 #: The skills this repo ships. They are the **interpreter**
-#: (`../docs/method.md#the-interpreter`), and an interpreter is nothing but
+#: (`../docs/reference.md#the-interpreter`), and an interpreter is nothing but
 #: pointers at the program: a skill citing a section the repo does not ship
 #: sends a session to read a document that is not there, which is the exact
 #: failure the guard over `src/` exists for, one artifact further out.
 #:
-#: Their real home, not the `.claude/skills` link at it. That link is this
-#: tree's own harness wiring: a session working here discovers skills only
-#: under `.claude/`, and one home with a link at the other is how the two
-#: paths cannot drift. Reading through it made the link part of the shipping
-#: set, which put a `.claude/` into a repository no session works in. Read at
-#: the real path, these guards also grade what the wheel carries, which is
-#: the copy a consumer actually installs.
+#: The package's copy, not `.claude/skills/`. That directory holds the roots
+#: fileplan module's skills, which a session working here runs, and it ships
+#: nothing (38-2). It was once a link at this directory, and reading through
+#: the link put a `.claude/` into a repository no session works in. Read here,
+#: these guards also grade what the wheel carries, which is the copy a
+#: consumer actually installs.
 SKILLS = Path("src/fileplan/skills")
 
 #: The document a `policy =` points at: what a session *does* around a run,
-#: against `docs/method.md`'s what a verb means.
+#: against `docs/reference.md`'s what a verb means.
 PROCEDURES = Path("docs/procedures.md")
 
-#: The release procedure, and a document **nothing points at with a
-#: `policy =`**: it is not a transition, so the orphan guard over `PROCEDURES`
-#: would refuse it. It stopped shipping on 2026-09-12 (John), because what it
-#: walks is *this* project's release — the account, the name on the index,
-#: which of two trees uploads — and a consumer who installed the tool has no
-#: use for any of it. So it is in `OWN_SOURCES` for `ADJUDICATION`'s reason,
-#: and graded where it is there for the same two things: its citations
-#: resolve, and its headings do not repeat a meaning that already has a home.
-RELEASING = Path("docs/releasing.md")
-
 #: The walk from an empty directory, and the second shipped document nothing
-#: points at with a `policy =`. It was the *adoption* walk until 2026-09-12
-#: (John). Two documents told apart only by their starting state cannot be
-#: named by two words that mean the same thing, and adoption and retrofit are
-#: near synonyms. `init` is the command one walk runs and the other refuses
+#: points at with a `policy =`. Two documents told apart only by their
+#: starting state cannot be named by two words that mean the same thing, and
+#: adoption and retrofit are near synonyms (John). `init` is the command one walk runs and the other refuses
 #: by name, so the command names the walk. Graded beside the others for the
 #: same two things: its citations resolve, and its headings do not repeat a
 #: meaning that has a home.
@@ -188,39 +217,18 @@ DISCLOSURE = Path("docs/ai-disclosure.md")
 #: only kept while every document is named and every name resolves.
 INDEX = Path("docs/index.md")
 
-#: The harness a `pysmelly` pass is adjudicated under, and the fourth
-#: document nothing points at with a `policy =`. Nothing can: the pass is a
-#: **session** rather than a transition — like `do-next` — so there is no verb
-#: for a `policy =` to hang on, and a section of it in `docs/procedures.md`
-#: would be an orphan the guard over `PROCEDURES` refuses. Graded here for the
-#: same two things as the three above: its citations resolve, and its headings
-#: do not repeat a meaning that already has a home — the tool's own guidance
-#: holds what the tool means, and this holds only what this repo has to answer
-#: for itself. It is in `OWN_SOURCES` rather than `SOURCES`, so every guard that
-#: reads it reads it only where it is there.
-ADJUDICATION = Path("docs/pysmelly-adjudication.md")
-
 #: How the public copy is built: the two trees, the three gates, and what
 #: nobody automated. It is the account of `publish/`, which does not ship, so
 #: it does not either — and it names the strings the checker suppresses, so it
-#: could not. It is in `OWN_SOURCES` for `ADJUDICATION`'s reason, and graded
-#: here for the same two things: its citations resolve, and its headings do not
-#: repeat a meaning that already has a home.
+#: could not. It is in `OWN_SOURCES` rather than `SOURCES`, so every guard
+#: that reads it reads it only where it is there. Graded here for two things:
+#: its citations resolve, and its headings do not repeat a meaning that already
+#: has a home.
 PUBLISHING = Path("docs/publishing.md")
-
-#: How this repo writes the documents people read, and the fifth document
-#: nothing points at with a `policy =`. It does not ship, for `PUBLISHING`'s
-#: reason: it is about this tree's practice rather than about the tool, and it
-#: quotes prose the README has since cut. Graded where it is there for the
-#: same two things as the others: its citations resolve, and its headings do
-#: not repeat a meaning that already has a home.
-STYLE = Path("docs/writing-style.md")
 
 #: Headings that hold other headings rather than a meaning. A pointer names a
 #: leaf; these are the shelves the leaves sit on.
-CONTAINERS = frozenset(
-    {"the-method", "states", "keys", "item-files", "transitions"}
-)
+CONTAINERS = frozenset({"the-method", "states", "keys", "item-files", "transitions"})
 
 
 #: One fenced block, opening and closing fence at the start of a line.
@@ -244,7 +252,7 @@ def prose(text: str) -> str:
     declined when it chose extraction: a name list catches only what somebody
     remembered to add, and the next walked document would have to remember
     itself. It costs nothing that was being graded — a fenced *example* has no
-    prompt in it, so `docs/method.md`'s TOML snippets, which really do name
+    prompt in it, so `docs/reference.md`'s TOML snippets, which really do name
     this repo's own sections, stay in the haystack.
     """
     return FENCED.sub(
@@ -268,11 +276,7 @@ def _filed() -> list[Path]:
     state and this returns nothing for it, so the guards that need a haystack
     say so themselves rather than passing vacuously.
     """
-    return sorted(
-        path
-        for state in ITEMS
-        for path in (REPO / state).glob("*.md")
-    )
+    return sorted(path for state in _items() for path in (REPO / state).glob("*.md"))
 
 
 def _own_sources() -> list[str]:
@@ -311,8 +315,8 @@ def _cited() -> list[tuple[str, str, str | None]]:
 
 
 def _pointers() -> list[tuple[str, str]]:
-    """Every `doc =` in the repo's own declaration, as `(what, pointer)`."""
-    declaration = load(REPO / "plan.toml")
+    """Every `doc =` in the worked example, as `(what, pointer)`."""
+    declaration = load(EXAMPLE)
     entries = (
         list(declaration.states.values())
         + list(declaration.keys.values())
@@ -321,13 +325,27 @@ def _pointers() -> list[tuple[str, str]]:
     return [(entry.name, entry.doc) for entry in entries if entry.doc]
 
 
+def _anchor_in_the_method(pointer: str) -> str | None:
+    """The section of `docs/reference.md` a `doc =` pointer names, or `None`.
+
+    A pointer is relative to the declaration that holds it, the way the loader
+    resolves it, so the worked example's `../docs/reference.md#plan` names
+    `plan`. Comparing the spelling instead would pass every pointer by as
+    naming nothing once the example moved under `examples/` (38-7).
+    """
+    path, _, anchor = pointer.partition("#")
+    if (EXAMPLE.parent / path).resolve() != (REPO / METHOD).resolve():
+        return None
+    return anchor or None
+
+
 #: A link from a section of the method to a section of the procedures, as
 #: markdown writes one: `(procedures.md#anchor)`.
 PROCEDURE_LINK = re.compile(r"\(procedures\.md#([a-z0-9-]+)\)")
 
 
 def _procedure_links() -> set[str]:
-    """Every procedure a transition's own `docs/method.md` section links to.
+    """Every procedure a transition's own `docs/reference.md` section links to.
 
     31-2 folded `policy =` into `doc`: a transition reaches its procedure by a
     link from the section its `doc` names, so this is what joins the two
@@ -343,28 +361,26 @@ def _procedure_links() -> set[str]:
             current = None
         elif current is not None:
             sections[current].append(line)
-    declaration = load(REPO / "plan.toml")
+    declaration = load(EXAMPLE)
     return {
         anchor
         for transition in declaration.transitions.values()
-        if transition.doc is not None and transition.doc.startswith(f"{METHOD}#")
-        for anchor in PROCEDURE_LINK.findall(
-            " ".join(sections.get(transition.doc.partition("#")[2], []))
-        )
+        if transition.doc is not None
+        for section in [_anchor_in_the_method(transition.doc)]
+        if section is not None
+        for anchor in PROCEDURE_LINK.findall(" ".join(sections.get(section, [])))
     }
 
 
 def _anchors_into_the_method() -> set[str]:
-    """Every section of `docs/method.md` something names, however it names it."""
+    """Every section of `docs/reference.md` something names, however it names it."""
     named = {
-        anchor
-        for _, target, anchor in _cited()
-        if target == str(METHOD) and anchor
+        anchor for _, target, anchor in _cited() if target == str(METHOD) and anchor
     }
     named |= {
-        pointer.partition("#")[2]
+        anchor
         for _, pointer in _pointers()
-        if pointer.startswith(f"{METHOD}#")
+        if (anchor := _anchor_in_the_method(pointer)) is not None
     }
     return named
 
@@ -393,10 +409,10 @@ def test_the_citation_guard_catches_a_fabricated_citation() -> None:
     """The mutation check. Fed a document that does not exist and an anchor
     that is not a heading, the same extractor must produce both — a guard that
     silently matched nothing would pass the check above forever."""
-    fabricated = "See docs/nowhere.md and docs/method.md#no-such-section."
+    fabricated = "See docs/nowhere.md and docs/reference.md#no-such-section."
     assert citations(fabricated) == [
         ("docs/nowhere.md", None),
-        ("docs/method.md", "no-such-section"),
+        ("docs/reference.md", "no-such-section"),
     ]
     assert not (REPO / "docs/nowhere.md").exists()
     slugs = heading_slugs(REPO / METHOD)
@@ -409,13 +425,15 @@ def test_the_transcript_strip_takes_out_pasted_output_and_nothing_else() -> None
     nothing would have fixed nothing: a fenced block with a prompt in it goes,
     a fenced block without one stays, and prose either side of both is
     untouched."""
-    transcript = "Before.\n\n```\n$ fileplan x --help\n  x  docs/method.md#x\n```\n\nAfter."
-    assert citations(transcript) == [("docs/method.md", "x")]
+    transcript = (
+        "Before.\n\n```\n$ fileplan x --help\n  x  docs/reference.md#x\n```\n\nAfter."
+    )
+    assert citations(transcript) == [("docs/reference.md", "x")]
     assert citations(prose(transcript)) == []
     assert "Before." in prose(transcript) and "After." in prose(transcript)
 
-    example = '```toml\ndoc = "docs/method.md#work"\n```'
-    assert citations(prose(example)) == [("docs/method.md", "work")]
+    example = '```toml\ndoc = "docs/reference.md#work"\n```'
+    assert citations(prose(example)) == [("docs/reference.md", "work")]
 
     # And the shape that made this necessary: this repo really does ship a
     # walked document whose every citation is inside a transcript, and really
@@ -485,11 +503,11 @@ def test_a_draft_in_a_head_is_a_citation_the_guard_grades() -> None:
     `draft` belongs to one state's items and a tree can legitimately hold
     none: with `plan/` empty this asserted over nothing and passed, which is
     the vacuum an assertion on a real item's key cannot see itself falling
-    into (8-5, 2026-09-06).
+    into (8-5).
     """
-    head = '+++\ndraft = "docs/method.md"\n+++\n'
-    assert [match.group(1) for match in DRAFT.finditer(head)] == ["docs/method.md"]
-    assert ("docs/method.md", None) in citations(head)
+    head = '+++\ndraft = "docs/reference.md"\n+++\n'
+    assert [match.group(1) for match in DRAFT.finditer(head)] == ["docs/reference.md"]
+    assert ("docs/reference.md", None) in citations(head)
 
     for path in _filed():
         text = path.read_text()
@@ -532,13 +550,26 @@ def test_every_skill_this_repo_ships_opens_with_a_name_and_a_description() -> No
 
 
 def test_the_citation_guard_reads_the_comment_pointer_errors_cannot() -> None:
-    """`plan.toml` cites `docs/method.md#title` in a *comment*, because
+    """`plan.toml` cites `docs/reference.md#title` in a *comment*, because
     `title` is intrinsic and has no table to hold a `doc =`. `pointer_errors`
     reads `doc =` fields only, so that citation is unchecked by the loader and
     checked here — the class this guard exists for."""
-    declared = {pointer for _, pointer in _pointers()}
-    assert f"{METHOD}#title" not in declared
-    assert (str(METHOD), "title") in citations((REPO / "plan.toml").read_text())
+    declared = {_anchor_in_the_method(pointer) for _, pointer in _pointers()}
+    assert "title" not in declared
+    assert (str(METHOD), "title") in citations(EXAMPLE.read_text())
+
+
+def test_the_worked_examples_register_is_the_starter_archive() -> None:
+    """The example's register is committed rather than generated, because the
+    example has to load here as well as in the built tree, and a register
+    that does not exist refuses (38-7). A fresh tree's register is what `init`
+    writes, so the committed copy holds the starter's text, and this is what
+    stops the copy drifting from it."""
+    (archive,) = {
+        state.archive for state in load(EXAMPLE).states.values() if state.archive
+    }
+    starter = REPO / "src" / "fileplan" / "starter" / "archive.md"
+    assert (EXAMPLE.parent / archive).read_text() == starter.read_text()
 
 
 # --------------------------------------------------------------------------
@@ -566,14 +597,14 @@ def test_every_section_of_the_method_is_cited() -> None:
     `doc =` pointer or by an anchored citation from code or prose; the
     container headings hold sections rather than meanings and are exempt."""
     leaves = heading_slugs(REPO / METHOD, level=3)
-    assert leaves, "docs/method.md has no ### sections, so this guard proves nothing"
+    assert leaves, "docs/reference.md has no ### sections, so this guard proves nothing"
     assert not leaves & CONTAINERS, "a container heading is not a leaf"
     assert leaves - _anchors_into_the_method() == set()
 
 
 def test_the_orphan_check_would_catch_an_uncited_section() -> None:
     """The mutation check. A section nothing names is a difference the guard
-    reports, and every container heading really is a heading of `method.md` —
+    reports, and every container heading really is a heading of `reference.md` —
     so the exemption list names sections that exist rather than typos."""
     assert {"an-orphan"} - _anchors_into_the_method() == {"an-orphan"}
     assert CONTAINERS <= (heading_slugs(REPO / METHOD) or set())
@@ -601,25 +632,26 @@ def test_the_procedure_orphan_check_would_catch_one_nothing_links_to() -> None:
 
 def test_no_heading_is_a_heading_in_two_shipped_documents() -> None:
     """A term is defined once. `README.md` says what the tool is; the meaning
-    of every word in `plan.toml` is `docs/method.md`; and the procedures say
+    of every word in `plan.toml` is `docs/reference.md`; and the procedures say
     what a session *does*, which is the one thing the method deliberately does
     not. A heading in two of them would be two homes for one meaning, and the
     procedures are the likeliest place for it — a procedure that re-explained
     what a verb means would be the second copy.
 
-    `ADJUDICATION`, `PUBLISHING`, `RELEASING` and `STYLE` are graded where they
-    are there and skipped where they are not, for `OWN_SOURCES`' reason: none
-    of the four ships and this module does, so in a built tree `heading_slugs`
-    would be asked about a file that is absent."""
+    `PUBLISHING` is graded where it is there and skipped where it is not,
+    for `OWN_SOURCES`' reason: it does not ship and this module does, so in
+    a built tree `heading_slugs` would be asked about a file that is
+    absent."""
     names = [
-        "README.md", METHOD, PROCEDURES,
-        INITIALIZATION, RETROFIT, INDEX, DISCLOSURE,
+        "README.md",
+        METHOD,
+        PROCEDURES,
+        INITIALIZATION,
+        RETROFIT,
+        INDEX,
+        DISCLOSURE,
     ]
-    names += [
-        name
-        for name in (ADJUDICATION, PUBLISHING, RELEASING, STYLE)
-        if (REPO / name).exists()
-    ]
+    names += [PUBLISHING] if (REPO / PUBLISHING).exists() else []
     shipped = {name: heading_slugs(REPO / name) for name in names}
     assert all(slugs for slugs in shipped.values())
     for name, slugs in shipped.items():
@@ -634,7 +666,7 @@ def test_the_two_document_check_catches_a_term_defined_twice() -> None:
 
 
 # --------------------------------------------------------------------------
-# The draft, over this repo's own declaration
+# The draft, over the worked example
 # --------------------------------------------------------------------------
 
 
@@ -644,12 +676,12 @@ def test_no_transition_this_repo_declares_drops_the_draft() -> None:
     meaning was one load-time refusal — and the field went because this test
     was the same rule written a second time, for the one key that had it.
 
-    A control over the repo's own file on purpose, like the guards above it.
+    A control over the worked example on purpose, like the guards above it.
     What is graded is this workflow's choice, not the tool's: `draft` is an
     ordinary declared key, and nothing under `src/` knows the word. The key is
     named here rather than found by a flag, and the declaration is asserted
     first so the loop cannot pass over a key that is no longer there."""
-    document = tomllib.loads((REPO / "plan.toml").read_text())
+    document = tomllib.loads(EXAMPLE.read_text())
     assert "draft" in document["keys"], "this repo no longer declares draft"
     for name, transition in document["transitions"].items():
         assert "draft" not in transition.get("drops", ()), name
@@ -688,7 +720,7 @@ def test_no_verb_this_repo_declares_requires_a_key_a_marking_verb_drops() -> Non
     `plan.toml` because that is where such a declaration would live; a
     load-time refusal would be too strong, since a verb that `sets` the key
     can always write it back."""
-    document = tomllib.loads((REPO / "plan.toml").read_text())
+    document = tomllib.loads(EXAMPLE.read_text())
     marking = [
         name
         for name, entry in document["transitions"].items()
@@ -702,7 +734,7 @@ def test_the_dropped_key_control_catches_a_requires_its_neighbour_destroys() -> 
     """The mutation check. The key a marking verb drops, put back into a
     `requires` out of the same state, really is found — otherwise the control
     above would pass forever by grading nothing."""
-    document = tomllib.loads((REPO / "plan.toml").read_text())
+    document = tomllib.loads(EXAMPLE.read_text())
     marker, entry = next(
         (name, one)
         for name, one in document["transitions"].items()
@@ -746,14 +778,14 @@ def _flags(command: click.Command, ctx: click.Context) -> set[str]:
 
 
 def _repo_flags() -> set[str]:
-    group = _build_group(load(REPO / "plan.toml"))
+    group = _build_group(load(EXAMPLE))
     return _flags(group, click.Context(group))
 
 
 def test_no_named_report_flag_exists_anywhere_in_the_cli() -> None:
     """The whole group and every subgroup, not just `list`: a report flag
     added to one command would be the middle tier growing back one verb at a
-    time. A control over the repo's own declaration, like the guards above it
+    time. A control over the worked example, like the guards above it
     — the *behaviour* is graded in the fixture's vocabulary, in
     `test_cli.py`."""
     flags = _repo_flags()
@@ -765,8 +797,8 @@ def test_there_are_two_reads_and_no_third() -> None:
     """31-3 folded `next COMMAND` into the listing, so the tool's own reads of
     the tree are `list` and `show`. `release` and `init` write, and every
     other command is a declared transition."""
-    group = _build_group(load(REPO / "plan.toml"))
-    own = set(group.commands) - set(load(REPO / "plan.toml").transitions)
+    group = _build_group(load(EXAMPLE))
+    own = set(group.commands) - set(load(EXAMPLE).transitions)
     assert own - {"release", "init"} == {"list", "show"}
 
 
@@ -797,7 +829,7 @@ def test_the_flag_control_reaches_inside_a_subgroup() -> None:
     """The mutation check. A flag hand-added below the top level really is
     found — otherwise the guard above would pass forever by looking in the
     wrong place, which is exactly how the old tool's blacklist rotted."""
-    group = _build_group(load(REPO / "plan.toml"))
+    group = _build_group(load(EXAMPLE))
     inner = click.Group(name="fabricated-group")
     group.add_command(inner)
     inner.add_command(
@@ -811,19 +843,19 @@ def test_the_flag_control_reaches_inside_a_subgroup() -> None:
 
 
 # --------------------------------------------------------------------------
-# The contract, over this repo's own declaration
+# The contract, over the worked example
 # --------------------------------------------------------------------------
 
 
 def _epilogs() -> dict[str, str]:
     """Every declared transition's `--help` epilog, as the group builds it."""
-    group = _build_group(load(REPO / "plan.toml"))
+    group = _build_group(load(EXAMPLE))
     ctx = click.Context(group)
     return {
         name: command.epilog or ""
         for name in group.list_commands(ctx)
         if (command := group.get_command(ctx, name)) is not None
-        and name in load(REPO / "plan.toml").transitions
+        and name in load(EXAMPLE).transitions
     }
 
 
@@ -848,7 +880,7 @@ def test_no_transitions_contract_names_another_verb_this_repo_declares() -> None
     which is where a hand-written line about one workflow's verb would show up
     even though no code named it.
 
-    A control over the repo's own declaration, like the guards above it."""
+    A control over the worked example, like the guards above it."""
     epilogs = _epilogs()
     assert epilogs, "the repo declares no transitions, so this proves nothing"
     for name, epilog in epilogs.items():
@@ -867,7 +899,7 @@ def test_the_contract_control_catches_a_verb_written_into_an_epilog() -> None:
     epilogs = _epilogs()
     verb = next(iter(epilogs))
     assert re.search(_verb(verb), _named(f"Run {verb} first"))
-    assert not re.search(_verb(verb), _named(f"docs/method.md#{verb}"))
+    assert not re.search(_verb(verb), _named(f"docs/reference.md#{verb}"))
     # A hyphen joins a name, so `retitle` is not named by `retitle-idea`.
     assert not re.search(_verb("retitle"), "Reading retitle-idea")
 
@@ -908,7 +940,7 @@ def test_no_skill_this_repo_ships_names_a_verb_this_repo_declares() -> None:
     called `merge` whose kind is `merge`."""
     skills = _skills()
     assert skills, "this repo ships no skills, so this control proves nothing"
-    verbs = [verb for verb in load(REPO / "plan.toml").transitions if verb not in KINDS]
+    verbs = [verb for verb in load(EXAMPLE).transitions if verb not in KINDS]
     assert verbs, "the repo declares no transitions, so this control proves nothing"
     for where, source in skills.items():
         assert source, f"{where} is empty, so this control proves nothing"
@@ -937,7 +969,9 @@ def test_every_read_a_skill_runs_asks_for_json() -> None:
 
 def test_the_json_read_control_catches_a_text_read() -> None:
     """The mutation check: a text read in a skill really is found."""
-    found = [m.group(0) for m in SKILL_READ.finditer("Run `fileplan list --state plan`.")]
+    found = [
+        m.group(0) for m in SKILL_READ.finditer("Run `fileplan list --state plan`.")
+    ]
     assert found == ["`fileplan list --state plan`"] and "--json" not in found[0]
 
 
@@ -945,10 +979,10 @@ def test_the_verb_name_control_catches_a_verb_written_into_a_skill() -> None:
     """The mutation check. A verb's name in a sentence of a skill is found,
     and the citation strip does not swallow it — otherwise the control above
     would pass forever by grading nothing."""
-    verb = next(iter(load(REPO / "plan.toml").transitions))
+    verb = next(iter(load(EXAMPLE).transitions))
     assert re.search(rf"\b{re.escape(verb)}\b", CITATION.sub("", f"Then run {verb}."))
     assert not re.search(
-        rf"\b{re.escape(verb)}\b", CITATION.sub("", f"docs/method.md#{verb}")
+        rf"\b{re.escape(verb)}\b", CITATION.sub("", f"docs/reference.md#{verb}")
     )
 
 
@@ -1045,8 +1079,8 @@ def test_the_half_control_catches_a_half_the_interpreter_never_learned() -> None
 
 
 def _declared_json() -> list[dict]:
-    """This repo's own declaration, as `fileplan --json` renders it."""
-    declaration = load(REPO / "plan.toml")
+    """The worked example, as `fileplan --json` renders it."""
+    declaration = load(EXAMPLE)
     return [contract(declaration, one) for one in declaration.transitions.values()]
 
 
@@ -1055,7 +1089,7 @@ def test_the_declaration_read_carries_every_kind_and_option() -> None:
     tool grew and the machine-readable form never learned is a composing
     session selecting on it and finding nobody declares it. Nothing goes red, and
     the arm silently never runs — which is the whole failure
-    `docs/method.md#the-interpreter` says selecting by half rather than by
+    `docs/reference.md#the-interpreter` says selecting by half rather than by
     name exists to avoid.
 
     Graded both ways, over every option. A verb declaring it and missing from
@@ -1063,24 +1097,24 @@ def test_the_declaration_read_carries_every_kind_and_option() -> None:
     declaration would be the tool answering about a workflow nobody wrote.
     Every row carries its transition's kind."""
     rows = _declared_json()
-    declaration = load(REPO / "plan.toml")
+    declaration = load(EXAMPLE)
     assert [row["kind"] for row in rows] == [
         one.kind for one in declaration.transitions.values()
     ]
     for half in DECLARED:
         declaring = [
-            one.name
-            for one in declaration.transitions.values()
-            if getattr(one, half)
+            one.name for one in declaration.transitions.values() if getattr(one, half)
         ]
-        assert [row["name"] for row in rows if half in row["declares"]] == declaring, half
+        assert [row["name"] for row in rows if half in row["declares"]] == declaring, (
+            half
+        )
 
 
 def test_the_declaration_control_catches_a_half_the_json_never_learned() -> None:
     """The mutation check: a half stripped out of the rendering really is
     found missing, so the control above cannot pass by grading a list that
     happens to be there."""
-    declaration = load(REPO / "plan.toml")
+    declaration = load(EXAMPLE)
     forgotten = "claims"
     declaring = [
         one.name for one in declaration.transitions.values() if getattr(one, forgotten)
@@ -1096,7 +1130,7 @@ def test_the_declaration_control_catches_a_half_the_json_never_learned() -> None
 def test_every_transitions_contract_names_the_section_it_decides_from() -> None:
     """Done line 1, made reachable: `pointer_errors` proves the pointer
     resolves at every invocation, and this is what hands it over."""
-    declaration = load(REPO / "plan.toml")
+    declaration = load(EXAMPLE)
     for name, epilog in _epilogs().items():
         transition = declaration.transitions[name]
         assert transition.doc in epilog, name
@@ -1119,9 +1153,7 @@ def test_every_transitions_contract_names_the_section_it_decides_from() -> None:
 def _marked(document: dict) -> set[str]:
     """Every word this repo's verbs write onto a bullet."""
     return {
-        entry["marks"]
-        for entry in document["transitions"].values()
-        if "marks" in entry
+        entry["marks"] for entry in document["transitions"].values() if "marks" in entry
     }
 
 
@@ -1145,7 +1177,7 @@ def _process() -> dict[str, str]:
     """The documents that tell a session what to do: the procedures, and every
     shipped skill.
 
-    `docs/method.md` is deliberately outside this set. It is where the mark is
+    `docs/reference.md` is deliberately outside this set. It is where the mark is
     **explained**, so the form has to appear in it — one home, not an
     exemption list, which is the distinction 1-6 drew when it chose extraction
     over a blacklist.
@@ -1158,7 +1190,7 @@ def test_no_skill_or_procedure_writes_a_mark_in_the_form_the_tool_writes() -> No
     the two instances this replaced had been true when they were written and
     were false by the time anybody read them again. A guard over the form is
     what keeps the next one from being written."""
-    document = tomllib.loads((REPO / "plan.toml").read_text())
+    document = tomllib.loads(EXAMPLE.read_text())
     words = _marked(document)
     assert words, "this repo declares no marks, so this control proves nothing"
     for where, text in _process().items():
@@ -1171,7 +1203,7 @@ def test_the_hand_written_mark_control_catches_one_typed_into_a_procedure() -> N
     case it is typed in, and a sentence that merely uses the word is not — a
     control that fired on the bare word would make the documents unwritable
     and be turned off."""
-    word = sorted(_marked(tomllib.loads((REPO / "plan.toml").read_text())))[0]
+    word = min(_marked(tomllib.loads(EXAMPLE.read_text())))
     assert _hand_written(f"mark the bullet `**{word.title()} 2026-09-08.**`", {word})
     assert _hand_written(f"a **{word}** marker is a claim", {word})
     assert _hand_written(f"say the sub-phase is {word}", {word}) == []
@@ -1199,10 +1231,7 @@ def _prompts(text: str) -> list[str]:
 def _linked() -> list[Path]:
     """Every link in the index, resolved against `docs/`."""
     text = (REPO / INDEX).read_text()
-    return [
-        (REPO / INDEX.parent / target).resolve()
-        for target in LINK.findall(text)
-    ]
+    return [(REPO / INDEX.parent / target).resolve() for target in LINK.findall(text)]
 
 
 def test_the_index_reaches_every_document_this_repo_ships() -> None:
@@ -1210,11 +1239,21 @@ def test_the_index_reaches_every_document_this_repo_ships() -> None:
     trusts it stops looking. The floor is every `.md` under `docs/` and both
     shipped skills — the skills because they are package data a consumer
     installs, so an index omitting them misses the artifact a consumer most
-    wants reachable."""
+    wants reachable.
+
+    What a roots module delivered is not this repo's to index, so the floor
+    skips every path `roots.toml` names. Nor are the filed items and the
+    archives, which this repo's own `plan.toml` names (38-2)."""
+    archives = _archives() if OWN_PLAN.exists() else set()
+    skipped = {
+        (REPO / INDEX).resolve(),
+        *_delivered(),
+        *((REPO / path).resolve() for path in (*_items(), *archives)),
+    }
     documents = {
         path.resolve()
         for path in (REPO / "docs").rglob("*.md")
-        if path.resolve() != (REPO / INDEX).resolve()
+        if not skipped & {path.resolve(), *path.resolve().parents}
     }
     documents |= {path.resolve() for path in (REPO / SKILLS).rglob("*.md")}
     assert documents, "this repo ships no documents, so this guard proves nothing"
@@ -1237,9 +1276,7 @@ def test_the_link_extractor_finds_a_relative_link_and_not_a_citation() -> None:
     relative link with an anchor on it, and it is not reading the anchor as
     part of the path — a `#` left in the target would resolve to nothing and
     make the guard above unpassable rather than meaningless."""
-    assert LINK.findall("see [the method](method.md#the-queue) for it") == [
-        "method.md"
-    ]
+    assert LINK.findall("see [the method](method.md#the-queue) for it") == ["method.md"]
     assert LINK.findall("[a skill](../src/fileplan/skills/fileplan/SKILL.md)") == [
         "../src/fileplan/skills/fileplan/SKILL.md"
     ]
@@ -1265,10 +1302,11 @@ def test_the_excerpt_check_catches_a_command_the_walk_does_not_run() -> None:
     """The mutation check: a prompt line the walk has no copy of is found by
     the same reader, and a line it does have is not mistaken for one."""
     walk = _prompts((REPO / INITIALIZATION).read_text())
-    assert _prompts("```\n$ fileplan invent-a-verb\n```") == ["$ fileplan invent-a-verb"]
+    assert _prompts("```\n$ fileplan invent-a-verb\n```") == [
+        "$ fileplan invent-a-verb"
+    ]
     assert "$ fileplan invent-a-verb" not in walk
     assert "$ fileplan list" in walk
-
 
 
 # --------------------------------------------------------------------------
@@ -1283,18 +1321,14 @@ def _archives() -> set[str]:
     citation guard extracts rather than blacklists: a second state gaining an
     `archive` would otherwise be ungraded, and nobody would notice.
     """
-    return {
-        state.archive
-        for state in load(REPO / "plan.toml").states.values()
-        if state.archive
-    }
+    return {state.archive for state in load(OWN_PLAN).states.values() if state.archive}
 
 
 def _unfenced(text: str) -> str:
     """``text`` with every fenced block taken out.
 
     Wider than `prose`, and only for this guard. `prose` keeps a fence with no
-    prompt in it, because `docs/method.md`'s TOML snippets really do name this
+    prompt in it, because `docs/reference.md`'s TOML snippets really do name this
     repo's own sections and the existence guard has to grade them. Here they
     are the opposite: a snippet showing `archive = "…"` is the **declaration**
     quoted back, which is what the archive path is *for*, not somewhere a
@@ -1304,12 +1338,13 @@ def _unfenced(text: str) -> str:
     return FENCED.sub("", text)
 
 
+@own_tree
 def test_no_shipped_document_points_a_reader_into_the_plan_archive() -> None:
-    """John, 2026-09-11: the archive is a record, never a reference.
+    """John: the archive is a record, never a reference.
 
     An entry is written once, at close-out, about a moment. A document citing
     it sends a session to act on what was true that day, with every later
-    narrowing invisible — the shape `docs/method.md` exists to hold instead,
+    narrowing invisible — the shape `docs/reference.md` exists to hold instead,
     one section per meaning, kept current. Section 18 sharpens it: the archive
     is excluded from the published tree, so a pointer into it is not merely
     stale for a consumer, it resolves to nothing.
@@ -1324,9 +1359,7 @@ def test_no_shipped_document_points_a_reader_into_the_plan_archive() -> None:
     archives = _archives()
     assert archives, "no state declares an archive, so this guard proves nothing"
     graded = [
-        REPO / name
-        for name in (*SOURCES, *_own_sources())
-        if name != "plan.toml"
+        REPO / name for name in (*SOURCES, *_own_sources()) if name != "plan.toml"
     ]
     graded += sorted((REPO / "src").rglob("*.py"))
     graded += sorted((REPO / SKILLS).rglob("*.md"))
@@ -1340,6 +1373,7 @@ def test_no_shipped_document_points_a_reader_into_the_plan_archive() -> None:
         assert not named, f"{where} points a reader into {', '.join(sorted(named))}"
 
 
+@own_tree
 def test_the_archive_pointer_control_catches_a_fabricated_one() -> None:
     """The mutation check, in three parts, because this guard has three ways
     to pass while proving nothing.
@@ -1349,8 +1383,11 @@ def test_the_archive_pointer_control_catches_a_fabricated_one() -> None:
     and the path it grades must be the one the declaration gives, not a string
     typed here that a rename would strand.
     """
-    archive = sorted(_archives())[0]
-    assert archive == "docs/plan-archive.md", "the fixtures below assume this path"
+    states = load(OWN_PLAN).states
+    archive = states["plan"].archive
+    assert archive == "docs/plan-archive/register.md", (
+        "the fixtures below assume this path"
+    )
 
     fabricated = f"The decision is in `{archive}`, section 15."
     assert citations(_unfenced(fabricated)) == [(archive, None)]
@@ -1358,8 +1395,7 @@ def test_the_archive_pointer_control_catches_a_fabricated_one() -> None:
     declared = f'```toml\n[states.plan]\narchive = "{archive}"\n```'
     assert citations(_unfenced(declared)) == []
 
-    states = load(REPO / "plan.toml").states
-    assert states["plan"].archive == archive
+    assert archive in _archives()
     assert any(state.archive is None for state in states.values()), (
         "every state archives, so the filter above is never exercised"
     )
@@ -1369,7 +1405,7 @@ def test_the_archive_pointer_control_catches_a_fabricated_one() -> None:
 # The listing's JSON envelope, held against what `list --json` emits
 # --------------------------------------------------------------------------
 
-#: How the account of the envelope opens in `docs/method.md#the-listing`.
+#: How the account of the envelope opens in `docs/reference.md#the-listing`.
 ENVELOPE = "**The envelope is one object, and these are its fields.**"
 
 
@@ -1420,5 +1456,7 @@ def test_the_envelope_guard_catches_a_field_the_account_leaves_out() -> None:
     so the guard cannot pass by reading the whole section."""
     text = (REPO / METHOD).read_text()
     assert "`undeclared`" in _envelope_account(text)
-    dropped = text.replace("* `undeclared` is present wherever", "* It is present wherever")
+    dropped = text.replace(
+        "* `undeclared` is present wherever", "* It is present wherever"
+    )
     assert _unaccounted(["undeclared"], dropped) == ["undeclared"]

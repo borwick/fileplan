@@ -71,7 +71,9 @@ def test_the_decision_record_workflow_runs_end_to_end(
     )
 
     # Superseding is a set on the new record alone.
-    assert main(["propose", "Use JSON", "--body", "B.", "--supersedes", "use-toml"]) == 0
+    assert (
+        main(["propose", "Use JSON", "--body", "B.", "--supersedes", "use-toml"]) == 0
+    )
     assert main(["finalise", "use-json", "--decided", "2026-10-18"]) == 0
     assert main(["deprecate", "use-json"]) == 0
 

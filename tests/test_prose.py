@@ -1,12 +1,12 @@
 """The reading test, as a thing that runs rather than a number somebody quoted.
 
 Section 13 asked whether every part of fileplan earns its cost, and one of the
-costs is **the language**. John set the target on 2026-09-08: prose that reads
+costs is **the language**. John set the target: prose that reads
 easily, with the lever named in his own analysis. The pieces already reading
 well run about 14 words a sentence. The longest documents ran 23 to 26.
 *"A sentence that holds three qualifications is teaching three things at once."*
 
-On 2026-09-09 he decided what the read is: **words per sentence, per section,
+He decided what the read is: **words per sentence, per section,
 at 15 or under**. Reading ease is reported beside it and does not decide.
 Sentence length is the lever, and it is the half that survives vocabulary — a
 section about the register carries long words at any sentence length, so an
@@ -21,7 +21,7 @@ existed do not match it and were left as written, being dated records.
 **It gates nothing.** No test here asserts any document's ease or words per
 sentence. The suite grades that the reader works; a person reads the table:
 
-    uv run python tests/test_prose.py docs/method.md
+    uv run python tests/test_prose.py docs/reference.md
 
 This module measures the prose, and `test_docs.py` grades what the documents
 say.
@@ -223,7 +223,7 @@ def test_the_fence_strip_actually_strips() -> None:
     fenced = (
         body
         + "\n\n```\n$ fileplan list --state plan --lacks claimed-by\n```\n\n"
-        + "```toml\n[states.plan]\npath = \"plan\"\n```\n"
+        + '```toml\n[states.plan]\npath = "plan"\n```\n'
     )
     assert rate(fenced) == rate(body)
     assert "fileplan" not in _prepared(fenced)
@@ -292,4 +292,4 @@ def _table(paths: list[str]) -> str:
 
 
 if __name__ == "__main__":
-    print(_table(sys.argv[1:]))
+    print(_table(sys.argv[1:]))  # noqa: T201 — a script's report, and printing is its output

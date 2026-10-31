@@ -67,7 +67,7 @@ def test_bold_prose_does_not_close_a_span_and_that_is_deliberate():
     on it would mean interpreting prose to guess where a list stops, and the
     guesses are unbounded — ``**Done when:**``, ``_Done when:_``, ``Done
     when:``. The rule stays mechanical, and the convention it asks for is
-    written into ``docs/method.md#sub-phases``: put the sub-phases last, or
+    written into ``docs/reference.md#sub-phases``: put the sub-phases last, or
     close them with a real heading."""
     text = body("### Steps", "- one", "", "**Done when:**", "- counted, by design")
     assert subphase.count(text, HEADING) == 2
@@ -252,7 +252,9 @@ def test_a_bullet_that_is_not_the_named_form_carries_no_name(line):
 def test_two_bullets_sharing_a_name_refuse_listing_both_lines():
     """The duplicate heading's defect one level down: a name that answers to
     two sub-phases is not a reference."""
-    text = body("### Steps", "- **dup — one.**", "- **other — two.**", "- **dup — three.**")
+    text = body(
+        "### Steps", "- **dup — one.**", "- **other — two.**", "- **dup — three.**"
+    )
     (message,) = subphase.errors(text, HEADING)
     assert '2 sub-phases named "dup"' in message
     assert "body lines 2, 4" in message
@@ -588,7 +590,7 @@ def test_a_cursor_the_body_does_not_carry_falls_to_the_first_unmarked_bullet():
 
 # --- minting: the declared name form -----------------------------------------
 
-#: The two forms this repo's own `plan.toml` and the fixture between them
+#: The two forms the worked example and the fixture between them
 #: prove: one over a key the state mints, one over nothing but the ordinal.
 NUMBERED_FORM, BARE_FORM = "{number}-{ordinal}", "c{ordinal}"
 
@@ -648,9 +650,7 @@ def test_a_brace_that_is_unclosed_is_one_complaint_and_not_also_a_missing_slot()
         pytest.param(NUMBERED_FORM, {"number": 7}, "7-", id="a-key-the-state-mints"),
         pytest.param(BARE_FORM, {}, "c", id="nothing-but-a-literal"),
         pytest.param("{ordinal}", {}, "", id="the-slot-alone-has-no-prefix"),
-        pytest.param(
-            "{a}/{b}-{ordinal}", {"a": "x", "b": 2}, "x/2-", id="two-fields"
-        ),
+        pytest.param("{a}/{b}-{ordinal}", {"a": "x", "b": 2}, "x/2-", id="two-fields"),
     ],
 )
 def test_the_prefix_is_the_form_with_its_ordinal_taken_off(form, head, expected):
@@ -765,8 +765,11 @@ def test_last_takes_the_pending_bullet_out():
 
 def test_last_with_a_title_mints_and_closes_in_one_run():
     assert minted(
-        "### Steps", "- **7-1 — The register**", f"- {PENDING}",
-        title="Close-out", last=True,
+        "### Steps",
+        "- **7-1 — The register**",
+        f"- {PENDING}",
+        title="Close-out",
+        last=True,
     ) == body("### Steps", "- **7-1 — The register**", "- **7-2 — Close-out**")
 
 
@@ -803,26 +806,47 @@ def test_a_bullet_joins_the_list_rather_than_the_end_of_the_span():
     in prose or in the blank lines that close it keeps the list contiguous —
     a bullet written past them would read as a paragraph of its own."""
     assert minted(
-        "### Steps", "- **7-1 — One.**", "", "Trailing prose.", "",
-        title="Two", last=True,
+        "### Steps",
+        "- **7-1 — One.**",
+        "",
+        "Trailing prose.",
+        "",
+        title="Two",
+        last=True,
     ) == body(
-        "### Steps", "- **7-1 — One.**", "- **7-2 — Two**", "",
-        "Trailing prose.", "",
+        "### Steps",
+        "- **7-1 — One.**",
+        "- **7-2 — Two**",
+        "",
+        "Trailing prose.",
+        "",
     )
 
 
 def test_a_bullet_joins_the_list_after_the_last_ones_continuation():
-    """A consumer's defect, 2026-09-13: 231-5 was written under 231-4's first
+    """A consumer's defect: 231-5 was written under 231-4's first
     line, so 231-4's indented description read as 231-5's. The last bullet is
     the lines `text` says it owns, and the new one goes after all of them —
     ahead of the blank lines that close the span, as before."""
     assert minted(
-        "### Steps", "- **7-1 — One**", "  Said at length,", "",
-        "  and continued.", f"- {PENDING}", "", "Trailing prose.",
+        "### Steps",
+        "- **7-1 — One**",
+        "  Said at length,",
+        "",
+        "  and continued.",
+        f"- {PENDING}",
+        "",
+        "Trailing prose.",
         title="Two",
     ) == body(
-        "### Steps", "- **7-1 — One**", "  Said at length,", "",
-        "  and continued.", "- **7-2 — Two**", f"- {PENDING}", "",
+        "### Steps",
+        "- **7-1 — One**",
+        "  Said at length,",
+        "",
+        "  and continued.",
+        "- **7-2 — Two**",
+        f"- {PENDING}",
+        "",
         "Trailing prose.",
     )
 
@@ -831,8 +855,12 @@ def test_a_fenced_transcript_in_the_last_bullet_stays_with_it():
     """The continuation rule read by the writer too, fence included: a
     column-zero line inside the transcript is not where the bullet ends."""
     last = (
-        "### Steps", "- **7-1 — One**", "  What was run:", "  ```",
-        "- somebody else's bullet, at column zero", "  ```",
+        "### Steps",
+        "- **7-1 — One**",
+        "  What was run:",
+        "  ```",
+        "- somebody else's bullet, at column zero",
+        "  ```",
     )
     assert minted(*last, title="Two", last=True) == body(*last, "- **7-2 — Two**")
 
@@ -849,7 +877,11 @@ def test_nothing_after_the_span_is_touched():
     """A heading of any depth closes the span, so what follows one is another
     section of the body and not this capability's business."""
     written = minted(
-        "### Steps", f"- {PENDING}", "", "### Done when", "- untouched",
+        "### Steps",
+        f"- {PENDING}",
+        "",
+        "### Done when",
+        "- untouched",
         title="One",
     )
     assert written.endswith(body("### Done when", "- untouched"))
@@ -872,7 +904,7 @@ def test_a_minted_bullet_is_counted_and_named_by_the_readers_beside_it():
 
 
 def test_the_pending_bullet_counts_like_any_other():
-    """John's decision 2, 2026-09-03: an unfinished decomposition gets no new
+    """John's decision: an unfinished decomposition gets no new
     surface. An opened section reads 1 rather than 0, which is what takes it
     out of the started-but-not-decomposed report — the bullet is the signal."""
     assert subphase.count(minted(""), HEADING) == 1
@@ -1049,7 +1081,7 @@ def test_a_marked_bullets_rest_is_its_own_mark_run():
 
 
 def test_a_second_bold_run_is_a_mark_only_where_the_state_declares_its_word():
-    """Section 23 (John, 2026-09-28): `**Note:** prose` has a mark's shape
+    """Section 23 (John): `**Note:** prose` has a mark's shape
     and nobody marked it. So a run is a mark only where a declared verb marks
     that word into the state, and otherwise the bullet is open and
     unmarkable. `None` is a state nothing marks into, read as before."""
@@ -1139,7 +1171,7 @@ def test_an_indented_continuation_comes_back_verbatim():
     """Indentation and the blank line inside it, exactly as written: what a
     person reads is the file, so anything reflowed here would be a second
     rendering of a document the tool does not own."""
-    assert subphase.text(CONTINUED, HEADING, name="c1") == "\n".join(
+    assert subphase.text(CONTINUED, HEADING, name="c1") == "\n".join(  # noqa: FLY002 — one row per line of the expected text
         (
             "- **c1 — The first**",
             "  Said at more length,",
@@ -1222,7 +1254,7 @@ def test_text_is_total_and_ungated():
 def test_unknown_names_the_value_and_the_names_the_body_carries():
     """`cursor_errors`' message shape, whose docstring already said so — now
     one function rather than two spellings, because `show` needs it byte for
-    byte (`docs/method.md#marking`)."""
+    byte (`docs/reference.md#marking`)."""
     carried = subphase.bullets(MARKED_BODY, HEADING, pending=PENDING)
     said = subphase.unknown("propagator/a-batch.md", "c9", carried, HEADING)
     assert said == (
@@ -1260,7 +1292,10 @@ def test_a_mark_reads_back_through_the_reader_that_wrote_it():
     """The property that keeps the writer and the reader one rule: what `mark`
     writes is what `bullets` finds, rather than a form a test agreed with."""
     written = subphase.mark(MARKED_BODY, heading=HEADING, name="c2", word="potted")
-    found = {one.name: one.mark for one in subphase.bullets(written, HEADING, pending=PENDING)}
+    found = {
+        one.name: one.mark
+        for one in subphase.bullets(written, HEADING, pending=PENDING)
+    }
     assert found == {"c1": "rooted", "c2": "potted"}
 
 
@@ -1286,8 +1321,14 @@ def test_a_mark_reads_back_exactly_where_rest_says_it_will():
 def test_marking_a_name_the_body_does_not_carry_writes_nothing():
     """Total over any string, like everything else here: the caller resolves
     the name and refuses, so this cannot be the one to guess."""
-    assert subphase.mark(MARKED_BODY, heading=HEADING, name="c7", word="potted") == MARKED_BODY
-    assert subphase.mark(MARKED_BODY, heading="Nowhere", name="c2", word="potted") == MARKED_BODY
+    assert (
+        subphase.mark(MARKED_BODY, heading=HEADING, name="c7", word="potted")
+        == MARKED_BODY
+    )
+    assert (
+        subphase.mark(MARKED_BODY, heading="Nowhere", name="c2", word="potted")
+        == MARKED_BODY
+    )
 
 
 def test_marking_touches_the_first_matching_bullet_only():
@@ -1333,10 +1374,17 @@ def test_a_note_is_written_outside_the_bold_run_the_mark_is_read_from():
     """What the whole change rests on: the word stays the second bold run and
     the note is prose after it, so the reader is untouched."""
     written = subphase.mark(
-        MARKED_BODY, heading=HEADING, name="c2", word="potted", note="Roots to the wall."
+        MARKED_BODY,
+        heading=HEADING,
+        name="c2",
+        word="potted",
+        note="Roots to the wall.",
     )
     assert "- **c2 — The second** **potted** Roots to the wall." in written
-    found = {one.name: one.mark for one in subphase.bullets(written, HEADING, pending=PENDING)}
+    found = {
+        one.name: one.mark
+        for one in subphase.bullets(written, HEADING, pending=PENDING)
+    }
     assert found == {"c1": "rooted", "c2": "potted"}
 
 
@@ -1359,7 +1407,9 @@ def test_a_note_spelling_the_mark_word_changes_nothing_the_reader_reads():
         note="not rooted, and never potted",
     )
     (found,) = [
-        one for one in subphase.bullets(written, HEADING, pending=PENDING) if one.name == "c2"
+        one
+        for one in subphase.bullets(written, HEADING, pending=PENDING)
+        if one.name == "c2"
     ]
     assert found.mark == "potted"
     assert found.title == "The second"
@@ -1583,8 +1633,15 @@ SHAPES = {
         "### Steps", "- **7-1 — One.**", "```", "- quoted", "### quoted", "```"
     ),
     "described-then-prose": body(
-        "### Steps", "- **7-1 — One**", "  Said.", "", "", "Trailing prose.", "",
-        "### Done when", "- untouched",
+        "### Steps",
+        "- **7-1 — One**",
+        "  Said.",
+        "",
+        "",
+        "Trailing prose.",
+        "",
+        "### Done when",
+        "- untouched",
     ),
 }
 
@@ -1639,8 +1696,8 @@ WRITTEN_BODY = body(
 
 def test_an_append_goes_after_the_continuation_and_ahead_of_the_blank_lines():
     written = subphase.write(WRITTEN_BODY, heading=HEADING, name="7-1", text="Decided.")
-    assert subphase.text(written, HEADING, name="7-1") == "\n".join(
-        ["- **7-1 — One** **done**", "  Planned.", "", "  Still planned.", "  Decided."]
+    assert subphase.text(written, HEADING, name="7-1") == (
+        "- **7-1 — One** **done**\n  Planned.\n\n  Still planned.\n  Decided."
     )
     assert "  Decided.\n\n- **7-2 — Two**" in written
 
@@ -1655,7 +1712,13 @@ def test_a_replace_swaps_only_the_owned_lines():
         WRITTEN_BODY, heading=HEADING, name="7-1", text="Only this.", replace=True
     )
     assert written.startswith(
-        body("### Steps", "- **7-1 — One** **done**", "  Only this.", "", "- **7-2 — Two**")
+        body(
+            "### Steps",
+            "- **7-1 — One** **done**",
+            "  Only this.",
+            "",
+            "- **7-2 — Two**",
+        )
     )
 
 
@@ -1690,7 +1753,10 @@ def test_every_non_blank_line_is_indented_and_a_blank_one_stays_empty():
 
 
 def test_a_name_the_body_does_not_carry_writes_nothing():
-    assert subphase.write(WRITTEN_BODY, heading=HEADING, name="7-9", text="x") == WRITTEN_BODY
+    assert (
+        subphase.write(WRITTEN_BODY, heading=HEADING, name="7-9", text="x")
+        == WRITTEN_BODY
+    )
 
 
 @pytest.mark.parametrize("name", ["7-1", "7-2"])
@@ -1808,7 +1874,11 @@ SPLIT_BODY = body(
 
 def test_a_mint_after_a_bullet_takes_the_next_free_ordinal_and_not_a_suffix():
     written = subphase.mint(
-        SPLIT_BODY, heading=HEADING, prefix=PREFIX, pending=PENDING, title="New",
+        SPLIT_BODY,
+        heading=HEADING,
+        prefix=PREFIX,
+        pending=PENDING,
+        title="New",
         after="7-1",
     )
     assert subphase.names(written, HEADING) == ["7-1", "7-4", "7-2", "7-3", "unpruned"]
@@ -1817,15 +1887,26 @@ def test_a_mint_after_a_bullet_takes_the_next_free_ordinal_and_not_a_suffix():
 
 def test_a_mint_after_a_bullet_still_ends_the_list_with_the_pending_one():
     written = subphase.mint(
-        SPLIT_BODY, heading=HEADING, prefix=PREFIX, pending=PENDING, title="New",
+        SPLIT_BODY,
+        heading=HEADING,
+        prefix=PREFIX,
+        pending=PENDING,
+        title="New",
         after="7-2",
     )
     assert written.endswith(body("- **7-3 — Three**", f"- {PENDING}"))
     closed = subphase.mint(
-        SPLIT_BODY, heading=HEADING, prefix=PREFIX, pending=PENDING, title="New",
-        after="7-2", last=True,
+        SPLIT_BODY,
+        heading=HEADING,
+        prefix=PREFIX,
+        pending=PENDING,
+        title="New",
+        after="7-2",
+        last=True,
     )
-    assert closed.endswith(body("- **7-2 — Two**", "- **7-4 — New**", "- **7-3 — Three**"))
+    assert closed.endswith(
+        body("- **7-2 — Two**", "- **7-4 — New**", "- **7-3 — Three**")
+    )
 
 
 FOLD_BODY = body(
@@ -1848,7 +1929,7 @@ FOLD_BODY = body(
 
 def test_absorb_moves_the_continuation_under_the_survivor_headed_once():
     written = subphase.absorb(FOLD_BODY, heading=HEADING, name="7-2", into="7-1")
-    assert subphase.text(written, HEADING, name="7-1") == "\n".join(
+    assert subphase.text(written, HEADING, name="7-1") == "\n".join(  # noqa: FLY002 — one row per line of the expected text
         [
             "- **7-1 — One**",
             "  Planned for one.",
@@ -1883,5 +1964,9 @@ def test_a_bullet_with_no_continuation_absorbs_as_its_heading_line_alone():
     shape = body("### Steps", "- **7-1 — One**", "- **7-2**", "- **7-3 — Three**")
     written = subphase.absorb(shape, heading=HEADING, name="7-2", into="7-3")
     assert written == body(
-        "### Steps", "- **7-1 — One**", "- **7-2**", "- **7-3 — Three**", "  *From 7-2:*"
+        "### Steps",
+        "- **7-1 — One**",
+        "- **7-2**",
+        "- **7-3 — Three**",
+        "  *From 7-2:*",
     )

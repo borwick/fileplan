@@ -17,7 +17,7 @@ look live.
 
 Pure but for `read`, `write`, `remove` and `identity`.
 
-See docs/method.md#the-claim
+See docs/reference.md#the-claim
 """
 
 from __future__ import annotations
@@ -25,9 +25,10 @@ from __future__ import annotations
 import datetime as dt
 import os
 import socket
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from fileplan import item
 from fileplan.declaration import (
@@ -42,7 +43,7 @@ from fileplan.lock import LOCAL_DIR
 
 #: The capability a state opts into. The seam that takes, holds and drops a
 #: claim is `fileplan.transition`, because it mutates under the lock and this
-#: module takes none. See docs/method.md#the-claimed-state
+#: module takes none. See docs/reference.md#the-claimed-state
 NAME = CLAIMED
 
 #: Under `local/`, beside the lock: session-local state, gitignored.
@@ -255,8 +256,7 @@ def errors(record: Mapping[str, Any]) -> list[str]:
     so a hand-edited record is fixed in one sitting.
     """
     found = [
-        f'"{name}" is not a claim record field (a record holds: '
-        f"{', '.join(FIELDS)})"
+        f'"{name}" is not a claim record field (a record holds: {", ".join(FIELDS)})'
         for name in record
         if name not in FIELDS
     ]
@@ -299,7 +299,9 @@ def read(path: str | os.PathLike[str], root: Path) -> dict[str, Any]:
             f"{named(path, root)} is not UTF-8, so it is not a claim record"
         ) from None
     except OSError as exc:
-        raise Refusal(f"{named(path, root)} could not be read: {exc.strerror}") from None
+        raise Refusal(
+            f"{named(path, root)} could not be read: {exc.strerror}"
+        ) from None
 
     try:
         return item.flat(text, noun="claim record")
@@ -337,7 +339,7 @@ def holders(declaration: Declaration) -> dict[str, dict[str, str]]:
     the listing, where a missing one reads as unclaimed: a fresh clone has no
     records, and a record that cannot be read says something the tool does
     not understand about who holds an item. See
-    docs/method.md#the-claimed-state
+    docs/reference.md#the-claimed-state
     """
     who = identity(declaration)
     return {
@@ -351,7 +353,7 @@ def mine(declaration: Declaration, who: Identity) -> list[str]:
 
     Ownership is `owns`, so a record with no pid on this host counts. Whether
     each slug is an item in a claimed state is the caller's question, as it is
-    for `holders`. See docs/method.md#the-claimed-state
+    for `holders`. See docs/reference.md#the-claimed-state
     """
     return [slug for slug, held in _records(declaration).items() if owns(held, who)]
 

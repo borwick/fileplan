@@ -10,7 +10,7 @@ tries without blocking, writes one line to stderr naming the holder, then
 acquires and waits. The holder line carries the host as well as the pid. A pid
 means nothing on another machine.
 
-See docs/method.md#the-lock
+See docs/reference.md#the-lock
 """
 
 from __future__ import annotations
@@ -18,9 +18,9 @@ from __future__ import annotations
 import fcntl
 import os
 import socket
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 import click
 

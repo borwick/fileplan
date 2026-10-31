@@ -4,6 +4,10 @@ This module grades the tells the rule names: arguing and narrating
 history, over every
 comment and docstring under `src/` and over nothing a person reads at the
 command line: a refusal may say "on purpose" to the person it refuses.
+
+The two dating tells, a dated ruling and a date, are graded over the
+comments and docstrings in `tests/` and `publish/` as well. A ruling there
+keeps its name and drops its day, as METHODOLOGY's *Current state only* says.
 """
 
 from __future__ import annotations
@@ -16,12 +20,22 @@ from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parent.parent / "src" / "fileplan"
+ROOT = Path(__file__).resolve().parent.parent
+SRC = ROOT / "src" / "fileplan"
 
-#: The tells: arguing ("deliberately", "on purpose") and history (a dated
-#: ruling, a date, "used to").
+#: The trees graded for a date only. `publish/` does not ship, so a public
+#: clone has no such directory and grades `tests/` alone.
+DATED = sorted(
+    path for tree in ("tests", "publish") for path in (ROOT / tree).rglob("*.py")
+)
+
+#: The dating tells: a dated ruling and a date.
+DATES = re.compile(r"\(John, |\b20\d\d-\d\d-\d\d\b")
+
+#: The tells: arguing ("deliberately", "on purpose") and history (the dating
+#: tells, "used to").
 TELLS = re.compile(
-    r"\bdeliberate(ly)?\b|\bon purpose\b|\(John, |\b20\d\d-\d\d-\d\d\b|\bused to\b",
+    rf"\bdeliberate(ly)?\b|\bon purpose\b|{DATES.pattern}|\bused to\b",
     re.IGNORECASE,
 )
 
@@ -34,9 +48,11 @@ def _prose(source: str) -> list[tuple[int, str]]:
         if token.type == tokenize.COMMENT
     ]
     for node in ast.walk(ast.parse(source)):
-        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef)):
-            if (text := ast.get_docstring(node, clean=False)) is not None:
-                found.append((node.body[0].lineno, text))
+        if (
+            isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef))
+            and (text := ast.get_docstring(node, clean=False)) is not None
+        ):
+            found.append((node.body[0].lineno, text))
     return found
 
 
@@ -47,6 +63,19 @@ def test_no_comment_in_src_argues_or_narrates_history(path: Path) -> None:
         (line, match.group(0))
         for line, text in _prose(path.read_text())
         for match in TELLS.finditer(text)
+    ]
+    assert said == [], said
+
+
+@pytest.mark.parametrize("path", DATED, ids=lambda p: p.relative_to(ROOT).as_posix())
+def test_no_comment_in_tests_or_publish_dates_a_ruling(path: Path) -> None:
+    """No comment or docstring in `tests/` or `publish/` dates a ruling or
+    holds a date. A date in a fixture string is data, so only comments and
+    docstrings are read."""
+    said = [
+        (line, match.group(0))
+        for line, text in _prose(path.read_text())
+        for match in DATES.finditer(text)
     ]
     assert said == [], said
 

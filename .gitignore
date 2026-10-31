@@ -1,10 +1,26 @@
+# Composed by roots from: base, python, the product.
+# Edit those fragments, not this file; `roots compose` regenerates it.
+
+# roots: from base
+# the environment file make env writes; never committed
+.env
+# every module's session-local state: locks, claims, generated files
+local/
+# Claude Code's per-person and per-session state
+.claude/settings.local.json
+CLAUDE.local.md
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+# macOS Finder metadata, in every directory
+.DS_Store
+
+# roots: from python
+.venv/
 __pycache__/
 *.pyc
 .pytest_cache/
-.venv/
 dist/
-build/
 *.egg-info/
 
-# Session-local state: locks and claims, never committed.
-local/
+# roots: from the product
+build/

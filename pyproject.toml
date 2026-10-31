@@ -1,19 +1,23 @@
+# Composed by roots from: python, the product.
+# Edit those fragments, not this file; `roots compose` regenerates it.
+
 [project]
+# fileplan ships to PyPI, so it keeps its own floor, which wins over
+# python's (C4). `make test-floor` runs the tests on it.
+requires-python = ">=3.12"
 name = "fileplan"
-version = "0.11.0"
+version = "0.12.0"
 description = "A plan.toml interpreter: declared states, transitions and keys for filing work across sessions"
 readme = "README.md"
 authors = [
     { name = "John Borwick", email = "john_borwick@pobox.com" }
 ]
-requires-python = ">=3.12"
 dependencies = [
     "click>=8.1",
     "dulwich>=1.2.14",
 ]
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
-
 # PEP 639 forbids a `License ::` classifier beside the expression above, and
 # the build refuses one — so the habit of adding it is the mistake to make
 # loud rather than to remember. `tests/test_packaging.py` asserts its absence.
@@ -42,22 +46,24 @@ Issues = "https://github.com/borwick/fileplan/issues"
 fileplan = "fileplan.cli:console_main"
 
 [build-system]
-requires = ["uv_build>=0.12.3,<0.13.0"]
+requires = ["uv_build>=0.12.9,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = [
-    "pytest>=8.0",
-]
+dev = ["pytest>=8.0", "pytest-xdist>=3.8", "ruff>=0.17"]
+
+[tool.uv]
+# Resolve only releases at least a week old. Days or weeks: uv takes
+# "1 month" with a warning and then applies no cutoff. A security release
+# is exempted per package with exclude-newer-package in the override.
+exclude-newer = "1 week"
 
 [tool.pytest.ini_options]
+# publish/ holds the pipeline's tests. python gives `tests`, and arrays union.
 testpaths = ["tests"]
 
-# Tests are excluded because a test caller must never justify production code:
-# left in the scan, a test import silently falsifies the premise of
-# `internal-only` and `single-call-site`, and that disproof settles nothing.
-# The three patterns cover where a test can land — `tests/` is the directory,
-# `test_*` the filename convention wherever it sits, and `conftest.py` is
-# neither.
-[tool.pysmelly]
-exclude = ["tests/", "test_*", "conftest.py"]
+[tool.ruff.lint]
+# ruff's default rule set, which ruff changes only in a minor release, plus
+# print() (T20) and naive datetimes (DTZ). No select; the version comes
+# from requires-python.
+extend-select = ["T20", "DTZ"]

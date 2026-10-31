@@ -126,9 +126,9 @@ def test_an_order_that_agrees_names_nothing() -> None:
 
 
 def test_an_edge_at_the_same_place_is_not_later() -> None:
-    assert depends.misordered(
-        "a-tree", 100, ("b-tree",), {"b-tree": 100}, key=KEY
-    ) == []
+    assert (
+        depends.misordered("a-tree", 100, ("b-tree",), {"b-tree": 100}, key=KEY) == []
+    )
 
 
 def test_an_item_with_no_place_is_ignored_rather_than_guessed_at() -> None:
@@ -190,8 +190,7 @@ def test_a_list_naming_nothing_of_the_kind_is_unchanged() -> None:
     assert depends.without(["a-tree"], "b-tree") == ["a-tree"]
 
 
-def test_a_non_string_entry_is_compared_as_text_and_the_others_kept_verbatim(
-) -> None:
+def test_a_non_string_entry_is_compared_as_text_and_the_others_kept_verbatim() -> None:
     """`edges`' comparison exactly — `str(entry) == slug` — so an edge those
     readers can see is an edge this can clear, and one they cannot match is
     kept as it was written rather than rewritten as text."""
@@ -243,10 +242,10 @@ def test_the_survivors_own_edge_to_the_absorbed_item_is_dropped() -> None:
     """**The self-edge.** `own == into` means this head belongs to the
     survivor, and an item may not wait on itself — so the entry contributes
     nothing rather than being written, and the caller says which item and
-    which key (John, 2026-09-04)."""
-    assert depends.repoint(
-        ["a-tree", "b-tree"], "b-tree", "d-tree", own="d-tree"
-    ) == ["a-tree"]
+    which key (John)."""
+    assert depends.repoint(["a-tree", "b-tree"], "b-tree", "d-tree", own="d-tree") == [
+        "a-tree"
+    ]
 
 
 def test_a_value_the_drop_empties_comes_back_none() -> None:
@@ -265,8 +264,9 @@ def test_a_value_naming_the_slug_twice_yields_one_entry() -> None:
     ) == ["d-tree", "a-tree"]
 
 
-def test_a_non_string_entry_is_compared_as_text_and_the_others_kept_verbatim_here(
-) -> None:
+def test_a_non_string_entry_is_compared_as_text_and_the_others_kept_verbatim_here() -> (
+    None
+):
     """`without`'s comparison exactly — `str(entry) == slug` — so the two
     cannot disagree about what "names this slug" means."""
     assert depends.repoint([7, "b-tree"], "7", "d-tree", own="e-tree") == [

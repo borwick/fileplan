@@ -158,7 +158,7 @@ a list of what it waits on. A `[fileplan]` table can name the oldest release
 the file needs, so an older fileplan says to upgrade instead of blaming the
 file, a `root` the states sit under, or the file names a state directory
 does not read as items. Each of those stays off until
-`plan.toml` turns it on, and [the method](method.md) describes them one at a
+`plan.toml` turns it on, and [the method](reference.md) describes them one at a
 time.
 
 Two commands read your declaration back to you. The bare `fileplan` above

@@ -14,13 +14,14 @@ The document is an object and never a bare array. The object carries
 `version`, `kind` and the counts the text form puts on stderr. An array would
 have nowhere to grow.
 
-See docs/method.md#the-listing
+See docs/reference.md#the-listing
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 #: The read contract's version. Bumped only for a change a consumer parsing
 #: the previous shape could not survive — a field removed or retyped. Adding a
@@ -96,7 +97,9 @@ def document(kind: str, rows: Sequence[Mapping[str, Any]], **meta: Any) -> str:
         **meta,
         "rows": list(rows),
     }
-    return json.dumps(payload, separators=(",", ":"), sort_keys=False, default=str) + "\n"
+    return (
+        json.dumps(payload, separators=(",", ":"), sort_keys=False, default=str) + "\n"
+    )
 
 
 def _spell(value: Any) -> str:
