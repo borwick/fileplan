@@ -308,7 +308,10 @@ item, and a file that is not one refuses the listing by name. One kind of file
 is placed in a state directory without being an item: the file an agent tool
 reads from the directory it works in, such as `AGENTS.md`. With that file in
 place every `fileplan list` refuses, saying there is no `+++` head on line 1.
-`ignore` names such files, and every state directory skips them:
+`ignore` names such files, and every directory fileplan reads as documents
+skips them. Those are the state directories, a key's
+[`directory`](#directory), and a [register](#the-register) kept as a
+directory:
 
 ```toml
 [fileplan]
@@ -317,15 +320,15 @@ ignore = ["AGENTS.md"]
 
 The list holds **exact file names**, not globs, so the rule stays one
 sentence: a file whose name is in the list is left out of the walk, and every
-other `*.md` is still claimed to be an item. A broken item beside an ignored
-file still refuses the listing, and the refusal names the broken item alone.
+other `*.md` is still read. A broken item beside an ignored file still
+refuses the listing, and the refusal names the broken item alone.
 
 The load refuses a list that could skip nothing, each by name. The value must
 be a list of strings. An empty list refuses, since it says nothing. A name
 written twice refuses. A name holding a path separator refuses, because the
-list holds file names and each one is applied in every state directory. A
-name without the `.md` suffix refuses, because the traversal never reads
-such a file, so listing it would skip nothing.
+list holds file names and each one is applied in every directory fileplan
+reads as documents. A name without the `.md` suffix refuses, because the
+traversal never reads such a file, so listing it would skip nothing.
 
 Two other shapes were refused. A list built into the tool would put an agent
 vendor's file name under `src/`, and would be a rule a consumer has to know
@@ -433,7 +436,8 @@ Each value is then a repo-relative path naming a file directly inside
 
 The files in the directory are the `*.md` files directly inside it, the same
 rule a [register](#the-register) kept as a directory reads by. A file below a
-subdirectory and a file with another extension are left alone. Paths compare
+subdirectory, a file with another extension, and a name
+[`ignore`](#ignore) lists are left alone. Paths compare
 as POSIX paths, so `./sketches/a.md` and `sketches/a.md` name one file, and
 `sketches/` and `sketches` are one directory.
 
@@ -2222,8 +2226,9 @@ single archive file holds: `## <number>. <title>`, a blank line, then the
 record. Filing writes that one new file and touches no other file in the
 directory.
 
-The register reads **every `*.md` directly inside the directory**. It does not
-read subdirectories, and it ignores other extensions, so a `.gitkeep` is fine.
+The register reads **every `*.md` directly inside the directory**, except a
+name [`ignore`](#ignore) lists. It does not read subdirectories, and it
+ignores other extensions, so a `.gitkeep` is fine.
 Each file is read the way a single archive file is read, so the numbering, the
 gaps and the register's own record come out the same in either form. A lost
 close-out names the entry file and its line.
@@ -2231,7 +2236,8 @@ close-out names the entry file and its line.
 **A `.md` file there with no readable heading is a lost close-out**, named at
 line 1. The file *is* the entry, so a file the register cannot number from has
 dropped its number, the same as a `##` the parse cannot read. A stray
-`README.md` in the directory is therefore reported rather than skipped. A file
+`README.md` in the directory is therefore reported rather than skipped, unless
+`ignore` names it. A file
 holding two readable headings is read as two entries, as in a single file.
 
 Two refusals guard the write, and both run before anything is written. A

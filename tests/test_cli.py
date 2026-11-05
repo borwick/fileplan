@@ -517,6 +517,21 @@ def test_a_file_in_the_directory_that_no_item_names_is_orphaned(
     ) in capsys.readouterr().err
 
 
+def test_a_key_s_directory_skips_an_ignored_name(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """39-1: `[fileplan].ignore` applies to a key's directory as it does to a
+    state directory, so an agent file there is not an orphan."""
+    sketched(tree, "CLAUDE.md", "stray.md")
+    plan = tree / "plan.toml"
+    plan.write_text('[fileplan]\nignore = ["CLAUDE.md"]\n\n' + plan.read_text())
+    capsys.readouterr()
+
+    assert main(["list", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [one["path"] for one in payload["orphaned"]] == ["sketches/stray.md"]
+
+
 def test_neither_directory_report_narrows_under_a_filter(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -4254,6 +4269,23 @@ def test_a_markdown_file_with_no_heading_there_is_a_lost_close_out(
         1,
         "# What this is",
     )
+
+
+def test_an_ignored_name_there_is_not_a_lost_close_out(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """39-1: a name `[fileplan].ignore` lists is skipped in a register kept
+    as a directory, as in every directory fileplan reads as documents."""
+    plan = tree / "plan.toml"
+    plan.write_text('[fileplan]\nignore = ["CLAUDE.md"]\n\n' + plan.read_text())
+    as_directory(
+        tree,
+        {
+            "1-a-felled-tree.md": "## 1. A felled tree\n",
+            "CLAUDE.md": "# How to work here\n",
+        },
+    )
+    assert listed(capsys)["lost"] == []
 
 
 def test_a_file_that_is_not_markdown_there_is_left_alone(

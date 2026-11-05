@@ -156,14 +156,11 @@ SOURCES = (
 #: raises rather than failing a claim. They are graded where they are and
 #: skipped where they are not.
 #:
-#: Written out here rather than read from the private tree's own publishing
-#: code, because that does not ship and a shipped test importing it would not
-#: run in the built tree. The control that these two lists agree with what is
-#: shipped lives on the side of the fence that has both.
+#: Written out by hand. The release policy, `clean-release.toml`, says what
+#: ships, and no test asserts that these two lists agree with it.
 OWN_SOURCES = (
     "plan.toml",
     "CLAUDE.md",
-    "docs/publishing.md",
 )
 
 #: The skills this repo ships. They are the **interpreter**
@@ -216,15 +213,6 @@ DISCLOSURE = Path("docs/ai-disclosure.md")
 #: below: an index that names a document is a promise, and the promise is
 #: only kept while every document is named and every name resolves.
 INDEX = Path("docs/index.md")
-
-#: How the public copy is built: the two trees, the three gates, and what
-#: nobody automated. It is the account of `publish/`, which does not ship, so
-#: it does not either — and it names the strings the checker suppresses, so it
-#: could not. It is in `OWN_SOURCES` rather than `SOURCES`, so every guard
-#: that reads it reads it only where it is there. Graded here for two things:
-#: its citations resolve, and its headings do not repeat a meaning that already
-#: has a home.
-PUBLISHING = Path("docs/publishing.md")
 
 #: Headings that hold other headings rather than a meaning. A pointer names a
 #: leaf; these are the shelves the leaves sit on.
@@ -453,11 +441,9 @@ def test_the_citation_guard_reads_every_source_it_can_be_sure_of() -> None:
     defect. `OWN_SOURCES` does not, so absence is the built tree's ordinary
     shape rather than a defect.
 
-    The tolerance is the risk, and it is halved here and halved next door.
-    Here: every own source that *was* read has to have contributed a citation,
-    so a file that stopped being read is not silently skipped. There: whether
-    this tree has both of them at all is `publish/test_publish.py`'s to say,
-    because only that side knows which tree it is looking at."""
+    The tolerance is the risk. Every own source that *was* read has to have
+    contributed a citation, so a file that stopped being read is not silently
+    skipped. No test asserts that this tree has them at all."""
     missing = [name for name in SOURCES if not (REPO / name).exists()]
     assert missing == [], missing
 
@@ -486,9 +472,8 @@ def test_the_citation_guard_reads_every_filed_item() -> None:
         # clone of the published repo is one: it ships with an empty plan by
         # design. So the missing haystack is skipped rather than asserted
         # away — a skip says out loud that nothing was proved, which a
-        # vacuous pass does not, and `pytest -q` prints the count. The
-        # control that *this* tree has the haystack lives in `publish/`,
-        # which is the side of the fence that knows it is the private one.
+        # vacuous pass does not, and `pytest -q` prints the count. No test
+        # asserts that *this* tree has the haystack.
         pytest.skip("no items are filed, so there is no haystack to read")
     read = {str(path.relative_to(REPO)) for path in _haystack()}
     assert filed <= read, sorted(filed - read)
@@ -636,12 +621,7 @@ def test_no_heading_is_a_heading_in_two_shipped_documents() -> None:
     what a session *does*, which is the one thing the method deliberately does
     not. A heading in two of them would be two homes for one meaning, and the
     procedures are the likeliest place for it — a procedure that re-explained
-    what a verb means would be the second copy.
-
-    `PUBLISHING` is graded where it is there and skipped where it is not,
-    for `OWN_SOURCES`' reason: it does not ship and this module does, so in
-    a built tree `heading_slugs` would be asked about a file that is
-    absent."""
+    what a verb means would be the second copy."""
     names = [
         "README.md",
         METHOD,
@@ -651,7 +631,6 @@ def test_no_heading_is_a_heading_in_two_shipped_documents() -> None:
         INDEX,
         DISCLOSURE,
     ]
-    names += [PUBLISHING] if (REPO / PUBLISHING).exists() else []
     shipped = {name: heading_slugs(REPO / name) for name in names}
     assert all(slugs for slugs in shipped.values())
     for name, slugs in shipped.items():

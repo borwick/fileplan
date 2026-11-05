@@ -6,8 +6,8 @@ comment and docstring under `src/` and over nothing a person reads at the
 command line: a refusal may say "on purpose" to the person it refuses.
 
 The two dating tells, a dated ruling and a date, are graded over the
-comments and docstrings in `tests/` and `publish/` as well. A ruling there
-keeps its name and drops its day, as METHODOLOGY's *Current state only* says.
+comments and docstrings in `tests/` as well. A ruling there keeps its name
+and drops its day, as METHODOLOGY's *Current state only* says.
 """
 
 from __future__ import annotations
@@ -23,11 +23,8 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src" / "fileplan"
 
-#: The trees graded for a date only. `publish/` does not ship, so a public
-#: clone has no such directory and grades `tests/` alone.
-DATED = sorted(
-    path for tree in ("tests", "publish") for path in (ROOT / tree).rglob("*.py")
-)
+#: The tree graded for a date only.
+DATED = sorted((ROOT / "tests").rglob("*.py"))
 
 #: The dating tells: a dated ruling and a date.
 DATES = re.compile(r"\(John, |\b20\d\d-\d\d-\d\d\b")
@@ -68,10 +65,10 @@ def test_no_comment_in_src_argues_or_narrates_history(path: Path) -> None:
 
 
 @pytest.mark.parametrize("path", DATED, ids=lambda p: p.relative_to(ROOT).as_posix())
-def test_no_comment_in_tests_or_publish_dates_a_ruling(path: Path) -> None:
-    """No comment or docstring in `tests/` or `publish/` dates a ruling or
-    holds a date. A date in a fixture string is data, so only comments and
-    docstrings are read."""
+def test_no_comment_in_tests_dates_a_ruling(path: Path) -> None:
+    """No comment or docstring in `tests/` dates a ruling or holds a date.
+    A date in a fixture string is data, so only comments and docstrings are
+    read."""
     said = [
         (line, match.group(0))
         for line, text in _prose(path.read_text())

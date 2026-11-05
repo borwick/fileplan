@@ -6,7 +6,7 @@
 # python's (C4). `make test-floor` runs the tests on it.
 requires-python = ">=3.12"
 name = "fileplan"
-version = "0.12.0"
+version = "0.13.0"
 description = "A plan.toml interpreter: declared states, transitions and keys for filing work across sessions"
 readme = "README.md"
 authors = [
@@ -59,7 +59,6 @@ dev = ["pytest>=8.0", "pytest-xdist>=3.8", "ruff>=0.17"]
 exclude-newer = "1 week"
 
 [tool.pytest.ini_options]
-# publish/ holds the pipeline's tests. python gives `tests`, and arrays union.
 testpaths = ["tests"]
 
 [tool.ruff.lint]

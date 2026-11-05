@@ -647,8 +647,10 @@ class Declaration:
     #: `[identity]`, and there is no default. Names rather than a value: reading
     #: them is `fileplan.claim.identity`.
     pid_names: tuple[str, ...] = ()
-    #: The file names `[fileplan].ignore` lists, which `fileplan.read.items`
-    #: leaves out of every state directory. Empty when the table lists none.
+    #: The file names `[fileplan].ignore` lists, which `fileplan.read.documents`
+    #: leaves out of every directory fileplan reads as documents: state
+    #: directories, a key's directory, and a register kept as a directory.
+    #: Empty when the table lists none.
     ignore: frozenset[str] = frozenset()
 
     def has(self, capability: str) -> bool:
@@ -1451,8 +1453,8 @@ def _tool_errors(entry: Any) -> list[str]:
 
 def _ignore_errors(value: Any) -> list[str]:
     """Every way `[fileplan].ignore` is not a list of item file names: each
-    name is applied in every state directory, so a path cannot be one, and a
-    name the traversal never reads cannot be skipped."""
+    name is applied in every directory fileplan reads as documents, so a path
+    cannot be one, and a name the traversal never reads cannot be skipped."""
     where = f"{TOOL}.{IGNORE}"
     if not _is_string_list(value):
         return [f"{where} must be a list of strings"]
@@ -1472,7 +1474,9 @@ def _ignore_errors(value: Any) -> list[str]:
         if "/" in name or os.sep in name:
             errors.append(
                 f'{where}: "{name}" is a path, and the list holds file names '
-                "applied in every state directory"
+                "applied in every directory fileplan reads as documents: state "
+                "directories, a key's directory, and a register kept as a "
+                "directory"
             )
         elif not name.endswith(SUFFIX):
             errors.append(

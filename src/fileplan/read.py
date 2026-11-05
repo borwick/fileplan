@@ -24,7 +24,7 @@ import operator as operators
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any
 
@@ -144,8 +144,19 @@ class Test:
 
 
 # --------------------------------------------------------------------------
-# The traversal: the two functions here that touch a disk
+# The traversal: the functions here that touch a disk
 # --------------------------------------------------------------------------
+
+
+def documents(declaration: Declaration, directory: Path) -> list[Path]:
+    """Every `*.md` directly inside `directory` whose name `[fileplan].ignore`
+    does not list. The one filter every directory walk shares: a
+    state's, a key's `directory`, and a register kept as a directory. Each
+    caller keeps its own order. See docs/reference.md#ignore
+    """
+    return [
+        p for p in directory.glob(f"*{item.SUFFIX}") if p.name not in declaration.ignore
+    ]
 
 
 def items(declaration: Declaration) -> list[Item]:
@@ -165,14 +176,7 @@ def items(declaration: Declaration) -> list[Item]:
         if not directory.is_dir():
             continue
         here: list[Item] = []
-        paths = sorted(
-            (
-                p
-                for p in directory.glob(f"*{item.SUFFIX}")
-                if p.name not in declaration.ignore
-            ),
-            key=lambda p: p.stem,
-        )
+        paths = sorted(documents(declaration, directory), key=lambda p: p.stem)
         for path, one in collecting(lambda p: item.read(p, declaration), paths, errors):
             here.append(one)
             if state.sub_phases:
@@ -201,8 +205,9 @@ def archive(declaration: Declaration, state: State) -> list[Archived]:
 
     The `archive` field names a path, and what is on disk decides its form.
     A file is the archive, read whole. A directory holds one entry per file:
-    every `*.md` directly inside it, sorted by name, with no recursion and any
-    other extension left alone. There a file with no readable heading is a
+    every `*.md` directly inside it, sorted by name, with no recursion, any
+    other extension left alone, and a name `[fileplan].ignore` lists skipped.
+    There a file with no readable heading is a
     lost close-out (`fileplan.numbered.unreadable_entry`). The load check
     guarantees the path exists. See docs/reference.md#the-register
     """
@@ -214,7 +219,7 @@ def archive(declaration: Declaration, state: State) -> list[Archived]:
         text = path.read_text(encoding="utf-8")
         return [Archived(where, text, numbered.unreadable(text))]
     found = []
-    for one in sorted(path.glob(f"*{item.SUFFIX}"), key=lambda p: p.name):
+    for one in sorted(documents(declaration, path), key=lambda p: p.name):
         if not one.is_file():
             continue
         text = one.read_text(encoding="utf-8")
@@ -669,7 +674,8 @@ def _paths(
     `notes/a.md`. A list is asked entry by entry, `carries`' rule. Every
     item in every state counts as naming, because the reports cover the whole
     tree. The directory holds `archive`'s documents: every `*.md` directly
-    inside it, no recursion, other extensions left alone. The load check
+    inside it, no recursion, other extensions left alone, and a name
+    `[fileplan].ignore` lists skipped. The load check
     guarantees each directory exists. See docs/reference.md#directory
     """
     missing: list[dict[str, Any]] = []
@@ -680,7 +686,7 @@ def _paths(
         directory = PurePosixPath(key.directory)
         held = {
             directory / one.name
-            for one in (declaration.root / directory).glob(f"*{item.SUFFIX}")
+            for one in documents(declaration, declaration.root / directory)
             if one.is_file()
         }
         named: set[PurePosixPath] = set()
