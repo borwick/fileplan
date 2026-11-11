@@ -1,14 +1,13 @@
 """Staleness: the arithmetic, and the one git read under it.
 
-The pure table comes first and takes no ``tmp_path`` — `test_depends.py`'s
-shape, and for its reason: what a number *means* is graded without a tree.
+The pure table comes first and takes no ``tmp_path``: what a number *means*
+is graded without a tree.
 
-The git half builds its repos **in-process with dulwich**, the same library
-the tool reads them with. No subprocess runs anywhere in this module, and no
-clock is mocked: a commit is written with an explicit ``author_timestamp``
-and `fileplan.stale.ages` is handed an explicit ``today``, so "five days
-ago" is arithmetic between two stated values rather than a guess about when
-the suite happens to run.
+The git half builds its repos **in-process with dulwich**, the library the
+tool reads them with. No subprocess runs and no clock is mocked: a commit is
+written with an explicit ``author_timestamp`` and `fileplan.stale.ages` is
+handed an explicit ``today``, so "five days ago" is arithmetic between two
+stated values, not a guess about when the suite runs.
 """
 
 from __future__ import annotations
@@ -16,12 +15,13 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+from dulwich.index import commit_tree
+from dulwich.objects import Blob, Commit
 from dulwich.repo import Repo
 
 from fileplan import stale
 
-#: The day every backdated commit is measured against. Any date will do; a
-#: fixed one is what keeps a test from meaning something different tomorrow.
+#: The day every backdated commit is measured against. Any fixed date will do.
 TODAY = dt.date(2026, 9, 4)
 
 WHO = b"A Gardener <gardener@example.invalid>"
@@ -37,14 +37,14 @@ def test_days_is_whole_days_between_the_commit_and_today() -> None:
 
 
 def test_a_file_committed_today_is_zero_days_stale() -> None:
-    """Zero is a real answer — committed today — which is exactly why git
-    having *no* answer may not also be zero."""
+    """Zero is a real answer, committed today, so git having *no* answer may
+    not also be zero."""
     assert stale.days(TODAY, TODAY) == 0
 
 
 def test_no_commit_is_none_rather_than_zero() -> None:
-    """`None` in is `None` out. A zero would read as "committed today", which
-    is the loudest possible lie about a file nobody has ever committed."""
+    """`None` in is `None` out. A zero would read as "committed today" for a
+    file nobody has ever committed."""
     assert stale.days(None, TODAY) is None
 
 
@@ -135,7 +135,7 @@ def test_a_repo_with_no_commits_at_all_answers_about_nothing(
 
 def test_a_second_commit_to_the_file_resets_it(tmp_path: Path) -> None:
     """The last commit, not the first: the number says *days since anybody
-    was near this*, and that is the whole reason nothing is stamped."""
+    was near this*."""
     with started(tmp_path) as repo:
         path = write(tmp_path, "plan/a-section.md")
         commit(repo, "plan/a-section.md", ago=30)
@@ -160,9 +160,7 @@ def test_a_commit_touching_another_file_leaves_this_one_alone(
 
 
 def test_an_uncommitted_edit_does_not_reset_it(tmp_path: Path) -> None:
-    """The field counts commits, not keystrokes. Where work is committed
-    promptly that is a feature, and it is written down rather than
-    left to surprise someone."""
+    """The field counts commits, not keystrokes."""
     with started(tmp_path) as repo:
         path = write(tmp_path, "plan/a-section.md")
         commit(repo, "plan/a-section.md", ago=9)
@@ -185,8 +183,8 @@ def test_paths_are_taken_relative_to_the_repo_not_the_declaration_root(
 
 
 def test_a_file_outside_the_repo_is_absent(tmp_path: Path) -> None:
-    """Not under the repo at all, so git has nothing to say about it — and
-    saying nothing is `null`, not a refusal."""
+    """Git has nothing to say about a file outside the repo, and saying
+    nothing is `null`, not a refusal."""
     with started(tmp_path / "checkout") as repo:
         write(tmp_path / "checkout", "plan/a-section.md")
         commit(repo, "plan/a-section.md", ago=1)
@@ -195,6 +193,50 @@ def test_a_file_outside_the_repo_is_absent(tmp_path: Path) -> None:
 
 
 def test_nothing_filed_asks_git_nothing(tmp_path: Path) -> None:
-    """No dated items means no discovery, no HEAD lookup and no walk — which
-    is what makes the capability free where nobody opts in."""
+    """No dated items means no discovery, no HEAD lookup, and no walk, so the
+    capability is free where nobody opts in."""
     assert stale.ages(tmp_path, [], TODAY) == {}
+
+
+def raw_commit(
+    repo: Repo, files: dict[str, bytes], parents: list[bytes], ago: int
+) -> bytes:
+    """A commit of exactly ``files`` on ``parents``, built as objects and
+    pointed at by HEAD, so two branches can hold different trees with no
+    worktree or index in between."""
+    when = int(
+        dt.datetime.combine(
+            TODAY - dt.timedelta(days=ago), dt.time(12), tzinfo=dt.UTC
+        ).timestamp()
+    )
+    blobs = []
+    for name, text in files.items():
+        blob = Blob.from_string(text)
+        repo.object_store.add_object(blob)
+        blobs.append((name.encode("utf-8"), blob.id, 0o100644))
+    made = Commit()
+    made.tree = commit_tree(repo.object_store, blobs)
+    made.parents = parents
+    made.author = made.committer = WHO
+    made.author_time = made.commit_time = when
+    made.author_timezone = made.commit_timezone = 0
+    made.message = b"a commit"
+    repo.object_store.add_object(made)
+    repo.refs[b"HEAD"] = made.id
+    return made.id
+
+
+def test_across_a_merge_each_file_follows_its_own_history(tmp_path: Path) -> None:
+    """Past a merge, a file's history follows the parent its content came
+    from, so a file changed only on the side branch reads that branch's
+    commit, not the merge's. Above the merge one walk settles every file; a
+    file it does not reach walks on alone from the merge."""
+    with started(tmp_path) as repo:
+        base = raw_commit(repo, {"a.md": b"a", "b.md": b"b"}, [], ago=30)
+        side = raw_commit(repo, {"a.md": b"a2", "b.md": b"b"}, [base], ago=10)
+        main = raw_commit(repo, {"a.md": b"a", "b.md": b"b2"}, [base], ago=5)
+        merged = {"a.md": b"a2", "b.md": b"b2"}
+        merge = raw_commit(repo, merged, [main, side], ago=3)
+        raw_commit(repo, {**merged, "c.md": b"c"}, [merge], ago=1)
+    filed = [(name, tmp_path / f"{name}.md") for name in ("a", "b", "c")]
+    assert stale.ages(tmp_path, filed, TODAY) == {"a": 10, "b": 5, "c": 1}

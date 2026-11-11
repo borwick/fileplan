@@ -3,19 +3,15 @@
 From nothing to a tree an agent can work in.
 
 Every command below was run and its output pasted from that run. The walk
-from `fileplan init` on was re-run on 2026-10-06 against the working tree,
-through `uv run`; the install, `--version` and `--skills` blocks are from the
-2026-09-12 run against a built wheel. Two blocks are trimmed. The install
-block leaves out uv's dependency lines, and `fileplan --skills` prints the
-ordinary install location rather than the throwaway directory that run
-installed into.
+from `fileplan init` on ran against the working tree, through `uv run`; the
+`--version` and `--skills` blocks ran against an installed wheel.
 
 ## what you are getting
 
 A directory for each stage your work goes through, and one command for each
 move between the directories. `plan.toml` names the directories and the moves.
 fileplan builds all of it out of `plan.toml`: the commands, the filters on the
-listing, and a refusal by name for anything the declaration does not allow.
+listing and a refusal by name for anything the declaration does not allow.
 
 The names in this walk come from the example `plan.toml` that `fileplan init`
 writes. None of them is fileplan's own word, and renaming them is the first
@@ -29,26 +25,13 @@ have.
 
 ## installing it
 
-Once fileplan is on PyPI:
+fileplan is on PyPI:
 
 ```
 $ uv tool install fileplan
 ```
 
-Today it is not, so install from a built wheel:
-
-```
-$ uv build --no-sources
-Building source distribution...
-Building wheel from source distribution...
-Successfully built dist/fileplan-0.4.0.tar.gz
-Successfully built dist/fileplan-0.4.0-py3-none-any.whl
-
-$ uv tool install ./dist/fileplan-0.4.0-py3-none-any.whl
-Installed 1 executable: fileplan
-```
-
-Either way you get the `fileplan` console script. `python -m fileplan` runs
+That gives you the `fileplan` console script. `python -m fileplan` runs
 the same code. Check what you installed:
 
 ```
@@ -79,7 +62,7 @@ local/.gitignore
 ```
 
 Two directories for your work, a `plan.toml`, the archive document a closed
-item's entry is filed in, and `local/`, where fileplan keeps session state
+item's entry is filed in and `local/`, where fileplan keeps session state
 such as its lock. `local/.gitignore` holds `*`, so none of that is ever
 committed. `fileplan init` writes nothing over a file that is already there,
 and refuses inside a tree that already has a `plan.toml` above it, so running
@@ -115,7 +98,7 @@ Run `fileplan COMMAND --help` to see what COMMAND takes.
 `States` and `Transitions` are `plan.toml` read back to you. Add a state to
 the declaration and it appears here. **`Declares`** gives each command's
 kind: `capture` creates an item, `queue` moves one, `work` edits one where it
-stands, and `archive` closes one out, writing a record as it takes the item
+stands and `archive` closes one out, writing a record as it takes the item
 away.
 
 ## making it yours
@@ -153,13 +136,13 @@ close it out. Every line in it is there because the loop needs it:
   section can link on to a procedure a session follows around a run.
 
 fileplan does more than that loop asks for. An item can be claimed by one
-session at a time, cut into named bullets and marked off one by one, or given
+session at a time, cut into named bullets and marked off one by one or given
 a list of what it waits on. A `[fileplan]` table can name the oldest release
 the file needs, so an older fileplan says to upgrade instead of blaming the
-file, a `root` the states sit under, or the file names a state directory
-does not read as items. Each of those stays off until
-`plan.toml` turns it on, and [the method](reference.md) describes them one at a
-time.
+file. It can also name a `root` the states sit under and the file names a
+state directory does not read as items. Each of those stays off until
+`plan.toml` turns it on, and [the method](../examples/docs/reference.md)
+describes them one at a time.
 
 Two commands read your declaration back to you. The bare `fileplan` above
 lists everything `plan.toml` declares. `fileplan COMMAND --help` gives one
@@ -393,14 +376,14 @@ fileplan
 
 **`/fileplan` runs one command, whichever it is.** The skill asks fileplan for
 the contract, checks the item against the contract, reads the sections the
-contract names, does what those sections say, and runs the command. The skill
+contract names, does what those sections say and runs the command. The skill
 branches on what the declaration says a command *declares*, never on the
 command's name. So it works for a command it has never seen, including yours.
 Your `Reading` pointers, and the procedures their sections link to, are the
 program, and the skill is the interpreter.
 
 **`/do-next` is a worked example of composing runs.** It reads the tree, works
-out which of three arms a session is in, and hands every move to `/fileplan`.
+out which of three arms a session is in and hands every move to `/fileplan`.
 It acts on the head item, or on the one a section number, a sub-phase name or
 a slug prefix names, and it stops rather than guessing when the name matches
 nothing.
@@ -415,9 +398,13 @@ particular workflow declares.
 
 ## where this goes
 
-A copied skill goes stale when fileplan is upgraded. The native route in 2026
-is a **plugin**. That is a manifest plus a marketplace file that a harness
-installs and updates from a git repository, rather than a directory you copy
-by hand. A plugin needs a remote, which is what publishing to PyPI needs too,
-and this project has neither yet. When the remote arrives, the skills come
-with it and this section becomes one command.
+A copied skill goes stale when fileplan is upgraded, so copy it again after an
+upgrade. Claude Code's native route is a **plugin**: a directory of skills and
+other parts, usually with a manifest at `.claude-plugin/plugin.json`. Most
+plugins are installed from a marketplace, a git repository or a directory whose
+`.claude-plugin/marketplace.json` says where to fetch each plugin. An installed
+plugin is updated by `claude plugin update`, or by the marketplace's
+auto-update, which is off until you turn it on. A plugin's skills run under its
+name, so in a plugin named fileplan, `/fileplan` runs as `/fileplan:fileplan`.
+fileplan ships no plugin yet. This paragraph was checked against Claude Code
+2.1.319's documentation on 2026-11-08.

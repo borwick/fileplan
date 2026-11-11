@@ -2,17 +2,17 @@
 
 The group is built inside `main`, so a malformed ``plan.toml`` is
 catchable in-process and only the operator's contract — rc 2, one ``ERROR:``
-line on stderr, no traceback, no stdout — needs a subprocess. That is the
-whole reason 1-1 built it there.
+line on stderr, no traceback, no stdout — needs a subprocess.
 
-Everything drives the *fixture's* vocabulary. The control at the bottom is
-the one that matters most in this sub-phase: no verb the repo declares
-appears under ``src/`` at all, because there is no per-verb code to name it.
+Everything drives the *fixture's* vocabulary. The control, under *no per-verb
+code exists* below: no verb the repo declares appears under ``src/`` at all,
+because there is no per-verb code to name it.
 """
 
 from __future__ import annotations
 
 import ast
+import dataclasses
 import datetime as dt
 import io
 import json
@@ -29,7 +29,7 @@ from typing import Any
 
 import click
 import pytest
-from conftest import DERIVABLE_KEYS, EXAMPLE, FIXTURE_FILES
+from conftest import EXAMPLE, RECORD_TEXT, REPO, UNPRUNED, UNSTRUCK, copy_fixture
 from dulwich.repo import Repo
 
 from fileplan import claim, cli, render, subphase
@@ -43,7 +43,7 @@ from fileplan.cli import (
     RECORD,
     main,
 )
-from fileplan.declaration import CLAIMED, KINDS, load
+from fileplan.declaration import CLAIMED, DERIVABLE, KINDS, Refusal, load
 from fileplan.item import read as item_read
 
 #: The tool's own option words, built here from the constants that spell
@@ -66,19 +66,15 @@ RESERVED_OPTIONS = (
 # collection. Imported so that what a citation looks like, and what a pid
 # that is honestly dead is, each have one home rather than a copy in every
 # test that needs them.
-from test_claim import TAKEN, exited
+from test_claim import exited, written
 from test_docs import CITATION
-
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
-REPO = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
 def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A tree the CLI discovers the way an operator's would: cwd plus the
     environment override, both pointed at a copy of the fixture."""
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    copy_fixture(tmp_path)
     for state in load(tmp_path / "plan.toml").states.values():
         (tmp_path / state.path).mkdir(parents=True)
     monkeypatch.setenv("FILEPLAN_PLAN_TOML", str(tmp_path / "plan.toml"))
@@ -103,9 +99,9 @@ def test_every_declared_transition_registers_as_a_subcommand(
 def test_help_lists_transitions_in_toml_order_not_alphabetically(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`plan.toml` declares `transplant` before `sprout` on purpose: document
-    order is not alphabetical order, which is what makes this mean something.
-    The workflow's order is the sequence work moves through."""
+    """`plan.toml` declares `transplant` before `sprout`: document order is not
+    alphabetical order, which is what makes this mean something. The
+    workflow's order is the sequence work moves through."""
     main(["--help"])
     out = capsys.readouterr().out
     assert out.index("transplant") < out.index("sprout")
@@ -144,12 +140,10 @@ def test_a_moving_transition_takes_the_handle_and_no_body(
 def test_the_read_takes_three_filters_and_no_option_named_after_a_key(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The 13-3 cut, as the guard the old one was read the other way round.
-    `list` is not a declared transition — it moves nothing and takes no lock —
-    and its whole filter vocabulary is three words. A key is something `--has`
-    *names*, so no key's name is an option, and no key's name is written in
-    the CLI either way. `--sort` names a key the same way, and orders rather
-    than filters."""
+    """13-3: `list` is not a declared transition: it moves nothing and takes
+    no lock. A key is something `--has` *names*, so no key's name is an
+    option, and no key's name is written in the CLI either way. `--sort` names
+    a key the same way, and orders rather than filters."""
     assert main(["list", "--help"]) == 0
     out = capsys.readouterr().out
     assert "--state" in out and "--json" in out
@@ -157,6 +151,7 @@ def test_the_read_takes_three_filters_and_no_option_named_after_a_key(
     declared = load(tree / "plan.toml")
     options = re.findall(r"^\s+(--[a-z-]+)", out, re.MULTILINE)
     assert sorted(options) == [
+        "--fields",
         "--has",
         "--help",
         "--json",
@@ -172,7 +167,7 @@ def test_the_read_takes_three_filters_and_no_option_named_after_a_key(
 
 
 def places(capsys: pytest.CaptureFixture[str], verb: str) -> int:
-    """How many of the three order options ``verb`` carries."""
+    """How many of the order options ``verb`` carries."""
     capsys.readouterr()
     assert main([verb, "--help"]) == 0
     out = capsys.readouterr().out
@@ -204,10 +199,9 @@ def test_a_same_state_verb_that_only_places_carries_them_too(
 def test_a_same_state_verb_that_writes_something_else_carries_none(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """**The 13-3 cut.** Before it, every verb whose destination state was
-    ordered took all three, whether or not moving was what the verb was for —
-    so a verb that marks a bullet took three options about the item's place.
-    A cursor, a mint and a mark, each in `orchard`."""
+    """13-3: a verb whose destination state is ordered takes the order options
+    only when moving is what the verb is for. A cursor, a mint, and a mark,
+    each in `orchard`."""
     assert places(capsys, "graft-on") == 0
     assert places(capsys, "espalier") == 0
     assert places(capsys, "ripen") == 0
@@ -226,9 +220,9 @@ def test_a_transition_into_a_plain_state_carries_none_of_them(
 def test_a_verb_that_loses_an_option_says_so_rather_than_ignoring_it(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Why the cut can be derived rather than declared: a consumer whose verb
-    took `--at` yesterday gets click's own refusal at rc 2, not a run that
-    quietly places nothing: the polarity that fails loud."""
+    """Why the cut can be derived rather than declared: a consumer passing
+    `--at` to a verb that does not take it gets click's own refusal at rc 2,
+    not a run that quietly places nothing."""
     orchard(tree, "First tree")
     capsys.readouterr()
     assert main(["ripen", "first-tree", "1-1", "--at", "50"]) == 2
@@ -238,7 +232,7 @@ def test_a_verb_that_loses_an_option_says_so_rather_than_ignoring_it(
 def test_a_sets_key_colliding_with_a_placement_option_refuses_by_name(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The `--body` precedent, unchanged: one option cannot mean two things.
+    """As with `--body`, one option cannot mean two things.
     The declaration is otherwise well formed — the key is declared and its doc
     heading added — so this refusal is the only reason it could fail."""
     plan = (
@@ -255,6 +249,147 @@ def test_a_sets_key_colliding_with_a_placement_option_refuses_by_name(
     err = capsys.readouterr().err
     assert 'transitions.transplant.sets names "above"' in err
     assert "One option cannot mean two things" in err
+
+
+def body_refusal(tree: Path, **change: Any) -> str:
+    """What building `sprout`, the fixture's creating verb, refuses with once
+    `change` is made to it: built directly, because `plan.toml` cannot reach
+    a creating verb that names `body` (it is intrinsic, and only a
+    mark-bullet files)."""
+    declaration = load(tree / "plan.toml")
+    sprout = dataclasses.replace(declaration.transitions["sprout"], **change)
+    with pytest.raises(Refusal) as refusal:
+        cli._command(declaration, sprout)
+    return str(refusal.value)
+
+
+def test_a_creating_verb_whose_sets_names_body_refuses_by_name(tree: Path) -> None:
+    assert body_refusal(tree, sets=("cultivar", "body")) == (
+        'transitions.sprout.sets names "body", and a transition that creates '
+        "an item already takes --body for its prose. One option cannot mean "
+        "two things"
+    )
+
+
+def test_a_creating_verb_whose_files_sets_names_body_refuses_by_name(
+    tree: Path,
+) -> None:
+    """The collision check walks both lists a run takes options from, as
+    every other option builder's does."""
+    assert body_refusal(tree, files={"sets": ["body"]}) == (
+        'transitions.sprout.files.sets names "body", and a transition that '
+        "creates an item already takes --body for its prose. One option cannot "
+        "mean two things"
+    )
+
+
+@pytest.mark.parametrize(
+    ("builder", "verb", "change", "refused"),
+    [
+        (
+            cli._check_option,
+            "transplant",
+            {"sets": ("check",)},
+            (
+                'transitions.transplant.sets names "check", and every transition '
+                "already takes --check for what it would do without doing it."
+            ),
+        ),
+        (
+            cli._placement_options,
+            "transplant",
+            {"sets": ("at",)},
+            (
+                'transitions.transplant.sets names "at", and a transition into a '
+                "queued state already takes --at for where the item goes in the "
+                "order."
+            ),
+        ),
+        (
+            cli._minting_options,
+            "espalier",
+            {"sets": ("last",)},
+            (
+                'transitions.espalier.sets names "last", and a transition that '
+                "mints a sub-phase already takes --last for what it writes into "
+                "the body."
+            ),
+        ),
+        (
+            cli._filing_options,
+            "line-out",
+            {"sets": ("title",)},
+            (
+                'transitions.line-out.sets names "title", and a transition that '
+                "files an item already takes --title for what it writes into that "
+                "item."
+            ),
+        ),
+        (
+            cli._filing_options,
+            "line-out",
+            {"files": {"sets": ["body"]}},
+            (
+                'transitions.line-out.files.sets names "body", and a transition '
+                "that files an item already takes --body for what it writes into "
+                "that item."
+            ),
+        ),
+        (
+            cli._record_option,
+            "harvest",
+            {"sets": ("record",)},
+            (
+                'transitions.harvest.sets names "record", and a transition that '
+                "archives already takes --record for the entry's prose."
+            ),
+        ),
+        (
+            cli._note_option,
+            "pot-on",
+            {"sets": ("note",)},
+            (
+                'transitions.pot-on.sets names "note", and a transition that marks '
+                "a bullet already takes --note for why it was disposed of that way."
+            ),
+        ),
+        (
+            cli._fold_option,
+            "graft-together",
+            {"sets": ("into",)},
+            (
+                'transitions.graft-together.sets names "into", and a transition '
+                "that folds a bullet already takes --into for the bullet its prose "
+                "moves under."
+            ),
+        ),
+        (
+            cli._keep_claims_option,
+            "tend",
+            {"sets": ("keep-claims",)},
+            (
+                'transitions.tend.sets names "keep-claims", and a transition that '
+                "claims an item already takes --keep-claims to hold a second claim "
+                "on purpose."
+            ),
+        ),
+    ],
+)
+def test_each_option_builder_refuses_a_key_of_its_flag_s_name_in_its_own_words(
+    tree: Path,
+    builder: Callable[..., Any],
+    verb: str,
+    change: dict[str, Any],
+    refused: str,
+) -> None:
+    """The whole sentence each builder's collision refusal says, pinned so the
+    one check they share keeps every builder's own words. BODY's is pinned
+    by `body_refusal`'s tests."""
+    declaration = load(tree / "plan.toml")
+    transition = dataclasses.replace(declaration.transitions[verb], **change)
+    with pytest.raises(Refusal) as refusal:
+        builder(transition)
+    assert str(refusal.value) == f"{refused} One option cannot mean two things"
 
 
 def test_a_declared_transition_named_list_refuses_by_name(
@@ -307,7 +442,7 @@ def test_one_occurrence_writes_a_list_of_one(tree: Path) -> None:
 
 def test_the_option_not_given_writes_no_key_at_all(tree: Path) -> None:
     """Click hands back an empty tuple rather than `None` for an option that
-    repeats, so without the normalisation this would write `pest = []` — a key
+    repeats, so without the normalization this would write `pest = []` — a key
     the item does not carry, spelled as one it does."""
     assert "pest" not in pested(tree)
 
@@ -334,9 +469,8 @@ def test_the_help_says_the_option_repeats(
 def test_a_refused_entry_stops_the_next_verb_and_names_it(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """End to end, and the reason D4 is in this sub-phase: `harvest` refuses
-    canker, and before this a list-valued head matched nothing — the rule read
-    like it was running and never fired."""
+    """End to end: `harvest` refuses canker, so a list-valued head must match,
+    or the rule reads like it is running and never fires."""
     pested(tree, "aphid", "canker")
     capsys.readouterr()
     assert main(["harvest", "a-seedling"]) == 2
@@ -366,8 +500,8 @@ def filed(tree: Path) -> None:
 def test_a_word_in_a_title_finds_the_item_ignoring_case(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`--has title=review` is an exact match, so a session piped `list`
-    through grep. `~` is a substring, any case, over any text key."""
+    """`--has title=review` is an exact match. `~` is a substring, any case,
+    over any text key."""
     filed(tree)
     capsys.readouterr()
     assert main(["list", "--has", "title~ANOTHER", "--json"]) == 0
@@ -424,7 +558,7 @@ def test_a_hand_edited_value_its_key_does_not_declare_is_named(
 
 
 # --------------------------------------------------------------------------
-# `directory`: the `missing` and `orphaned` reports. See docs/reference.md#directory
+# `directory`: the `missing` and `orphaned` reports. See examples/docs/reference.md#directory
 # --------------------------------------------------------------------------
 
 
@@ -578,9 +712,7 @@ def test_text_and_json_are_two_renderings_of_one_traversal(
     """**The control.** The JSON rows are rendered through the *text*
     renderer and compared against what the text run actually printed. A second
     traversal beside the first would pass every other test in this file and
-    fail this one — which is exactly what happened in the old tool before its
-    § 9, when every listing interpolated its own text inside the loop that
-    found the data."""
+    fail this one."""
     filed(tree)
     capsys.readouterr()
 
@@ -640,8 +772,8 @@ def test_the_counts_line_goes_to_stderr_never_stdout(
 def test_stderr_is_silent_under_json(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Which is why the counts moved into the envelope: a consumer parses one
-    thing, and there is no second frame to strip."""
+    """The counts are in the envelope: a consumer parses one thing, and there
+    is no second frame to strip."""
     filed(tree)
     capsys.readouterr()
     assert main(["list", "--json"]) == 0
@@ -654,9 +786,8 @@ def test_stderr_is_silent_under_json(
 def test_a_refusal_emits_no_json(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """1-1's deferred assertion, assertable now that `--json` exists. A
-    consumer must never get a parseable document describing a run that did not
-    happen — rc 2, `ERROR:` on stderr, and stdout empty."""
+    """1-1: a consumer must never get a parseable document describing a run
+    that did not happen: rc 2, `ERROR:` on stderr, and stdout empty."""
     (tree / "plan.toml").write_text("[states.greenhouse]\npath = 3\n")
     assert main(["list", "--json"]) == 2
     captured = capsys.readouterr()
@@ -843,7 +974,11 @@ def unsorting(tree: Path) -> None:
     plan = (tree / "plan.toml").read_text()
     (tree / "plan.toml").write_text(
         re.sub(
-            r"(?ms)^\[transitions\.respace\].*?(?=^\[)",
+            r"""(?msx)
+            ^\[transitions\.respace\]   # the table's header
+            .*?                         # and everything after it
+            (?=^\[)                     # up to the next table
+            """,
             "",
             plan.replace(
                 'capabilities      = ["queued", "numbered", "bulleted"]',
@@ -884,8 +1019,8 @@ def test_a_declared_sort_orders_the_listing_and_a_sort_flag_replaces_it(
 def test_a_queued_item_with_no_place_is_named_in_the_default_read(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """It comes last, as it always did, and now the listing says so: the
-    declared sort reports a missing key the way `--sort` does."""
+    """It comes last, and the listing says so: the declared sort reports a
+    missing key the way `--sort` does."""
     orchard(tree, "Apple")
     orchard(tree, "Birch")
     path = tree / "orchard" / "apple.md"
@@ -902,7 +1037,7 @@ def test_a_queued_item_with_no_place_is_named_in_the_default_read(
 def test_an_offer_from_a_queued_state_comes_in_place_order(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`next VERB` reads through the same listing, so its offers follow the
+    """A verb's offers are a `list` filtered on `commands`, so they follow the
     declared sort too."""
     orchard(tree, "First tree")
     orchard(tree, "Second tree")
@@ -944,9 +1079,8 @@ def test_an_offer_takes_the_listings_sort(
     assert [row["slug"] for row in payload["rows"]] == ["cherry", "birch", "apple"]
 
 
-#: The corpus 14-2 measured the finding against: three seedlings carrying
-#: pests, one of them carrying a pest nobody asked about, and one carrying
-#: none at all.
+#: 14-2's corpus: seedlings carrying pests, one of them carrying a pest nobody
+#: asked about, and one carrying none at all.
 INFESTED = (
     ("One", ("aphid",)),
     ("Mixed", ("aphid", "canker")),
@@ -998,7 +1132,7 @@ def test_the_read_names_the_operator_in_its_own_help(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A word the read takes and does not spell is a word only somebody
-    reading `src/` finds, which is what section 14 is about."""
+    reading `src/` finds."""
     assert main(["list", "--help"]) == 0
     assert "pest:aphid,scab" in capsys.readouterr().out
 
@@ -1042,7 +1176,7 @@ def test_the_toc_indexes_the_kind_each_transition_declares(
 ) -> None:
     """6-3's read, and 30-2's kinds: a session composing several runs asks
     *which verb is which kind* once, rather than opening every contract in
-    turn (`docs/reference.md#the-interpreter`). Every transition has a kind, so
+    turn (`examples/docs/reference.md#the-interpreter`). Every transition has a kind, so
     every transition is in the block, its kind first and then the options it
     declares. Graded over the whole declaration — one verb would pass while
     the block quietly dropped the rest."""
@@ -1082,8 +1216,7 @@ def test_the_toc_index_and_the_contract_cannot_disagree(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """One kind and one `DECLARED` tuple off one `Transition`, rendered
-    twice — the
-    `list`-and-`show` relationship this tool already ships. A second home for
+    twice, as `list` and `show` are. A second home for
     what a verb declares could drift; two renderings of one fact cannot."""
     declaration = load(tree / "plan.toml")
     assert main([]) == 0
@@ -1114,7 +1247,7 @@ def test_the_declaration_renders_as_one_json_object(
     """14-3's done line: a consumer gets every verb's declared halves *and*
     its contract blocks in one invocation, rather than one `--help` run per
     verb and prose parsing. `Declares` alone is not always the answer, because
-    halves are shared — here `marks` is four verbs — and `Reading` is what
+    halves are shared — here `marks` is several verbs — and `Reading` is what
     tells them apart."""
     payload = declaration_json(capsys)
     declaration = load(tree / "plan.toml")
@@ -1132,8 +1265,8 @@ def test_the_declaration_renders_as_one_json_object(
     ]
 
 
-#: One option's line in a `--help` Options section. The spelling a consumer's
-#: lint gate scraped before the contract carried it.
+#: One option's line in a `--help` Options section: what a scrape of `--help`
+#: reads.
 HELP_OPTION = re.compile(r"^  (--[\w-]+)")
 
 
@@ -1151,9 +1284,9 @@ def test_every_option_help_prints_is_in_the_contract(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """26-1's drift guard: the contract replaces scraping `--help`, so it must
-    hold everything a scrape would find, for every transition, every one of
-    the tool's own commands and every `next X`. Both come off the same click
-    parameters, and this is what says so."""
+    hold everything a scrape would find, for every transition and every one
+    of the tool's own commands. Both come off the same click parameters, and
+    this is what says so."""
     payload = declaration_json(capsys)
     carried: dict[tuple[str, ...], list[dict]] = {
         (row["name"],): row["options"] for row in payload["rows"]
@@ -1255,8 +1388,8 @@ def test_a_required_option_not_given_refuses_at_the_command_line(
 def test_the_tools_own_commands_are_not_rows(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`commands` holds the tool's own words and no transition. Since 31-3
-    there is no `next`, so none of them nests another."""
+    """`commands` holds the tool's own words and no transition, and none of
+    them nests another."""
     payload = declaration_json(capsys)
     declaration = load(tree / "plan.toml")
     commands = {command["name"]: command for command in payload["commands"]}
@@ -1268,8 +1401,8 @@ def test_the_tools_own_commands_are_not_rows(
 def test_every_declared_key_is_in_the_contract(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A key's allowed values reached a reader only as a click choice in
-    `--help` before, and free text is `null` rather than absent."""
+    """A key's allowed values reach a reader here, not only as a click choice
+    in `--help`, and free text is `null` rather than absent."""
     keys = {key["name"]: key for key in declaration_json(capsys)["keys"]}
     declared = load(tree / "plan.toml").keys
     assert list(keys) == list(declared)
@@ -1298,8 +1431,8 @@ def contract_json(name: str, capsys: pytest.CaptureFixture[str]) -> dict:
 def test_a_moving_verb_carries_every_block_the_contract_has(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`transplant` is the one verb declaring all four of `requires`,
-    `refuses`, `sets` and `drops`."""
+    """`transplant` is the one verb declaring each of `requires`,
+    `refuses`, `sets`, and `drops`."""
     row = contract_json("transplant", capsys)
     assert row["from"] == "greenhouse" and row["to"] == "orchard"
     assert row["requires"] == ["cultivar"]
@@ -1338,8 +1471,8 @@ def test_a_verb_declaring_nothing_carries_the_empty_keys_anyway(
 ) -> None:
     """Present-always, which is the listing's corpus-independence rule one
     level up: the shape a consumer writes against must not depend on which
-    verbs a declaration happens to declare. The text form goes on omitting an
-    empty block, because a person reading help wants the blocks that say
+    verbs a declaration happens to declare. The text form omits an empty
+    block, because a person reading help wants the blocks that say
     something. `Declares` is never empty, because every verb has a kind."""
     row = contract_json("bed-out", capsys)
     assert row["declares"] == []
@@ -1351,8 +1484,8 @@ def test_a_verb_declaring_nothing_carries_the_empty_keys_anyway(
 def test_the_reading_block_answers_the_shared_half_question(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The finding this sub-phase answers: two verbs declare `claims`, so the
-    half alone does not say which to run. `Reading` is what disambiguates, and
+    """More than one verb declares `claims`, so the half alone does not say
+    which to run. `Reading` is what disambiguates, and
     it is in the same read."""
     rows = declaration_json(capsys)["rows"]
     claiming = {
@@ -1540,6 +1673,28 @@ def test_a_value_outside_a_keys_values_refuses_through_click_choice(
     assert list((tree / "greenhouse").iterdir()) == []
 
 
+def test_an_entry_holding_a_comma_refuses_naming_it_and_the_option(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Refused, never split: `--has 'KEY:a,b'` reads a comma as a separator,
+    so the entry could never be matched. `--check` says the same."""
+    for check in ([], ["--check"]):
+        invocation = ["sprout", "A seedling", "--body", "P.", "--replaces", "a,b"]
+        assert main([*invocation, *check]) == 2
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err.startswith("ERROR: ")
+        assert 'the entry "a,b" holds a comma' in captured.err
+        assert "Repeat --replaces once per entry instead" in captured.err
+        assert list((tree / "greenhouse").iterdir()) == []
+
+    # `replaces` is a reference, so each entry must name a filed item.
+    for title in ("A", "B"):
+        assert main(["sprout", title, "--body", "P."]) == 0
+    invocation = ["sprout", "A seedling", "--body", "P."]
+    assert main([*invocation, "--replaces", "a", "--replaces", "b"]) == 0
+
+
 def test_a_failed_precondition_refuses_by_name_with_rc_2(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1569,8 +1724,7 @@ def test_a_malformed_plan_toml_refuses_at_a_subcommand_and_writes_nothing(
 def test_a_refusal_is_one_error_line_then_one_line_per_defect(tree: Path) -> None:
     """The operator's contract, through the real console script: rc 2, one
     `ERROR:` line on stderr, nothing on stdout, no traceback. Section 23: each
-    further defect goes on an indented line of its own, where four used to
-    share one line joined by semicolons."""
+    further defect goes on an indented line of its own."""
     (tree / "plan.toml").write_text(
         "".join(f"[states.s{n}]\npath = {n}\n" for n in range(4))
     )
@@ -1596,7 +1750,7 @@ def test_a_refusal_is_one_error_line_then_one_line_per_defect(tree: Path) -> Non
 #
 # A consumer's commit hook runs fileplan on a temporary copy, from a cwd outside it.
 # Each run below does the same, so a path relative to the cwd would carry the
-# copy's whole prefix. See docs/reference.md#the-listing
+# copy's whole prefix. See examples/docs/reference.md#the-listing
 
 
 def from_outside(tree: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -1687,9 +1841,8 @@ def orchard(tree: Path, title: str, *placement: str) -> None:
 def test_the_count_of_sub_phases_reaches_both_renderings(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The whole sub-phase, end to end: a body with three strict bullets under
-    the declared heading reads as three, in the record and in the document,
-    from one traversal."""
+    """End to end: the strict bullets under the declared heading are counted
+    alike in the record and in the document, from one traversal."""
     orchard(tree, "First tree")
     path = tree / "orchard" / "first-tree.md"
     path.write_text(
@@ -1812,7 +1965,7 @@ def test_a_cursor_naming_a_sub_phase_the_body_carries_is_written(
 def test_a_cursor_survives_a_bullet_inserted_above_the_one_it_names(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The reason for the whole sub-phase, end to end. Under ordinals this
+    """Why a cursor names its step, end to end. Under ordinals this
     insert would leave the head pointing at the bullet *above* the work — a
     wrong state nothing would report. Under names the cursor still grades, and
     still names the same step."""
@@ -1938,9 +2091,9 @@ def test_the_count_left_is_a_filter_of_its_own(
 def test_a_stale_cursor_is_visible_in_the_default_read(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The polarity this whole field exists for. A cursor left on a finished
-    step while later ones shipped used to read as ordinary progress; now the
-    listing says which step is next and the answer is one already behind."""
+    """The polarity this field exists for. A cursor left on a finished step
+    while later ones shipped would read as ordinary progress; the listing
+    says which step is next, and the answer is one already behind."""
     named(tree, "graft-1", "graft-2", "graft-3")
     assert main(["graft-on", "first-tree", "--graft", "graft-1"]) == 0
     assert main(["ripen", "first-tree", "graft-1"]) == 0
@@ -2171,8 +2324,8 @@ def test_the_record_shows_the_place_under_the_slug(
     assert main(["list", "--state", "orchard"]) == 0
     out = capsys.readouterr().out
     assert "first-tree" in out
-    # The labels are padded to the widest field the listing carries, which is
-    # now `sub-phases` rather than `position`.
+    # The labels are padded to the widest field the listing carries,
+    # `sub-phases`.
     assert "  position         100" in out
 
 
@@ -2194,10 +2347,9 @@ def test_the_place_filter_compares_as_a_number(
 # Dependencies: what an item waits on, and the edge that names nothing
 # --------------------------------------------------------------------------
 #
-# The re-pin the old tool got wrong is `test_an_edge_naming_no_filed_item_...`
-# below: `_plan_dir.unmet_after` kept only the slugs that were present, so a
-# **typo'd** one was never present either and read as a satisfied dependency,
-# silently. Here the complement is a line in the default read.
+# The pin that matters is `test_an_edge_naming_no_filed_item_...` below: a
+# **typo'd** slug must not read as a satisfied dependency, silently. It is a
+# line in the default read.
 #
 # No verb in the fixture writes `after`, and none should — an edge is prose a
 # person writes, and section 5's archiver is what edits one mechanically. So
@@ -2292,11 +2444,10 @@ def test_a_run_handed_an_edge_naming_nothing_refuses_and_writes_nothing(
 def test_an_edge_naming_no_filed_item_is_named_rather_than_read_as_satisfied(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """**The re-pin**, and the test whose absence was the old tool's bug.
-    Absence used to mean satisfied, so a typo was invisible; now it means
-    unknown, and unknown is named in the default read. It is deliberately not
-    in `blocked-by`: "waiting on X" and "X does not exist" are different
-    facts."""
+    """**The pin.** An edge naming no filed item means unknown, not
+    satisfied, and unknown is named in the default read, so a typo is
+    visible. It is not in `blocked-by`: "waiting on X" and "X does not exist"
+    are different facts."""
     orchard(tree, "First tree")
     waits(tree, "first-tree", "no-such-tree")
     capsys.readouterr()
@@ -2378,9 +2529,8 @@ def test_a_referent_is_found_by_its_inverse(
 def test_the_listing_s_order_is_unchanged_by_any_edge(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Two keys, two jobs. The old tool ran Kahn's walk over `after` and
-    reordered; here an edge naming an item later in the queue is *named*, and
-    the queue is exactly as `position` left it."""
+    """Two keys, two jobs: an edge naming an item later in the queue is
+    *named*, not reordered, and the queue is exactly as `position` left it."""
     orchard(tree, "First tree")
     orchard(tree, "Second tree", "--at", "200")
     before = [row["slug"] for row in rows(capsys)]
@@ -2398,8 +2548,8 @@ def test_the_listing_s_order_is_unchanged_by_any_edge(
 def test_both_reports_reach_both_renderings(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """One traversal, two renderings — and four exception reports that stay
-    four arrays rather than one merged list, because the envelope key is how a
+    """One traversal, two renderings — and the exception reports stay separate
+    arrays rather than one merged list, because the envelope key is how a
     consumer selects the one it cares about."""
     orchard(tree, "First tree")
     orchard(tree, "Second tree", "--at", "200")
@@ -2439,7 +2589,7 @@ def test_no_filter_narrows_either_dependency_report(
 def test_the_blocked_by_filter_narrows_and_has_lacks_reach_it(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """One `--<field>` per row field, the `--position` rule a fourth time.
+    """One `--<field>` per row field, the `--position` rule again.
     `--lacks blocked-by` is the work nothing filed is in the way of."""
     orchard(tree, "First tree")
     orchard(tree, "Second tree", "--at", "200")
@@ -2461,7 +2611,7 @@ def test_a_declaration_with_no_dependencies_carries_neither_field_nor_filter(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Generated by the state's opt-in, so where nothing names a key there is
-    no field, no filter and no report — the `--position` rule's other half."""
+    no field, no filter, and no report — the `--position` rule's other half."""
     source = tree / "plan.toml"
     source.write_text(source.read_text().replace('dependencies      = "after"', ""))
     orchard(tree, "First tree")
@@ -2594,7 +2744,7 @@ def test_a_second_commit_moves_it_and_nothing_is_rewritten(
 def test_the_stale_days_filter_narrows_and_has_lacks_reach_it(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """One `--<field>` per row field, the `--position` rule a fifth time — and
+    """One `--<field>` per row field, the `--position` rule again — and
     it compares as a **number**, so `>=9` keeps 30 and drops 3."""
     hardened(tree, "First tree")
     hardened(tree, "Second tree")
@@ -2712,7 +2862,7 @@ def gapped(tree: Path) -> None:
 
 
 def unread(tree: Path) -> None:
-    """A `##` in the archive the register cannot read — the old tool's own."""
+    """A `##` in the archive the register cannot read."""
     path = tree / "orchard-archive.md"
     path.write_text(path.read_text() + "\n## Section 168: Something\n")
 
@@ -2720,8 +2870,8 @@ def unread(tree: Path) -> None:
 def test_both_register_reports_reach_both_renderings(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Done line 2, end to end. Seven exception reports now, still seven
-    arrays rather than one merged list of notices: a gap is a *number* and a
+    """Done line 2, end to end. The exception reports stay separate arrays
+    rather than one merged list of notices: a gap is a *number* and a
     lost close-out is a *document line*, and the envelope key is how a
     consumer selects the one it cares about."""
     gapped(tree)
@@ -2756,10 +2906,9 @@ def test_both_register_reports_reach_both_renderings(
 def test_the_read_reports_the_gap_the_mint_still_refuses_on(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The two polarities in one test, which is the point of the sub-phase.
-    The listing **reports** — rc 0, so a session that has to fix the register
-    can still read the tree — and the writer **refuses**, on the same
-    arithmetic, before minting on top of it."""
+    """The two polarities in one test. The listing **reports** — rc 0, so a
+    session that has to fix the register can still read the tree — and the
+    writer **refuses**, on the same arithmetic, before minting on top of it."""
     gapped(tree)
     capsys.readouterr()
 
@@ -2794,8 +2943,8 @@ def test_no_filter_narrows_either_register_report(
 def test_an_offer_carries_the_register_reports_too(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """An offer narrows *rows* and narrows no report, so `next <verb>` says
-    the register is short exactly as `list` does."""
+    """An offer narrows *rows* and narrows no report, so it says the register
+    is short exactly as an unfiltered `list` does."""
     gapped(tree)
     unread(tree)
     capsys.readouterr()
@@ -2827,10 +2976,10 @@ def test_a_clean_register_carries_both_arrays_empty(
 def test_the_register_reaches_both_renderings(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The register itself, on a corpus with nothing wrong. It is the JSON's,
-    and since 33-1 the text says nothing about a register that is whole: a
-    gap or a lost close-out is still a line, and "floor" is a word a
-    newcomer never has to meet."""
+    """33-1: the register itself, on a corpus with nothing wrong. It is the
+    JSON's, and the text says nothing about a register that is whole: a gap
+    or a lost close-out is still a line, and "floor" is a word a newcomer
+    never has to meet."""
     orchard(tree, "First tree")
     capsys.readouterr()
 
@@ -2853,10 +3002,10 @@ def test_the_register_reaches_both_renderings(
 def test_a_consumer_answers_is_n_a_section_from_the_envelope_alone(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The question the sub-phase exists for, asked the way a commit gate
-    asks it. The archive holds 1, the trees minted 2 and 3, and the one
-    holding 2 was deleted by hand. One `list --json` answers all four cases,
-    with no second invocation and no parse of the archive."""
+    """The register's question, asked the way a commit gate asks it. The
+    archive holds 1, the trees minted 2 and 3, and the one holding 2 was
+    deleted by hand. One `list --json` answers every case, with no second
+    invocation and no parse of the archive."""
     gapped(tree)
     capsys.readouterr()
 
@@ -2880,18 +3029,18 @@ def unnumbered(tree: Path) -> None:
 
     `unclaimed`'s shape, and every half goes together because each alone
     refuses at load: the state's opt-in, the `archive` only a register reads,
-    the `archives = true` on the two verbs that file an entry, and `bulleted`
-    with the two fields that only a state which mints bullets may carry.
+    the `archives = true` on the verbs that file an entry, and `bulleted`
+    with the fields that only a state which mints bullets may carry.
     `orchard`'s name form goes with them because it names `{number}`, which is
-    a key an unnumbered state does not give, and its two dispositions lose
-    their `marks` for the same reason the mint goes — a word written onto a
-    bullet needs a state that has bullets, so `bulleted` cannot come off
-    alone. The verbs themselves stay, as the kinds left to them: `ripen`
-    keeps its drop and becomes an edit, and the three that write nothing else
-    become reorders, `jot` among them, since text under a bullet needs one.
-    `graft-together` becomes a reorder too, and loses `merges` with its
-    `marks`, since a fold is a rider on a mark. `propagator` is left exactly as it is, and that is the
-    point: it is bulleted, it is not numbered, and it goes on minting here.
+    a key an unnumbered state does not give, and its dispositions lose their
+    `marks` for the same reason the mint goes — a word written onto a bullet
+    needs a state that has bullets, so `bulleted` cannot come off alone. The
+    verbs themselves stay, as the kinds left to them: `ripen` keeps its drop
+    and becomes an edit, and those that write nothing else become reorders,
+    `jot` among them, since text under a bullet needs one. `graft-together`
+    becomes a reorder too, and loses `merges` with its `marks`, since a fold
+    is a rider on a mark. `propagator` is left exactly as it is, and that is
+    the point: it is bulleted, it is not numbered, and it still mints here.
     """
     plan = (tree / "plan.toml").read_text()
     (tree / "plan.toml").write_text(
@@ -2954,7 +3103,7 @@ def test_a_declaration_with_no_numbered_state_carries_no_register(
 ) -> None:
     """Absent rather than an empty array, which is the rule `gaps` and `lost`
     keep one key over. One rule for the whole envelope beats a third rule
-    inside it, and a consumer gating on the key gates once for all three."""
+    inside it, and a consumer gating on the key gates once for all of them."""
     unnumbered(tree)
     orchard(tree, "First tree")
     capsys.readouterr()
@@ -2969,9 +3118,9 @@ def test_a_declaration_with_no_numbered_state_carries_no_register(
 def test_a_number_is_not_a_handle(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Settled, and not reopened by 4-5: an item is named by its
-    slug and by nothing else. A number that resolved would be a second answer
-    to "which item is this", and the two can disagree."""
+    """4-5: an item is named by its slug and by nothing else. A number that
+    resolved would be a second answer to "which item is this", and the two can
+    disagree."""
     orchard(tree, "First tree")
     capsys.readouterr()
     assert main(["graft-on", "2"]) == 2
@@ -3055,7 +3204,9 @@ def test_show_refuses_a_sub_phase_by_number_it_cannot_read(
 @pytest.mark.parametrize(
     "argv, said",
     [
-        pytest.param(["list", "orchard"], "did you mean --state orchard?", id="state"),
+        pytest.param(
+            ["list", "apple", "orchard"], "did you mean --state orchard?", id="state"
+        ),
         pytest.param(
             ["ripen"],
             "fileplan list --has commands=ripen lists what it can take",
@@ -3072,8 +3223,7 @@ def test_show_refuses_a_sub_phase_by_number_it_cannot_read(
 def test_a_usage_error_points_at_the_documented_way_through(
     tree: Path, capsys: pytest.CaptureFixture[str], argv: list[str], said: str
 ) -> None:
-    """Click's own refusal stays, and the line after it says where to go. A
-    consumer's sessions hit `list plan` forty-odd times."""
+    """Click's own refusal stays, and the line after it says where to go."""
     capsys.readouterr()
     assert main(argv) == 2
     err = capsys.readouterr().err
@@ -3086,14 +3236,196 @@ def test_an_extra_argument_naming_no_state_gets_only_clicks_refusal(
 ) -> None:
     """The pointer is a fact about the declaration, so it is never a guess."""
     capsys.readouterr()
-    assert main(["list", "226"]) == 2
+    assert main(["list", "apple", "226"]) == 2
     assert capsys.readouterr().err.strip().endswith("(226)")
+
+
+# --------------------------------------------------------------------------
+# `list WORD`: a search over the title and the body
+# --------------------------------------------------------------------------
+
+
+def planted(tree: Path, title: str, body: str, *, into: str = "orchard") -> None:
+    """A seedling with `body`, sprouted, then moved on `into` a later state."""
+    assert main(["sprout", title, "--body", body, "--cultivar", "heirloom"]) == 0
+    slug = title.lower().replace(" ", "-")
+    if into in ("orchard", "firewood"):
+        assert main(["transplant", slug]) == 0
+    if into == "firewood":
+        assert main(["grub-out", slug]) == 0
+
+
+def pear_orchard(tree: Path) -> None:
+    """Three trees filed in this order, so their places run apple, birch,
+    pear: two hold "pear" in the body alone, and one in the title."""
+    planted(tree, "Apple", "Grafted onto a Pear rootstock.")
+    planted(tree, "Birch", "Planted beside the pear.")
+    planted(tree, "Pear", "Prose.")
+    planted(tree, "Cherry", "Prose.")
+
+
+def test_a_word_lists_an_item_whose_body_alone_holds_it(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """In the text form and in `--json`, and the row is the listing's own:
+    the walk is still the whole tree."""
+    planted(tree, "Apple", "Grafted onto a pear.")
+    planted(tree, "Cherry", "Prose.")
+    capsys.readouterr()
+    assert main(["list", "PEAR"]) == 0
+    out, err = capsys.readouterr()
+    assert "apple" in out and "cherry" not in out
+    assert "showing 1 of 2 items" in err
+    payload = sorted_listing(capsys, "pear")
+    assert [row["slug"] for row in payload["rows"]] == ["apple"]
+    assert (payload["matched"], payload["read"]) == (1, 2)
+    assert main(["show", "apple", "--json"]) == 0
+    shown = json.loads(capsys.readouterr().out)["rows"]
+    assert payload["rows"] == shown
+
+
+def test_a_title_hit_lists_before_a_body_hit_under_any_sort(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`orchard` sorts by position, and `--sort -title` replaces it: either
+    way the title hit leads, and the body hits keep that sort's order."""
+    pear_orchard(tree)
+    capsys.readouterr()
+    rows = sorted_listing(capsys, "pear")["rows"]
+    assert [row["slug"] for row in rows] == ["pear", "apple", "birch"]
+    rows = sorted_listing(capsys, "pear", "--sort", "-title")["rows"]
+    assert [row["slug"] for row in rows] == ["pear", "birch", "apple"]
+
+
+def test_a_word_narrows_with_the_other_filters(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pear_orchard(tree)
+    planted(tree, "Quince", "Grown from a pear cutting.", into="greenhouse")
+    capsys.readouterr()
+    slugs = [row["slug"] for row in rows(capsys, "pear", "--state", "greenhouse")]
+    assert slugs == ["quince"]
+    slugs = [row["slug"] for row in rows(capsys, "pear", "--has", "title~ch")]
+    assert slugs == ["birch"]
+
+
+def test_a_word_counts_a_hit_in_an_unlisted_state_and_the_state_lists_it(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A word is not a `--state`, so the hiding stays on and says what it
+    took."""
+    planted(tree, "Old tree", "It bore a pear once.", into="firewood")
+    planted(tree, "Cherry", "Prose.")
+    slugs, err = listed_slugs(capsys, "pear")
+    assert slugs == []
+    assert "not listed: firewood (1). --state firewood lists them" in err
+    assert main(["list", "pear", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["unlisted"] == [
+        {"state": "firewood", "count": 1}
+    ]
+    slugs, err = listed_slugs(capsys, "pear", "--state", "firewood")
+    assert slugs == ["old-tree"]
+    assert "not listed" not in err
+
+
+def test_the_help_names_the_word_and_show_takes_none(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["list", "--help"]) == 0
+    out = capsys.readouterr().out
+    assert "Usage: fileplan list [OPTIONS] [WORD]" in out
+    assert "title or body holds it" in out
+    assert main(["show", "--help"]) == 0
+    assert "WORD" not in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# `list --fields`: the keys named, one row a line
+# --------------------------------------------------------------------------
+
+
+def test_the_fields_print_one_line_a_row_under_a_header(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No item here carries a rootstock, so every cell under it is `-`; the
+    frame stays on stderr."""
+    pear_orchard(tree)
+    capsys.readouterr()
+    assert (
+        main(
+            ["list", "--state", "orchard", "--fields", "slug", "--fields", "rootstock"]
+        )
+        == 0
+    )
+    out, err = capsys.readouterr()
+    assert out.splitlines() == [
+        "slug    rootstock",
+        "apple   -",
+        "birch   -",
+        "pear    -",
+        "cherry  -",
+    ]
+    assert "showing 4 of 4 items" in err
+
+
+def test_the_fields_narrow_each_json_row_and_leave_the_envelope_alone(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pear_orchard(tree)
+    capsys.readouterr()
+    narrowed = sorted_listing(capsys, "--fields", "title", "--fields", "slug")
+    whole = sorted_listing(capsys)
+    assert {tuple(row) for row in narrowed["rows"]} == {("title", "slug")}
+    assert list(narrowed) == list(whole)
+    assert narrowed["matched"] == whole["matched"]
+
+
+def test_the_fields_come_after_every_filter_and_sort(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--sort -title` orders by a key the projection leaves out, and the
+    title hit still leads."""
+    pear_orchard(tree)
+    planted(tree, "Quince", "Grown from a pear cutting.", into="greenhouse")
+    capsys.readouterr()
+    given = ["pear", "--state", "orchard", "--sort", "-title", "--fields", "slug"]
+    assert main(["list", *given]) == 0
+    assert capsys.readouterr().out.splitlines() == ["slug", "pear", "birch", "apple"]
+    assert sorted_listing(capsys, *given)["rows"] == [
+        {"slug": "pear"},
+        {"slug": "birch"},
+        {"slug": "apple"},
+    ]
+
+
+def test_a_field_naming_no_key_refuses_by_name(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["list", "--fields", "rootstok"]) == 2
+    out, err = capsys.readouterr()
+    assert out == "" and "--fields" in err and "rootstok" in err
+
+
+def test_a_field_named_twice_refuses(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["list", "--fields", "slug", "--fields", "slug"]) == 2
+    out, err = capsys.readouterr()
+    assert out == "" and "--fields names slug 2 times" in err
+
+
+def test_show_takes_no_fields(tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Its record already holds every key."""
+    planted(tree, "Apple", "Prose.")
+    capsys.readouterr()
+    assert main(["show", "apple", "--fields", "slug"]) == 2
 
 
 def test_a_repeated_state_filter_refuses_by_name(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Click kept the last `--state` and dropped the first, silently."""
+    """Left to click, the last `--state` would win and the first would drop,
+    silently."""
     capsys.readouterr()
     assert main(["list", "--state", "orchard", "--state", "greenhouse"]) == 2
     err = capsys.readouterr().err
@@ -3103,10 +3435,9 @@ def test_a_repeated_state_filter_refuses_by_name(
 def test_an_in_place_verb_leaves_the_order_alone(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """4-4's defect, end to end. `graft-on` is an in-place verb into the
-    ordered state, and it is about the cursor — so a run of it must not move
-    the item. Before the rule it appended past the last row, which is an order
-    somebody set deliberately being destroyed by a verb about something
+    """4-4, end to end. `graft-on` is an in-place verb into the ordered
+    state, and it is about the cursor, so a run of it must not move the item:
+    that would destroy an order somebody set, by a verb about something
     else."""
     orchard(tree, "First tree")
     orchard(tree, "Second tree")
@@ -3127,11 +3458,11 @@ def test_an_in_place_verb_leaves_the_order_alone(
 def test_an_in_place_verb_still_places_when_asked(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Staying put is the default, not a refusal to move: the three placement
+    """Staying put is the default, not a refusal to move: the placement
     options are what `--at`-as-respacing-tool depends on, and they are
-    untouched. Asked of `respace`, which is the same-state verb that places
-    and does nothing else — 13-3 took the options off the same-state verbs
-    that write something instead."""
+    untouched. Asked of `respace`, the same-state verb that places and does
+    nothing else; a same-state verb that writes something takes no placement
+    options (13-3)."""
     orchard(tree, "First tree")
     orchard(tree, "Second tree")
     capsys.readouterr()
@@ -3254,19 +3585,14 @@ def benched(tree: Path, title: str = "A seedling") -> str:
 
 
 def sibling(tree: Path, slug: str, *, pid: int, host: str | None = None) -> Path:
-    path = claim.path(tree, slug)
-    claim.write(
-        path, {"host": host or socket.gethostname(), "pid": pid, "taken": TAKEN}
-    )
-    return path
+    return written(tree, slug, host=host or socket.gethostname(), pid=pid)
 
 
 def test_release_registers_only_where_a_state_claims_something(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The `--position` precedent: a capability generates what it needs and
-    nothing else. This repo's own declaration has no claimed state, and its
-    `--help` carries no `release` either."""
+    nothing else."""
     assert main(["--help"]) == 0
     assert "release" in capsys.readouterr().out
 
@@ -3298,7 +3624,8 @@ def test_a_transition_takes_no_option_for_a_claim(
 ) -> None:
     """A claim takes no argument: who holds it and since when are read, not
     typed. `bench` moves into the claimed state and carries nothing for it —
-    unlike a transition into the ordered state, which carries three."""
+    unlike a transition into the ordered state, which carries the placement
+    options."""
     assert main(["bench", "--help"]) == 0
     out = capsys.readouterr().out
     assert "ITEM" in out
@@ -3422,7 +3749,7 @@ def test_a_second_session_cannot_pick_up_a_claimed_item(
 def test_taking_a_claim_with_no_pid_set_refuses_by_name_end_to_end(
     tree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The operator's contract on the refusal that decision 2 added: rc 2, one
+    """The operator's contract on decision 2's refusal: rc 2, one
     `ERROR:` line, nothing on stdout, and the names to export. It is the
     *claiming* verb that needs a pid — `bench` moves in and takes nothing, so
     it runs without one, and `tend` is where the refusal lives."""
@@ -3452,8 +3779,8 @@ def test_the_claims_filters_register_only_where_a_state_claims(
 ) -> None:
     """The `--position` precedent, over fields read from outside the item
     file: given by the capability, and absent from the `--has` roster entirely
-    where no state opts in. Since 13-3 the roster is where a key is offered —
-    there is no option named after one — so this is the same control read one
+    where no state opts in. The roster is where a key is offered (13-3):
+    there is no option named after one, so this is the same control read one
     surface over."""
     assert main(["list", "--help"]) == 0
     out = capsys.readouterr().out
@@ -3485,9 +3812,8 @@ def test_a_second_session_is_not_offered_claimed_work(
     tree: Path, session: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """**Section 2's done line**, end to end: with one item claimed, the pick
-    read does not offer it. Until section 3 spells that read as `next`, it is
-    `--lacks claimed-by` — and `--claim-status dead` is the other half, what
-    needs releasing."""
+    read, `--lacks claimed-by`, does not offer it. `--claim-status dead` is
+    the other half, what needs releasing."""
     # The free one first: bedding it out drops its claim, so the second
     # `tend` is not a second claim held by one session.
     free = benched(tree, "Another seedling")
@@ -3507,16 +3833,14 @@ def test_a_second_session_is_not_offered_claimed_work(
 def test_arriving_in_a_claimed_state_leaves_the_item_on_offer(
     tree: Path, session: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """**4-4's reason for existing**, in the fixture's vocabulary: `bench`
-    moves an item into the claimed state and claims nothing, so the pick read
-    still offers it.
+    """**4-4**, in the fixture's vocabulary: `bench` moves an item into the
+    claimed state and claims nothing, so the pick read still offers it.
 
-    This repo's `queue` is the same shape — it commits an idea to `plan`,
-    which claims. Under claim-on-entry every freshly-queued item would have
-    been stamped in the queueing session's name and never released, which is
-    what forced the claim onto the verb. Pinned here rather than against this
-    repo's own declaration, for the reason the whole suite runs on the
-    fixture."""
+    This repo's `queue` is the same shape: it commits an idea to `plan`,
+    which claims. Were the claim taken on entry, every freshly queued item
+    would carry the queueing session's name and never be released, so the
+    claim is on the verb. Pinned here rather than against this repo's own
+    declaration, for the reason the whole suite runs on the fixture."""
     assert main(["sprout", "A seedling", "--body", "Prose."]) == 0
     assert main(["bench", "a-seedling"]) == 0
     capsys.readouterr()
@@ -3536,8 +3860,8 @@ def test_two_sessions_divide_the_work_and_neither_item_moves(
     """**4-4's done line**, end to end: two sessions' pick reads return
     disjoint items, the second's attempt on a held one refuses naming the
     holder, `release` frees it — and nothing ever left the state it was
-    claimed in. The claim is on the item where it stands, which is the whole
-    point of moving it off arrival."""
+    claimed in. The claim is on the item where it stands, not on its
+    arrival."""
     for title in ("A seedling", "Another seedling"):
         assert main(["sprout", title, "--body", "Prose."]) == 0
         assert main(["bench", title.lower().replace(" ", "-")]) == 0
@@ -3776,7 +4100,7 @@ def test_this_sessions_claims_are_exactly_its_own_and_a_pid_prefix_is_not(
 def test_the_unclaimed_work_lacks_a_claim_holder(
     tree: Path, session: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The key is `null` where nothing claims, like the other two claim fields,
+    """The key is `null` where nothing claims, like the other claim fields,
     so `--lacks` reads as "nobody holds it"."""
     free = benched(tree, "Another seedling")
     assert main(["bed-out", free]) == 0
@@ -3792,8 +4116,8 @@ def test_the_unclaimed_work_lacks_a_claim_holder(
 def test_an_offer_narrows_to_this_sessions_claims(
     tree: Path, session: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`next` takes the listing's filters, so the key reaches an offer with no
-    option of its own. A sibling's claim is never offered anyway, so what the
+    """An offer is a `list`, so the key reaches it with no option of its
+    own. A sibling's claim is never offered anyway, so what the
     filter removes is the unclaimed work on the bench."""
     assert main(["sprout", "Free", "--body", "Prose.", "--cultivar", "heirloom"]) == 0
     assert main(["bench", "free"]) == 0
@@ -3848,12 +4172,10 @@ def test_a_malformed_claim_record_refuses_the_listing_with_no_json(
 def test_this_repo_claims_its_own_work_so_its_listing_carries_the_holder(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """**Supersedes `…_declares_no_claimed_state_so_its_listing_is_unchanged`**,
-    which asserted the opposite through 2-2, 4-2 and 4-3. 4-4 is where this
-    repo adopts the capability, so its own listing gains the two fields and
-    the `stranded` report — the fields are still generated by the capability
-    rather than by the tool, and this is the same proof read the other way
-    round. The behavioural half stays graded against `tests/fixtures/`.
+    """4-4: this repo's declaration adopts the claimed capability, so its own
+    listing carries the claim fields and the `stranded` report. The fields
+    are still generated by the capability rather than by the tool. The
+    behavioral half stays graded against `tests/fixtures/`.
 
     The adoption is read off the declaration, not off the rows, so a tree
     with nothing in `plan` still grades it rather than skipping: a clone of
@@ -3915,7 +4237,7 @@ def test_an_archiving_verb_files_its_entry_and_says_so(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The whole run, from the command line: the item moves, the entry lands
-    under the number it carried, the path is on stdout and the notice — what
+    under the number it carried, the path is on stdout, and the notice — what
     was minted, and that a record goes under it — is on stderr where a pipe
     does not carry it."""
     orchard(tree, "First tree")
@@ -3984,7 +4306,7 @@ def test_a_claim_another_session_holds_refuses_and_touches_neither_file(
 ) -> None:
     """ "This is not yours" is prior to everything else, and it is answered
     before the archive is so much as read: rc 2, one `ERROR:` line, nothing on
-    stdout, the item where it was and the archive byte for byte."""
+    stdout, the item where it was, and the archive byte for byte."""
     claimable(tree)
     orchard(tree, "First tree")
     assert main(["pick", "first-tree"]) == 0
@@ -4022,8 +4344,8 @@ def test_a_moving_verb_given_a_record_files_it_under_the_heading(
 def test_a_moving_verb_given_no_record_files_the_heading_as_it_always_did(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """**Byte for byte.** The option is new and optional, so a run without it
-    writes exactly the archive it wrote before the option existed."""
+    """**Byte for byte.** The option is optional, so a run without it writes
+    exactly the archive it would write if the option did not exist."""
     orchard(tree, "First tree")
     document = archived(tree)
     capsys.readouterr()
@@ -4036,8 +4358,8 @@ def test_a_moving_verb_given_no_record_files_the_heading_as_it_always_did(
 def test_an_archiving_move_whose_sets_names_record_refuses_by_name(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A close takes no `sets`, so the collision could not happen before a
-    move took `--record`. Now it can, and one option cannot mean two things."""
+    """An archiving move takes `--record`, so a `sets` key named `record`
+    collides with it, and one option cannot mean two things."""
     plan = (
         (tree / "plan.toml")
         .read_text()
@@ -4139,7 +4461,7 @@ def test_a_mint_over_a_directory_holding_one_and_two_mints_three(
 def test_one_corpus_as_a_file_and_as_a_directory_lists_the_same_register(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """**The parity.** One corpus — a live tree at 2, closed 1, 3 and 5, so a
+    """**The parity.** One corpus — a live tree at 2, closed 1, 3, and 5, so a
     gap at 4 — filed both ways. The register and the gaps are the same but for
     the `archive` each names, which is the declared path either way."""
     orchard(tree, "First tree")
@@ -4343,7 +4665,7 @@ def code_only(source: str) -> str:
             continue
         if token.type not in _LAYOUT:
             kept.append(token.string)
-        if token.type not in (tokenize.COMMENT,):
+        if token.type != tokenize.COMMENT:
             opening = token.type in _LAYOUT
     return "\n".join(kept)
 
@@ -4364,28 +4686,34 @@ _LAYOUT = frozenset(
 
 
 # --------------------------------------------------------------------------
-# The control: no ident is recognised in prose
+# The control: no ident is recognized in prose
 # --------------------------------------------------------------------------
 
 #: One line of the prose a tool that guessed would go looking in, carrying an
 #: ident of **both** shapes this repo declares: a sub-phase off a register and
-#: a finding off nothing but its ordinal. It is deliberately a sentence rather
-#: than a bullet — the strict form is *meant* to be read, and this is what a
-#: reader must not reach into.
+#: a finding off nothing but its ordinal. It is a sentence rather than a
+#: bullet: the strict form is *meant* to be read, and this is what a reader
+#: must not reach into.
 PROSE = "Carried → 22-3 and f4 were filed as slug-name on 2026-09-05."
 
 #: What an ident of either shape looks like, for asking whether a match caught
 #: one. Written here and nowhere in ``src/``, which is the whole point.
-AN_IDENT = re.compile(r"\d+-\d+|\bf\d+\b")
+AN_IDENT = re.compile(
+    r"""
+      \d+-\d+         # a sub-phase, 22-3
+    | \bf\d+\b        # or a finding, f4
+    """,
+    re.VERBOSE,
+)
 
 
 def patterns() -> list[tuple[Path, str]]:
     """Every regex ``src/`` builds, as (file, pattern). Read with `ast`.
 
     Both spellings, because the tool uses both: `re.compile` for the
-    module-level constants, and `re.sub` inline — `item.py` and
-    `declaration.py` between them hold six of the latter, so a walk that
-    looked only for `compile` would grade two thirds of the tree.
+    module-level constants, and `re.sub` inline, as `item.py` and
+    `declaration.py` do, so a walk that looked only for `compile` would miss
+    those.
     """
     found: list[tuple[Path, str]] = []
     for path in (REPO / "src").rglob("*.py"):
@@ -4407,24 +4735,22 @@ def patterns() -> list[tuple[Path, str]]:
 
 def test_no_regex_anywhere_under_src_reads_an_ident_out_of_prose() -> None:
     """**7-1's control.** The draft's rule, mechanically: idents are minted and
-    referenced as *data*, never recognised in prose with a regex.
+    referenced as *data*, never recognized in prose with a regex.
 
     The distinction it draws is the one that matters. Reading a name out of the
     **strict form** — a mechanically written shape whose writer and reader are
     the same module — is fine, and is what `NAMED` does: it is anchored at `^`
     and matches a bullet the tool wrote. Finding an ident by **pattern in
     running prose** is what this refuses, because a tool that scanned bodies
-    for a digit-hyphen-digit run would turn a date, a version and a page range
-    into
-    references, and would silently stop finding `f4` the moment a workflow
-    declared a form the pattern did not know.
+    for a digit-hyphen-digit run would turn a date, a version, and a page
+    range into references, and would silently stop finding `f4` the moment a
+    workflow declared a form the pattern did not know.
 
     Every pattern in the tree is searched against one line of prose carrying
     an ident of both shapes, and each must either miss or match something that
-    is not an ident. Today all of them miss with room to spare — `NAME_END`
-    matches a space, and `ORDINAL`, `BULLET`, `NAMED` and `HEADING` are
-    anchored — so this is a tripwire rather than a boundary the tree is
-    pressed against.
+    is not an ident. All of them miss with room to spare — `NAME_END` matches
+    a space, and `ORDINAL`, `BULLET`, `NAMED`, and `HEADING` are anchored — so
+    this is a tripwire rather than a boundary the tree is pressed against.
     """
     built = patterns()
     assert built, "no regex was found under src/, so this control proves nothing"
@@ -4463,15 +4789,6 @@ def test_the_ident_control_reaches_the_inline_calls_compile_would_miss() -> None
 # --------------------------------------------------------------------------
 # `bulleted`: the capability that writes the body
 # --------------------------------------------------------------------------
-
-#: The fixture's pending bullet, as `orchard` declares it.
-UNPRUNED = "**unpruned — Say what the rest of the training is.**"
-
-
-#: The `propagator`'s, as that state declares it. The second bulleted state
-#: exists to prove the name form is the state's business, so its vocabulary is
-#: its own down to the marker.
-UNSTRUCK = "**unstruck — Say what the rest of the batch is.**"
 
 
 def test_a_state_with_no_register_names_its_bullets_off_its_own_form(
@@ -4538,7 +4855,7 @@ def test_a_verb_into_the_same_state_that_mints_nothing_carries_neither(
 def test_a_sets_key_colliding_with_a_minting_option_refuses_by_name(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The `--body` and `--above` precedent, unchanged. Graded through
+    """The `--body` and `--above` precedent. Graded through
     `--last`, because `--title` cannot reach this guard: `title` is intrinsic
     to every item, so `sets = ["title"]` refuses one layer earlier, back in
     `plan.toml`. The guard covers both anyway rather than singling one out —
@@ -4589,7 +4906,7 @@ def test_a_minted_bullet_is_counted_and_pointable_at_with_no_hand_editing(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The done line that matters most. What the mint writes is what 4-1
-    counts and what 4-3 lets a cursor point at, because all three are the one
+    counts and what 4-3 lets a cursor point at, because they are the one
     strict form in the one module — and nothing here touches the file."""
     orchard(tree, "First tree")
     assert main(["espalier", "first-tree", "--title", "The register"]) == 0
@@ -4643,7 +4960,7 @@ def test_a_bare_mint_on_an_open_section_says_it_changed_nothing(
 ) -> None:
     """The consumer's report: a bare run on an open section drops the pending
     bullet and puts it back, so the file is byte-identical. It still exits 0,
-    and stderr now says so, naming the item and why. stdout is unchanged."""
+    and stderr says so, naming the item and why. stdout is unchanged."""
     orchard(tree, "First tree")
     path = tree / "orchard" / "first-tree.md"
     assert main(["espalier", "first-tree"]) == 0
@@ -4798,7 +5115,7 @@ def test_a_verb_refusing_its_own_key_on_presence_runs_once(
 ) -> None:
     """`refuses = { rootstock = true }` on a verb that sets `rootstock` is how
     a workflow says "once": the run refuses an item carrying it, writes
-    nothing, and `next` stops offering it, because both ask `offer_errors`."""
+    nothing, and its offer drops it, because both ask `offer_errors`."""
     plan = (
         (tree / "plan.toml")
         .read_text()
@@ -4843,8 +5160,8 @@ def test_a_run_that_writes_says_nothing_new(
 def test_a_decomposition_stopped_half_way_goes_on_reading_as_pending(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """John's decision: no row field and no third exception
-    report. The pending bullet **counts** like any other, so an opened section
+    """John's decision: no row field and no exception report of its own. The
+    pending bullet **counts** like any other, so an opened section
     reads 1 rather than 0 and leaves the started-but-not-decomposed report the
     moment it is opened — the bullet is the signal, and a cursor reaching it is
     what surfaces it in a read."""
@@ -4863,7 +5180,7 @@ def test_a_decomposition_stopped_half_way_goes_on_reading_as_pending(
     assert row["sub-phases"] == 1
 
     # And the pending bullet is a sub-phase like any other, so a cursor may
-    # point at it — which is how 4-7 will walk to an unfinished decomposition.
+    # point at it.
     assert main(["graft-on", "first-tree", "--graft", "unpruned"]) == 0
 
 
@@ -4886,11 +5203,10 @@ def test_a_title_that_would_break_the_strict_form_refuses_and_writes_nothing(
 
 
 # --------------------------------------------------------------------------
-# `next VERB`: the read named by the verb
+# An offer: the read named by the verb
 # --------------------------------------------------------------------------
 #
-# Section 3's first sub-phase, and the whole of the old tool's middle tier of
-# named report flags. The fixture divides the work: `transplant` has both
+# The fixture divides the work: `transplant` has both
 # `requires` and `refuses`, so a precondition has something to fail; `tend` is
 # the in-place verb on the claimed bench, so the claim rule has somewhere to
 # be true; and `sprout` and `pot-up` create, so there is a verb nothing can
@@ -4927,7 +5243,7 @@ def greenhoused(cultivar: str | None, title: str) -> str:
 
 def offered(capsys: pytest.CaptureFixture[str], verb: str, *argv: str) -> list[str]:
     """The items `verb` could take right now: the rows whose `commands` name
-    it, which is what the old `next VERB` read was (31-3)."""
+    it."""
     capsys.readouterr()
     assert main(["list", "--has", f"commands={verb}", *argv, "--json"]) == 0
     return [row["slug"] for row in json.loads(capsys.readouterr().out)["rows"]]
@@ -4944,10 +5260,10 @@ def commands_of(capsys: pytest.CaptureFixture[str], slug: str) -> list[str]:
 def test_an_item_failing_a_precondition_is_absent_and_a_satisfied_one_is_present(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`transplant` requires a cultivar and refuses `hybrid`, so the three
-    seedlings divide between the two halves of the same rule. No new
-    precondition logic was written for this: it is `offer_errors`, which
-    the verb itself runs."""
+    """`transplant` requires a cultivar and refuses `hybrid`, so the
+    seedlings divide between the two halves of the same rule. The offer has
+    no precondition logic of its own: it is `offer_errors`, which the verb
+    itself runs."""
     ready = greenhoused("heirloom", "A seedling")
     greenhoused(None, "B seedling")
     greenhoused("hybrid", "C seedling")
@@ -4972,9 +5288,9 @@ def test_a_section_this_session_holds_is_offered_because_work_would_take_it(
 ) -> None:
     """Decision 1, and the pair of the test above it. The offer is what the
     verb would **not refuse** — and a verb keeps a claim this session already
-    holds rather than re-stamping it — so the item picked up yesterday is
-    still what `next` hands back today. `--lacks claimed-by` is how the
-    stricter question is asked, and the two answers differ here on purpose."""
+    holds rather than re-stamping it — so an item picked up earlier is still
+    what the offer hands back. `--lacks claimed-by` is how the stricter
+    question is asked, and the two answers differ here."""
     slug = benched(tree, "A seedling")
     assert claim.path(tree, slug).exists()
     assert offered(capsys, "tend") == [slug]
@@ -4992,9 +5308,9 @@ def test_a_section_this_session_holds_is_offered_because_work_would_take_it(
 # --------------------------------------------------------------------------
 #
 # `pot-on` marks into `propagator`, so its offer lists **cuttings** rather
-# than batches. `orchard`'s `Steps` are deliberately left unmarked by
-# anything, which is what makes "walked is the whole traversal's bullets"
-# something a test can see rather than an assertion about intent.
+# than batches. `orchard`'s `Steps` are left unmarked by anything, which is
+# what makes "walked is the whole traversal's bullets" something a test can see
+# rather than an assertion about intent.
 
 
 def cuttings(*titles: str, close: bool = True) -> None:
@@ -5009,7 +5325,7 @@ def test_the_item_reads_are_untouched_by_a_mark(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`list` and `show` walk items and show the row rather than the body, so
-    a mark appears in neither — and there is still no fourth read."""
+    a mark appears in neither."""
     cuttings("The first")
     assert main(["pot-on", "a-batch", "c1"]) == 0
     capsys.readouterr()
@@ -5041,7 +5357,7 @@ def test_a_bullet_a_mark_could_not_be_read_on_refuses_the_run(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The report's own case, at the edge: rc 2, `ERROR:` on stderr, stdout
-    empty, and the bullet as it was. The quiet arm was a word written where
+    empty, and the bullet as it was. Quiet, it would be a word written where
     nothing reads it and a count that never falls."""
     path = scribbled(tree)
     before = path.read_bytes()
@@ -5073,10 +5389,9 @@ def test_the_check_refuses_the_same_bullet_in_the_same_words(
 def test_a_bullet_no_mark_could_be_read_on_is_named_by_the_default_read(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The seventh exception report, in both renderings. 14-1 made the verb
-    refuse such a bullet, and nothing said so until a session reached for the
-    verb. The default read is where a defect nobody is looking for gets
-    found."""
+    """14-1: an exception report, in both renderings. The verb refuses such a
+    bullet, and the default read says so before a session reaches for the
+    verb: it is where a defect nobody is looking for gets found."""
     path = scribbled(tree)
     capsys.readouterr()
     lines = path.read_text().split("\n")
@@ -5161,8 +5476,8 @@ def test_no_filter_narrows_the_unmarkable_report(
 def test_a_second_bold_run_holding_an_undeclared_word_is_open_and_reported(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Section 23: `**Note:** prose` read as a mark, so the count fell and
-    nothing was said. The mark is a declared word, so this bullet is open,
+    """Section 23: `**Note:** prose` is not a mark, or the count would fall
+    and nothing would be said. The mark is a declared word, so this bullet is open,
     unmarkable, and named by the default read."""
     cuttings("The first")
     path = tree / "propagator" / "a-batch.md"
@@ -5186,8 +5501,8 @@ def test_a_second_bold_run_holding_an_undeclared_word_is_open_and_reported(
 def test_a_title_carrying_a_lone_asterisk_refuses(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The tool wrote `- **f1 — *moves* thing**` itself, and then no reader
-    could name it. A lone `*` is the same second author as `**`."""
+    """Written, `- **f1 — *moves* thing**` is a bullet no reader can name, so
+    the mint refuses it. A lone `*` is the same second author as `**`."""
     cuttings("The first", close=False)
     path = tree / "propagator" / "a-batch.md"
     before = path.read_bytes()
@@ -5239,8 +5554,8 @@ def test_a_bullet_the_reader_cannot_name_is_reported_and_stops_a_mint(
 def test_a_bullet_a_heading_cut_off_from_its_span_is_reported_and_stops_a_mark(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A consumer saw 40 findings read as 18. Where a span ends does not
-    change, and the bullets past it are named rather than dropped."""
+    """Where a span ends does not change, and the bullets past it are named
+    rather than silently dropped from the count."""
     cuttings("The first", "The second")
     path = tree / "propagator" / "a-batch.md"
     path.write_text(
@@ -5345,7 +5660,7 @@ def test_a_filings_help_takes_two_positionals_its_options_and_both_halves(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The whole generated surface in one read: the disposition's positionals,
-    the filing's two options and the key it writes, the kind and `files` in
+    the filing's options and the key it writes, the kind and `files` in
     `Declares` — which is what lets a composed session reach for this verb by
     what it declares rather than by its name — and `Files`, which says which
     head the key lands on."""
@@ -5438,7 +5753,7 @@ def test_a_filing_with_no_body_refuses_in_the_executors_words(
 def test_the_offer_takes_the_listing_s_filters(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Deliberately not a poorer surface. Diverging would be a second
+    """Not a poorer surface. Diverging would be a second
     vocabulary to keep in step with the first, for no gain — `--state` on an
     offer is redundant rather than wrong, and it narrows further."""
     greenhoused("heirloom", "A seedling")
@@ -5456,59 +5771,49 @@ def test_the_offer_takes_the_listing_s_filters(
 
 
 def test_no_declared_verb_is_named_anywhere_under_src() -> None:
-    """The done line of 1-3, mutation-checked and still live. If any verb were
+    """The done line of 1-3, mutation-checked. If any verb were
     special-cased in code — an `if` on its name, a function per verb, a
     template picked by name — this is what would fail. It reads the repo's own
     declaration rather than a hard-coded list, so a verb added later is
     covered without anyone remembering to add it here.
 
-    **The match is on word boundaries**, which is what the control always
-    meant: a verb being *named*, not a substring appearing. 1-5 is what forced
-    it — `queued` is a capability and contains a declared verb's name — and it
-    loosens nothing that matters, because `if transition.name == "queue"`
-    anywhere still fails.
+    **The match is on word boundaries** (1-5): a verb being *named*, not a
+    substring appearing. `queued` is a capability and contains a declared
+    verb's name, and `if transition.name == "queue"` anywhere still fails.
 
-    **It grades the code and not the prose**, which is the same narrowing for
-    the third time. 1-6 stripped citations, because `queued.py` cites
-    `docs/reference.md#the-queue` and a pointer at prose is not code that
-    special-cases a verb. 4-4 is what forced the general form: this repo
-    declares a verb called `work`, and "work" is an ordinary English word that
-    a docstring about picking items up cannot avoid. The alternative was to
-    ban a word from the tool's own prose forever, which would make the prose
-    worse to satisfy a mechanical check — and a consumer whose workflow
-    declares `read`, `set` or `open` would hit the same wall on day one, which
-    is not a thing a *declared* workflow may punish. What the control protects
-    is unchanged and is stated exactly: **no per-verb code**. A string literal
-    in an expression is code and survives the strip, so every dispatch-on-name
-    shape it exists to catch still fails it.
+    **It grades the code and not the prose** (1-6, 4-4). Citations are
+    stripped, because `queued.py` cites `examples/docs/reference.md#the-queue` and a
+    pointer at prose is not code that special-cases a verb. Docstrings and
+    comments are stripped, because this repo declares a verb called `work`,
+    an ordinary English word that a docstring about picking items up cannot
+    avoid; a consumer whose workflow declares `read`, `set`, or `open` would
+    hit the same wall, and a *declared* workflow may not be punished for its
+    words. What the control protects is stated exactly: **no per-verb code**.
+    A string literal in an expression is code and survives the strip, so
+    every dispatch-on-name shape it exists to catch still fails it.
 
-    The citation strip stays, because a citation can appear in a string the
-    tool prints as well as in prose, and it uses `test_docs.CITATION` so that
-    "what a citation looks like" keeps one home.
+    The citation strip covers a citation in a string the tool prints as well
+    as in prose, and it uses `test_docs.CITATION` so that "what a citation
+    looks like" keeps one home.
 
-    The limit, stated rather than discovered: **a string literal is still
-    graded**, help text included, because a string literal is precisely where
-    a dispatch would hide. A `--help` line that wants to say "work" says it
-    another way, which costs a word; a docstring does not.
+    The limit: **a string literal is still graded**, help text included,
+    because a string literal is precisely where a dispatch would hide. A
+    `--help` line that wants to say "work" says it another way, which costs a
+    word; a docstring does not.
 
-    **And the hole, named rather than left to be found.** A verb named after
-    one of the tool's own option words is skipped, because at that point the
-    two are indistinguishable: the tool spells `RESERVED_OPTIONS` for its own
-    reasons whatever the workflow calls things, and a word it must spell
-    cannot also be a word it may not spell. 11-6 is what forced it — this repo
-    declares a verb called `note`, and the option that says *why* a
-    disposition disposed of a finding is `--note`. A verb and an option are
-    two namespaces that never meet on one command line, so the declaration
-    stays legal and this control loses its teeth over exactly those words.
-    What that costs is stated: per-verb code named after a reserved word would
-    pass. The roster is a dozen words the tool owns, assembled at the
-    top of this module out of the constants `cli` spells them with — so the
-    three table-driven halves track by themselves, and a new scalar option is
-    covered only when somebody adds it here.
-
-    30-1 widened the hole by the nine kind names, for the same reason: the
-    tool spells `KINDS` whatever the workflow calls its verbs, and this repo
-    declares a verb called `merge` whose kind is `merge`."""
+    **And the hole** (11-6, 30-1). A verb named after one of the tool's own
+    option words or kind names is skipped, because there the two are
+    indistinguishable: the tool spells `RESERVED_OPTIONS` and `KINDS` for its
+    own reasons whatever the workflow calls things, and a word it must spell
+    cannot also be a word it may not spell. This repo declares a verb called
+    `note`, beside the `--note` option that says *why* a disposition disposed
+    of a finding, and a verb called `merge` whose kind is `merge`. A verb and
+    an option are two namespaces that never meet on one command line, so the
+    declaration stays legal and this control loses its teeth over exactly
+    those words: per-verb code named after a reserved word would pass. The
+    roster is assembled at the top of this module out of the constants `cli`
+    spells them with, so its table-driven halves track by themselves, and a
+    new scalar option is covered only when somebody adds it here."""
     source = "\n".join(
         code_only(path.read_text()) for path in (REPO / "src").rglob("*.py")
     )
@@ -5532,7 +5837,7 @@ def test_the_control_skips_the_tools_own_words_and_nothing_else() -> None:
     skipped = declared & set(RESERVED_OPTIONS)
     assert skipped == {"note"}, skipped
     assert declared - skipped, "the narrowing may not empty the control"
-    # And the shape it can no longer catch, said out loud rather than implied.
+    # And the shape it cannot catch, said out loud rather than implied.
     assert re.search(r"\bnote\b", 'if transition.name == "note":')
 
 
@@ -5543,7 +5848,7 @@ def test_the_control_still_catches_a_verb_named_inside_a_word() -> None:
     assert re.search(r"\bqueue\b", 'if transition.name == "queue":')
     assert not re.search(r"\bqueue\b", 'CAPABILITIES = ("queued",)')
     assert (
-        CITATION.sub("", "cites ``docs/reference.md#the-queue`` here")
+        CITATION.sub("", "cites ``examples/docs/reference.md#the-queue`` here")
         == "cites ```` here"
     )
     assert CITATION.sub("", 'if name == "queue":') == 'if name == "queue":'
@@ -5552,7 +5857,7 @@ def test_the_control_still_catches_a_verb_named_inside_a_word() -> None:
 def test_the_control_reads_code_and_not_the_prose_around_it() -> None:
     """The mutation check on the strip. Every shape a verb could be
     special-cased in survives it; a docstring and a comment saying the same
-    word do not — which is the whole of what 4-4 loosened."""
+    word do not (4-4)."""
     dispatch = 'def go(name):\n    """Do the work."""\n    # work happens here\n'
     assert "work" not in code_only(dispatch)
 
@@ -5574,13 +5879,12 @@ def test_every_derived_key_is_reachable_by_a_filter(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """**The reachability control.** A field on every row that no filter can
-    name is a fact you have to read every line to find, and that is exactly
-    what `--sub-phases` was before 3-4. Since 13-3 there is one roster and
-    `--has` reaches all of it, so this holds by construction — and the
-    mutation below says it is not vacuous."""
+    name is a fact you have to read every line to find. There is one roster
+    and `--has` reaches all of it (13-3), so this holds by construction — and
+    the mutation below says it is not vacuous."""
     declared = load(tree / "plan.toml")
     assert declared.derived, "the fixture derives nothing, so this proves nothing"
-    assert set(declared.derived) <= {*DERIVABLE_KEYS, *declared.inverses}
+    assert set(declared.derived) <= {*DERIVABLE, *declared.inverses}
     assert main(["list", "--help"]) == 0
     roster = re.sub(r"-\n\s+", "-", capsys.readouterr().out)
     for key in declared.derived:
@@ -5590,11 +5894,10 @@ def test_every_derived_key_is_reachable_by_a_filter(
 def test_a_key_the_roster_grows_is_filterable_without_a_second_table(
     tree: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The mutation check on the control above, and what the 13-3 fold bought:
-    a derived key added to the roster is reachable by `--has` with nothing
-    else written anywhere. Before the fold this raised `KeyError`, because a
-    second table said how each key *read* on the command line and it had no
-    row for the new one."""
+    """The mutation check on the control above (13-3): a derived key added to
+    the roster is reachable by `--has` with nothing else written anywhere. A
+    second table saying how each key *reads* on the command line would raise
+    `KeyError` here, having no row for the new one."""
     from fileplan.declaration import DERIVED_KEYS, Derived
 
     monkeypatch.setattr(
@@ -5609,10 +5912,10 @@ def test_a_key_the_roster_grows_is_filterable_without_a_second_table(
 def test_the_sub_phase_count_filters_and_zero_is_a_value(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The defect the fold found. `--sub-phases 0` is a section somebody
-    started and nobody decomposed — the same fact the `undecomposed` report
-    names, now askable as a question. The zero survives because a zero is a
-    real count and only `""` and `[]` read as absent."""
+    """`--sub-phases 0` is a section somebody started and nobody decomposed —
+    the same fact the `undecomposed` report names, askable as a question. The
+    zero survives because a zero is a real count and only `""` and `[]` read
+    as absent."""
     named(tree, "graft-1", "graft-2")
     orchard(tree, "Second tree")
 
@@ -5646,7 +5949,7 @@ def test_show_names_one_item_by_its_handle(
 def test_show_resolves_a_unique_prefix(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The handle, not a slug: the same three rules every verb resolves by,
+    """The handle, not a slug: the same rules every verb resolves by,
     because they are the same function."""
     filed(tree)
     capsys.readouterr()
@@ -5751,7 +6054,7 @@ def test_show_frames_and_reports_over_the_whole_tree(
 def test_shows_envelope_names_one_item_and_the_whole_traversal(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`item` against `items` and `next`: a consumer reading a pipe can tell a
+    """`item` against `items`: a consumer reading a pipe can tell a
     read of one from a read of many without counting rows."""
     filed(tree)
     capsys.readouterr()
@@ -5765,7 +6068,7 @@ def test_shows_envelope_names_one_item_and_the_whole_traversal(
 def test_show_takes_no_filters(tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """A filter narrows a set and `show` has been told which item. `--state`
     on an item somewhere else would say "no such item" about an item that
-    exists — the failure tree-wide resolution was adopted to end."""
+    exists — the failure tree-wide resolution prevents."""
     filed(tree)
     capsys.readouterr()
     assert main(["show", "--help"]) == 0
@@ -5784,12 +6087,12 @@ def test_show_takes_no_filters(tree: Path, capsys: pytest.CaptureFixture[str]) -
 
 
 # --------------------------------------------------------------------------
-# show ITEM NAME: the third read, narrowed to the subject the second offers
+# show ITEM NAME: the read narrowed to one bullet
 # --------------------------------------------------------------------------
 #
-# Not a fourth read. `next <disposition>` already lists bullets, so a bullet
-# is already a subject of this tool's read surface — and the one thing that
-# could not be done with it was reading one (`docs/reference.md#show`).
+# Not a new read. A disposition's offer lists bullets, so a bullet is already
+# a subject of this tool's read surface, and this reads one
+# (`examples/docs/reference.md#show`).
 
 #: The continuation the fixture's first cutting grows: an indented paragraph
 #: and a fenced transcript whose lines are somebody else's document. This
@@ -5873,7 +6176,7 @@ def test_show_without_a_name_is_the_row_read_unchanged(
 def test_a_name_the_body_does_not_carry_refuses_in_the_dispositions_words(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """One home for that sentence since 11-4, so a typo is a read the operator
+    """11-4: one home for that sentence, so a typo is a read the operator
     can fix out of what the refusal said — the same words, from the same code,
     whichever of the two asked."""
     batched(tree)
@@ -5937,8 +6240,8 @@ def test_a_bullet_read_frames_and_reports_over_the_whole_tree(
     because you asked about one bullet would be the first read in this tool to
     hide one — `show`'s own rule, one level in. The frame counts **items**,
     because the traversal walked items and the narrowing that happened first
-    was item-narrowing; `next <disposition>` counts bullets because its rows
-    are bullets, and here there are no rows."""
+    was item-narrowing; a disposition's offer counts bullets because its
+    rows are bullets, and here there are no rows."""
     batched(tree)
     sibling(tree, "a-ghost", pid=ANOTHER_LIVE_SESSION)
     capsys.readouterr()
@@ -5953,7 +6256,7 @@ def test_a_bullet_read_frames_and_reports_over_the_whole_tree(
 def test_the_bullet_read_carries_the_same_facts_in_both_renderings(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Not more facts, and not a row: `name`, `title` and `mark` are extracted
+    """Not more facts, and not a row: `name`, `title`, and `mark` are extracted
     *from* the verbatim text a person reads, shaped for the consumer that
     would otherwise re-parse the bold. The envelope's kind is the singular, so
     a consumer can tell `show ITEM` from `show ITEM NAME`."""
@@ -5984,9 +6287,8 @@ def test_show_returns_the_mark_on_a_sub_phase_bullet(
 ) -> None:
     """12-1's premise from the read side, over `orchard` — the state that
     carries a cursor. `bullets` finds the word mechanically whatever state the
-    bullet is in, so a disposition on a plan-shaped state needed nothing added
-    here: `mark` was already the field, and it is null until a verb writes
-    one."""
+    bullet is in, so a disposition on a plan-shaped state needs nothing added
+    here: `mark` is the field, and it is null until a verb writes one."""
     orchard(tree, "First tree")
     assert main(["espalier", "first-tree", "--title", "The first", "--last"]) == 0
     assert main(["ripen", "first-tree", "2-1", "--note", "It held."]) == 0
@@ -6025,8 +6327,8 @@ def test_a_bullet_read_takes_no_filters_either(
 def test_a_declared_transition_named_show_refuses_by_name(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The tool's fourth word, reserved the way the other three are: one
-    command cannot mean two things."""
+    """The tool's own word, reserved the way its others are: one command
+    cannot mean two things."""
     plan = (tree / "plan.toml").read_text()
     (tree / "plan.toml").write_text(
         plan.replace("[transitions.sprout]", "[transitions.show]")
@@ -6053,8 +6355,6 @@ def test_the_table_of_contents_names_show(
 # `archive-plan`, which is the point: any state can declare a verb of either
 # shape.
 
-RECORD = "What it was, and why it came down."
-
 
 def test_a_dissolving_verb_takes_the_file_and_says_what_it_did(
     tree: Path, capsys: pytest.CaptureFixture[str]
@@ -6065,11 +6365,11 @@ def test_a_dissolving_verb_takes_the_file_and_says_what_it_did(
     orchard(tree, "First tree")
     capsys.readouterr()
 
-    assert main(["fell", "first-tree", "--record", RECORD]) == 0
+    assert main(["fell", "first-tree", "--record", RECORD_TEXT]) == 0
     printed = capsys.readouterr()
     assert printed.out.strip() == "orchard-archive.md"
     assert not (tree / "orchard" / "first-tree.md").exists()
-    assert f"## 2. First tree\n\n{RECORD}\n" in archived(tree)
+    assert f"## 2. First tree\n\n{RECORD_TEXT}\n" in archived(tree)
     assert "first-tree.md is gone" in printed.err
 
 
@@ -6156,7 +6456,7 @@ def test_the_cleared_edges_are_named_on_stderr_one_line_each(
         )
     capsys.readouterr()
 
-    assert main(["fell", "first-tree", "--record", RECORD]) == 0
+    assert main(["fell", "first-tree", "--record", RECORD_TEXT]) == 0
     printed = capsys.readouterr()
     assert printed.out.strip() == "orchard-archive.md"
     cleared = [one for one in printed.err.splitlines() if "out of after" in one]
@@ -6178,7 +6478,7 @@ def test_the_cleared_edges_leave_no_unknown_dependency_in_the_listing(
     path.write_text(
         path.read_text().replace("title = ", 'after = ["first-tree"]\ntitle = ')
     )
-    assert main(["fell", "first-tree", "--record", RECORD]) == 0
+    assert main(["fell", "first-tree", "--record", RECORD_TEXT]) == 0
     capsys.readouterr()
 
     assert main(["list", "--json"]) == 0
@@ -6203,7 +6503,7 @@ def test_a_claim_another_session_holds_refuses_and_deletes_nothing(
     capsys.readouterr()
 
     monkeypatch.setenv("GREENHOUSE_PID", str(ANOTHER_LIVE_SESSION))
-    assert main(["fell", "first-tree", "--record", RECORD]) == 2
+    assert main(["fell", "first-tree", "--record", RECORD_TEXT]) == 2
     printed = capsys.readouterr()
     assert printed.out == ""
     assert printed.err.count("ERROR: ") == 1
@@ -6221,7 +6521,7 @@ def test_the_holder_dissolves_it_and_the_claim_is_freed(
     assert main(["pick", "first-tree"]) == 0
     assert claim.path(tree, "first-tree").exists()
 
-    assert main(["fell", "first-tree", "--record", RECORD]) == 0
+    assert main(["fell", "first-tree", "--record", RECORD_TEXT]) == 0
     assert not claim.path(tree, "first-tree").exists()
     assert not (tree / "orchard" / "first-tree.md").exists()
 
@@ -6229,8 +6529,8 @@ def test_the_holder_dissolves_it_and_the_claim_is_freed(
 def test_a_dissolving_verb_has_a_next_read_like_any_other_that_moves(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """It leaves its state, so it is a verb something could be next for — which
-    is what makes `fileplan next archive-plan` the old tool's `--closeable`."""
+    """It leaves its state, so it is a verb something could be next for, and
+    its offer lists what can be closed."""
     orchard(tree, "First tree")
     assert offered(capsys, "fell") == ["first-tree"]
     assert offered(capsys, "compost") == []
@@ -6269,7 +6569,7 @@ def test_a_dissolving_verbs_offer_narrows_by_its_own_preconditions(
 
 
 def opened(tree: Path, *, title: str = "First tree") -> None:
-    """A tree in the orchard and a batch struck for it, holding two findings.
+    """A tree in the orchard and a batch struck for it, holding findings.
 
     It needs no history at all — the gate reads the tree, never git — which
     is why nothing here commits.
@@ -6314,7 +6614,7 @@ def test_the_note_option_is_on_every_marking_verb_and_no_other(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Generated by the half, like `--record` and `--into`, so nothing in the
-    CLI knows which verb carries it — and **optional** unlike those two: a
+    CLI knows which verb carries it — and **optional** unlike those: a
     disposition with no reason is the ordinary case. `line-out` is the filing
     one, and it takes a note for the same reason `pot-on` does."""
     for name in ("pot-on", "line-out", "espalier", "fell", "transplant"):
@@ -6364,14 +6664,14 @@ def test_a_check_over_an_open_carrier_refuses_by_name_and_touches_nothing(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The done line, end to end: rc 2, one `ERROR:` line naming the batch,
-    the declared key and the count, nothing on stdout, and the tree, the batch
-    and the archive all where they were."""
+    the declared key and the count, nothing on stdout, and the tree, the
+    batch, and the archive all where they were."""
     opened(tree)
     document = archived(tree)
     batch = (tree / "propagator" / "a-batch.md").read_text()
     capsys.readouterr()
 
-    assert main(["fell", "first-tree", "--record", RECORD, "--check"]) == 2
+    assert main(["fell", "first-tree", "--record", RECORD_TEXT, "--check"]) == 2
     printed = capsys.readouterr()
     assert printed.out == ""
     assert printed.err.count("ERROR: ") == 1
@@ -6392,17 +6692,17 @@ def test_the_close_out_goes_through_once_every_finding_is_disposed_of(
     rooted(tree)
     capsys.readouterr()
 
-    assert main(["fell", "first-tree", "--record", RECORD, "--check"]) == 0
+    assert main(["fell", "first-tree", "--record", RECORD_TEXT, "--check"]) == 0
     assert "would take" in capsys.readouterr().out
-    assert main(["fell", "first-tree", "--record", RECORD]) == 0
+    assert main(["fell", "first-tree", "--record", RECORD_TEXT]) == 0
     assert not (tree / "orchard" / "first-tree.md").exists()
-    assert f"## 2. First tree\n\n{RECORD}\n" in archived(tree)
+    assert f"## 2. First tree\n\n{RECORD_TEXT}\n" in archived(tree)
 
 
 def test_an_archiving_verb_that_moves_the_item_is_unaffected(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Where the two archiving verbs differ, from the command line: giving up
+    """Where the archiving verbs differ, from the command line: giving up
     on a tree is one run however much its batch still holds, because the tree
     lives on in `firewood` and the batch goes on naming something filed."""
     opened(tree)
@@ -6446,7 +6746,7 @@ def test_a_section_holding_an_unmarked_sub_phase_cannot_be_archived(
     before = path.read_bytes()
     capsys.readouterr()
 
-    assert main(["fell", "first-tree", "--record", RECORD]) == 2
+    assert main(["fell", "first-tree", "--record", RECORD_TEXT]) == 2
     printed = capsys.readouterr()
     assert printed.err.startswith("ERROR:")
     assert "2 of 3 sub-phases with no mark: graft-2, graft-3" in printed.err
@@ -6457,31 +6757,31 @@ def test_a_section_holding_an_unmarked_sub_phase_cannot_be_archived(
 def test_archive_plan_check_refuses_in_the_words_the_real_run_uses(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """6-1's identical-path rule over the new arm: `--check` runs the same
+    """6-1's identical-path rule over this arm: `--check` runs the same
     grader and stops at the same place, so the two refusals match byte for
     byte and a session can ask before it commits to the record."""
     named(tree, "graft-1", "graft-2")
     capsys.readouterr()
 
-    assert main(["fell", "first-tree", "--record", RECORD, "--check"]) == 2
+    assert main(["fell", "first-tree", "--record", RECORD_TEXT, "--check"]) == 2
     checked = capsys.readouterr().err
-    assert main(["fell", "first-tree", "--record", RECORD]) == 2
+    assert main(["fell", "first-tree", "--record", RECORD_TEXT]) == 2
     assert capsys.readouterr().err == checked
 
 
 def test_a_section_whose_every_bullet_is_marked_closes(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The window 12-2 opened, shut. `skip` closes a bullet as squarely as
+    """12-2: `skip` closes a bullet as squarely as
     `finish` does, so the section below is finished with one of each."""
     named(tree, "graft-1", "graft-2")
     assert main(["ripen", "first-tree", "graft-1"]) == 0
     assert main(["thin", "first-tree", "graft-2"]) == 0
     capsys.readouterr()
 
-    assert main(["fell", "first-tree", "--record", RECORD]) == 0
+    assert main(["fell", "first-tree", "--record", RECORD_TEXT]) == 0
     assert not (tree / "orchard" / "first-tree.md").exists()
-    assert f"## 2. First tree\n\n{RECORD}\n" in archived(tree)
+    assert f"## 2. First tree\n\n{RECORD_TEXT}\n" in archived(tree)
 
 
 def test_a_section_abandoned_half_done_is_not_refused_by_the_unmarked_rule(
@@ -6500,9 +6800,9 @@ def test_a_section_abandoned_half_done_is_not_refused_by_the_unmarked_rule(
 def test_the_close_out_offer_drops_a_section_with_an_unmarked_bullet(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Through the same function the verb refuses with, so `next` stays the
-    old tool's `--closeable` rather than handing back a run that would be
-    refused. The frame still counts the whole traversal."""
+    """Through the same function the verb refuses with, so the offer never
+    hands back a run that would be refused. The frame still counts the whole
+    traversal."""
     named(tree, "graft-1", "graft-2")
     assert offered(capsys, "fell") == []
 
@@ -6516,11 +6816,10 @@ def test_the_close_out_offer_drops_a_section_with_an_unmarked_bullet(
 def test_a_section_whose_every_step_is_marked_still_takes_a_cursor(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The deadlock 16-1 removed, as the sequence a session performs. Cut a
-    tree into steps, mark every one of them, and only then move the cursor —
-    which is the order that locked this repo's own section 15 out of its close,
-    because the cursor key a closing verb requires had become
-    unwritable. The cursor lands, and no status rides with it."""
+    """16-1, as the sequence a session performs. Cut a tree into steps, mark
+    every one of them, and only then move the cursor: the cursor key a
+    closing verb requires must still be writable then, or the section can
+    never close. The cursor lands, and no status rides with it."""
     path = named(tree, "graft-1", "graft-2")
     assert main(["ripen", "first-tree", "graft-1"]) == 0
     assert main(["thin", "first-tree", "graft-2"]) == 0
@@ -6531,7 +6830,7 @@ def test_a_section_whose_every_step_is_marked_still_takes_a_cursor(
     assert 'graft = "graft-2"' in head
     assert "graft-status" not in head
 
-    assert main(["fell", "first-tree", "--record", RECORD, "--check"]) == 0
+    assert main(["fell", "first-tree", "--record", RECORD_TEXT, "--check"]) == 0
 
 
 # --------------------------------------------------------------------------
@@ -6690,7 +6989,7 @@ def test_a_merge_moves_each_body_into_the_survivor(
 
 # A survivor in a `bulleted` state takes each absorbed item as a sub-phase
 # instead (37-6). `orchard` is bulleted and numbered, so a greenhouse
-# seedling merged into a tree there becomes `2-N`. See docs/reference.md#merge
+# seedling merged into a tree there becomes `2-N`. See examples/docs/reference.md#merge
 
 
 def seedlings(*pairs: tuple[str, str]) -> None:
@@ -6834,7 +7133,7 @@ def test_a_check_names_the_sub_phase_each_item_would_become(
 # Generated from the `Transition` the command is generated from, so these are
 # graded over the *whole fixture declaration* rather than over one verb: a
 # consumer's verbs get the epilog identically, and there is no verb-shaped
-# branch for a test to have to pick a side of. docs/reference.md#the-contract.
+# branch for a test to have to pick a side of. examples/docs/reference.md#the-contract.
 
 
 def helped(name: str, capsys: pytest.CaptureFixture[str]) -> str:
@@ -6847,8 +7146,8 @@ def test_every_transitions_help_names_its_own_doc_and_every_key_it_sets(
 ) -> None:
     """The `Reading` block, and the done line it serves: `pointer_errors`
     proves every pointer resolves, and this is what lets a caller follow one.
-    A key's `help` was always on its option and says what to pass; its `doc`
-    says what the value *is*, and was surfaced nowhere."""
+    A key's `help` is on its option and says what to pass; its `doc` says
+    what the value *is*, and this block is where it surfaces."""
     declaration = load(tree / "plan.toml")
     for transition in declaration.transitions.values():
         out = helped(transition.name, capsys)
@@ -6885,7 +7184,7 @@ def test_the_contract_names_the_keys_the_run_drops(
     on, and a caller that read the contract and then found a key gone would
     have met an effect nothing named, which is hiding with extra steps.
 
-    Its neighbour is the control: `thin` marks the same body out of the same
+    Its neighbor is the control: `thin` marks the same body out of the same
     state and drops nothing, so the block is absent there. Absence is the
     signal, the shape `Drops` already has."""
     declaration = load(tree / "plan.toml")
@@ -6995,7 +7294,7 @@ def test_a_check_on_a_dissolving_verb_leaves_the_item_and_the_archive(
     assert "file `## 2. First tree` in" in capsys.readouterr().out
     assert tracked(tree) == before
 
-    # And the run it was checking really does all three, so the check was
+    # And the run it was checking really does each, so the check was
     # reporting an effect rather than a no-op.
     assert main(["fell", "first-tree", "--record", "Because."]) == 0
     assert tracked(tree) != before
@@ -7047,7 +7346,7 @@ def test_a_finished_sub_phase_leaves_a_cursor_and_no_status(
 ) -> None:
     """End to end, and the shape the listing is meant to read in afterwards: a
     cursor saying where the last session was, and no status saying it is still
-    at work. The pair is what tells the three cases apart — no cursor and no
+    at work. The pair is what tells the cases apart — no cursor and no
     status is a section never started, a cursor alone is a session that
     finished what it was on, and both is work in flight."""
     named(tree, "graft-1", "graft-2")
@@ -7082,7 +7381,7 @@ def test_a_finished_sub_phase_leaves_a_cursor_and_no_status(
 def test_a_sets_key_colliding_with_the_check_flag_refuses_by_name(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The `--body`, `--above` and `--last` precedent, over the one flag that
+    """The `--body`, `--above`, and `--last` precedent, over the one flag that
     is on **every** generated command: a declared key called `check` becomes
     `--check` too, and one option cannot mean two things."""
     plan = (
@@ -7102,7 +7401,7 @@ def test_a_sets_key_colliding_with_the_check_flag_refuses_by_name(
 
 
 # --------------------------------------------------------------------------
-# Retitling, and the report a hand split leaves. See docs/reference.md#retitle
+# Retitling, and the report a hand split leaves. See examples/docs/reference.md#retitle
 # --------------------------------------------------------------------------
 
 
@@ -7184,7 +7483,7 @@ def test_the_overview_prints_each_default_it_chose(
 ) -> None:
     """32-2: a default is shown where the declaration is read back, never
     hidden. With `orchard`'s `sort` line and `greenhouse`'s `path` line gone,
-    and `sprout`'s `help`, the overview still says all three."""
+    and `sprout`'s `help`, the overview still says each."""
     plan = tree / "plan.toml"
     text = plan.read_text().replace('sort              = "position"\n', "", 1)
     text = text.replace(
@@ -7297,15 +7596,24 @@ def test_a_close_with_no_record_says_what_a_record_is(
     )
 
 
-def test_the_options_the_cli_fills_are_the_keys_the_executor_reads() -> None:
-    """34-2 f8: the scalar keys are imported from `fileplan.transition`; the
-    three option tables carry a metavar and help beside each flag, so their
-    flag columns are held to the executor's names here."""
-    from fileplan import transition
-
-    assert [flag for flag, *_ in PLACEMENT] == list(transition.PLACEMENT)
-    assert [flag for flag, *_ in MINTING] == list(transition.MINTING)
-    assert [flag for flag, *_ in FILING] == list(transition.FILING)
+def test_each_roster_row_s_help_belongs_to_the_flag_it_is_paired_with() -> None:
+    """The option tables take their flag column from `fileplan.transition`'s
+    tuples by position, so a reordered tuple would hand one flag another's
+    metavar and help. Each row's help is held to its flag here."""
+    words = {
+        "PLACEMENT": {"above": "ahead of", "below": "behind", "at": "place N"},
+        "MINTING": {
+            "title": "sub-phase with this title",
+            "last": "final sub-phase",
+            "after": "directly after",
+        },
+        "FILING": {"title": "Call the filed item", "body": "description"},
+    }
+    rosters = {"PLACEMENT": PLACEMENT, "MINTING": MINTING, "FILING": FILING}
+    for name, roster in rosters.items():
+        assert {flag for flag, *_ in roster} == set(words[name])
+        for flag, _, _, said in roster:
+            assert words[name][flag] in said, (name, flag)
 
 
 def test_every_report_has_one_gate_and_one_line() -> None:
@@ -7326,9 +7634,8 @@ def test_every_report_has_one_gate_and_one_line() -> None:
 def test_undecomposed_is_in_the_envelope_wherever_it_is_computed(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The drift f9 found: the report is computed over a state with a status
-    key and sub-phases, and the envelope gated it on a cursor. A state with
-    a status and no cursor now carries it too."""
+    """34-2 f9: the report is computed over a state with a status key and
+    sub-phases, so the envelope carries it there with or without a cursor."""
     plan = tree / "plan.toml"
     plan.write_text(
         re.sub(r"(?m)^sub-phase-cursor\s*=.*\n", "", plan.read_text(), count=1)
@@ -7373,6 +7680,7 @@ def test_every_option_a_command_takes_is_a_key_or_a_tool_word(tree: Path) -> Non
         "has",
         "lacks",
         "sort",
+        "fields",
     }
     assert words - keys - {one.replace("_", "-") for one in RESERVED_OPTIONS} == set()
 

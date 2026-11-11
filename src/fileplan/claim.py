@@ -15,9 +15,9 @@ only place in the tool that reads the environment. The identity is a host and
 a pid, with no session id, so a reused pid can make a dead session's claim
 look live.
 
-Pure but for `read`, `write`, `remove` and `identity`.
+Pure but for `read`, `write`, `remove`, and `identity`.
 
-See docs/reference.md#the-claim
+See examples/docs/reference.md#the-claim
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ import os
 import socket
 from collections.abc import Mapping
 from dataclasses import dataclass
+from dataclasses import fields as declared
 from pathlib import Path
 from typing import Any
 
@@ -38,12 +39,13 @@ from fileplan.declaration import (
     Refusal,
     collecting,
     named,
+    whole,
 )
-from fileplan.lock import LOCAL_DIR
+from fileplan.lock import LOCAL_DIR, holder
 
 #: The capability a state opts into. The seam that takes, holds and drops a
 #: claim is `fileplan.transition`, because it mutates under the lock and this
-#: module takes none. See docs/reference.md#the-claimed-state
+#: module takes none. See examples/docs/reference.md#the-claimed-state
 NAME = CLAIMED
 
 #: Under `local/`, beside the lock: session-local state, gitignored.
@@ -53,19 +55,34 @@ CLAIMS_DIR = "claims"
 #: person cats should be something they can parse.
 SUFFIX = ".toml"
 
-#: What a record holds, in canonical order. The item's slug is not here: the
-#: record's location answers that already, and a second answer could disagree.
-FIELDS = ("host", "pid", "taken")
 
-#: The four outcomes of the probe. `ELSEWHERE` and `UNKNOWN` are not "maybe
-#: dead" but the two ways the tool cannot know, and they end where `DEAD`
-#: ends: named, never auto-released.
+@dataclass(frozen=True)
+class Claim:
+    """One claim record: who holds an item, and since when.
+
+    Its fields in on-disk order. The item's slug is not here: the record's
+    location answers that already, and a second answer could disagree.
+    """
+
+    host: str
+    pid: int | None = None
+    #: Not graded: a record whose stamp is not a datetime reads, and
+    #: grading it would refuse records the on-disk format already holds.
+    taken: Any = None
+
+
+#: What a record holds, in canonical order, read off `Claim`.
+FIELDS = tuple(one.name for one in declared(Claim))
+
+#: The outcomes of the probe. `ELSEWHERE` and `UNKNOWN` are not "maybe dead"
+#: but the tool not knowing, and they end where `DEAD` ends: named, never
+#: auto-released.
 ALIVE = "alive"
 DEAD = "dead"
 ELSEWHERE = "elsewhere"
 UNKNOWN = "unknown"
 
-#: The four as a closed set: what a row's status field may hold, and what a
+#: The outcomes as a closed set: what a row's status field may hold, and what a
 #: filter over the key grades against, so `--has claim-status=zzz` refuses by
 #: name. Ordered alive-first, the order a person reads them in.
 STATUSES = (ALIVE, DEAD, ELSEWHERE, UNKNOWN)
@@ -76,10 +93,10 @@ STATUSES = (ALIVE, DEAD, ELSEWHERE, UNKNOWN)
 THIS_SESSION = "this-session"
 ANOTHER_SESSION = "another-session"
 
-#: The two as a closed set, so `--has claim-holder=mine` refuses by name.
+#: The holders as a closed set, so `--has claim-holder=mine` refuses by name.
 HOLDERS = (THIS_SESSION, ANOTHER_SESSION)
 
-#: The three fields a claim gives a row, unpacked so nothing below spells one
+#: The fields a claim gives a row, unpacked so nothing below spells one
 #: as a literal. Their one home is `fileplan.declaration.CLAIM_KEYS`, where a
 #: redeclaration of any of them is refused.
 BY, STATUS, HOLDER = CLAIM_KEYS
@@ -130,8 +147,8 @@ def path(root: Path, slug: str) -> Path:
     return root / LOCAL_DIR / CLAIMS_DIR / f"{slug}{SUFFIX}"
 
 
-def record(identity: Identity, *, taken: dt.datetime) -> dict[str, Any]:
-    """The flat mapping a claim is written as. Pure.
+def record(identity: Identity, *, taken: dt.datetime) -> Claim:
+    """The claim `identity` takes at `taken`. Pure.
 
     `taken` must be aware: a record is read on machines other than the one
     that wrote it, and a naive stamp means whatever the reader's clock means.
@@ -142,27 +159,22 @@ def record(identity: Identity, *, taken: dt.datetime) -> dict[str, Any]:
             "record is read on other machines — this tree is shared — and a "
             "stamp with no offset means a different moment on each of them"
         )
-    written: dict[str, Any] = {"host": identity.host}
-    if identity.pid is not None:
-        written["pid"] = identity.pid
-    written["taken"] = taken
-    return written
+    return Claim(host=identity.host, pid=identity.pid, taken=taken)
 
 
-def owns(record: Mapping[str, Any], identity: Identity) -> bool:
+def owns(record: Claim, identity: Identity) -> bool:
     """Whether `identity` is the session that holds `record`.
 
     A record carrying no pid is owned by any identity on its host, which lets
     a person at a shell complete a claim they took at that same shell. This is
     the question; the executor is the refusal.
     """
-    if record.get("host") != identity.host:
+    if record.host != identity.host:
         return False
-    pid = record.get("pid")
-    return pid is None or pid == identity.pid
+    return record.pid is None or record.pid == identity.pid
 
 
-def alive(record: Mapping[str, Any], identity: Identity) -> str:
+def alive(record: Claim, identity: Identity) -> str:
     """One of `ALIVE`, `DEAD`, `ELSEWHERE`, `UNKNOWN`.
 
     Host-gated, and the gate is load-bearing: `os.kill(pid, 0)` asks this
@@ -171,15 +183,14 @@ def alive(record: Mapping[str, Any], identity: Identity) -> str:
     called for another host. `PermissionError` is `ALIVE` — the process
     exists, it is simply not ours to signal.
     """
-    if record.get("host") != identity.host:
+    if record.host != identity.host:
         return ELSEWHERE
 
-    pid = record.get("pid")
-    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+    if record.pid is None:
         return UNKNOWN
 
     try:
-        os.kill(pid, 0)
+        os.kill(record.pid, 0)
     except ProcessLookupError:
         return DEAD
     except PermissionError:
@@ -187,9 +198,8 @@ def alive(record: Mapping[str, Any], identity: Identity) -> str:
     return ALIVE
 
 
-#: What each of the probe's four answers says about a holder, in the phrase a
-#: refusal carries. `UNKNOWN` and `ELSEWHERE` say what cannot be known rather
-#: than guessing at "maybe dead".
+#: What each of the probe's answers says about a holder, in the phrase a
+#: refusal carries.
 SAID = {
     ALIVE: "running",
     DEAD: "not running",
@@ -198,20 +208,18 @@ SAID = {
 }
 
 
-def _holder(record: Mapping[str, Any]) -> str:
+def _holder(record: Claim) -> str:
     """Who holds a claim: `a-host.local pid 4213`, or `a-host.local` alone.
 
     The one home for a holder's name, so the listing and the refusals cannot
-    name one session two ways. Best effort rather than a grader: a
-    hand-edited record missing a field still names something a person can act
-    on. `errors` is the grader, and `holders` runs it.
+    name one session two ways.
     """
-    who = str(record.get("host", "an unnamed host"))
-    pid = record.get("pid")
-    return f"{who} pid {pid}" if pid is not None else who
+    if record.pid is None:
+        return record.host
+    return holder(record.host, record.pid)
 
 
-def describe(record: Mapping[str, Any], status: str) -> str:
+def describe(record: Claim, status: str) -> str:
     """A holder, as a phrase: `host pid 4213 (not running), taken <when>`.
 
     The English of a refusal, built on `_holder` so the sentence and the row
@@ -221,14 +229,13 @@ def describe(record: Mapping[str, Any], status: str) -> str:
     return f"{_holder(record)} ({SAID.get(status, status)}), taken {_when(record)}"
 
 
-def fields(record: Mapping[str, Any], status: str, who: Identity) -> dict[str, str]:
-    """The three values a claim gives a row: its holder, the probe's word, and
+def fields(record: Claim, status: str, who: Identity) -> dict[str, str]:
+    """The values a claim gives a row: its holder, the probe's word, and
     whether `who` is that holder, by `owns`.
 
     Pure, and not a sentence: `claim-status` holds one of `STATUSES` and
     `claim-holder` one of `HOLDERS`, so each filters like any declared key with
-    `values`. `--has claim-status=dead` is "what needs releasing", and
-    `--has claim-holder=this-session` is "what this session holds".
+    `values`. See examples/docs/reference.md#the-claim
     """
     return {
         BY: _holder(record),
@@ -237,13 +244,13 @@ def fields(record: Mapping[str, Any], status: str, who: Identity) -> dict[str, s
     }
 
 
-def _when(record: Mapping[str, Any]) -> str:
+def _when(record: Claim) -> str:
     """When the claim was taken, spelled the way the record on disk spells it.
 
     `str(datetime)` separates the date and the time with a space where TOML
     writes a `T`, and the phrase should agree with the file.
     """
-    taken = record.get("taken")
+    taken = record.taken
     if isinstance(taken, dt.datetime):
         return taken.isoformat()
     return "at no recorded time" if taken is None else str(taken)
@@ -271,9 +278,7 @@ def errors(record: Mapping[str, Any]) -> list[str]:
         found.append(f"host holds {record['host']!r}, which is not a host name")
 
     pid = record.get("pid")
-    if pid is not None and (
-        not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0
-    ):
+    if pid is not None and not _is_pid(pid):
         found.append(
             f"pid holds {pid!r}, which is not a pid. It is written as a bare "
             "positive integer, because it is what the liveness probe asks "
@@ -282,49 +287,47 @@ def errors(record: Mapping[str, Any]) -> list[str]:
     return found
 
 
+def _is_pid(value: Any) -> bool:
+    """Whether `value` is a pid: a positive whole number."""
+    return whole(value) and value > 0
+
+
 # --------------------------------------------------------------------------
-# The filesystem: the three edges
+# The filesystem: the edges
 # --------------------------------------------------------------------------
 
 
-def read(path: str | os.PathLike[str], root: Path) -> dict[str, Any]:
-    """One claim record, parsed, or raise `Refusal`. Not graded — that is
-    `errors`, which is pure and reports every defect at once. `root` is what
-    a refusal names the record from."""
+def read(path: str | os.PathLike[str], root: Path) -> Claim:
+    """One claim record, parsed and graded by `errors`, or raise `Refusal`
+    naming every defect. `root` is what a refusal names the record from."""
     path = Path(path)
+    text = item.read_text(path, root, "a claim record")
     try:
-        text = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        raise Refusal(
-            f"{named(path, root)} is not UTF-8, so it is not a claim record"
-        ) from None
-    except OSError as exc:
-        raise Refusal(
-            f"{named(path, root)} could not be read: {exc.strerror}"
-        ) from None
-
-    try:
-        return item.flat(text, noun="claim record")
+        parsed = item.flat(text, noun="claim record")
     except Refusal as refusal:
         raise Refusal([_not_usable(path, root), *refusal.messages]) from None
+    if problems := errors(parsed):
+        raise Refusal([_not_usable(path, root), *problems])
+    return Claim(**parsed)
 
 
 def _not_usable(path: Path, root: Path) -> str:
-    """`fileplan.item.read`'s wording over the other kind of file: the line a
-    defect is reported under, so one bad record names itself once."""
-    return f"{named(path, root)} is not a usable claim record"
+    return item.not_usable(path, root, "claim record")
 
 
-def write(path: str | os.PathLike[str], record: Mapping[str, Any]) -> None:
-    """Put `record` in place of `path`, atomically, making `local/claims/`.
+def write(path: str | os.PathLike[str], held: Claim) -> None:
+    """Put `held` in place of `path`, atomically, making `local/claims/`.
 
     `fileplan.item.replace` does the writing, so a second session sees either
-    the whole old record or the whole new one. A record an operator has
-    chmodded keeps its mode; a new one lands at `0600`, the temp file's.
+    the whole old record or the whole new one. A field that is `None` is left
+    out, so a record with no pid carries no pid line.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    item.replace(path, item.table(record, noun="claim record"))
+    written = {
+        name: getattr(held, name) for name in FIELDS if getattr(held, name) is not None
+    }
+    item.replace(path, item.table(written, noun="claim record"))
 
 
 def holders(declaration: Declaration) -> dict[str, dict[str, str]]:
@@ -339,7 +342,7 @@ def holders(declaration: Declaration) -> dict[str, dict[str, str]]:
     the listing, where a missing one reads as unclaimed: a fresh clone has no
     records, and a record that cannot be read says something the tool does
     not understand about who holds an item. See
-    docs/reference.md#the-claimed-state
+    examples/docs/reference.md#the-claimed-state
     """
     who = identity(declaration)
     return {
@@ -353,24 +356,22 @@ def mine(declaration: Declaration, who: Identity) -> list[str]:
 
     Ownership is `owns`, so a record with no pid on this host counts. Whether
     each slug is an item in a claimed state is the caller's question, as it is
-    for `holders`. See docs/reference.md#the-claimed-state
+    for `holders`. See examples/docs/reference.md#the-claimed-state
     """
     return [slug for slug, held in _records(declaration).items() if owns(held, who)]
 
 
-def _records(declaration: Declaration) -> dict[str, Mapping[str, Any]]:
+def _records(declaration: Declaration) -> dict[str, Claim]:
     """Every record under `local/claims/`, by slug and graded, or raise
     `Refusal` naming every defect at once."""
     directory = Path(declaration.root) / LOCAL_DIR / CLAIMS_DIR
-    found: dict[str, Mapping[str, Any]] = {}
     defects: list[str] = []
     paths = sorted(directory.glob(f"*{SUFFIX}"), key=lambda one: one.stem)
     root = Path(declaration.root)
-    for path, held in collecting(lambda one: read(one, root), paths, defects):
-        if problems := errors(held):
-            defects += [_not_usable(path, root), *problems]
-            continue
-        found[path.stem] = held
+    found = {
+        path.stem: held
+        for path, held in collecting(lambda one: read(one, root), paths, defects)
+    }
     if defects:
         raise Refusal(defects)
     return found

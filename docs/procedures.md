@@ -2,14 +2,10 @@
 
 What a session **does** around a run: the questions to ask before it, what a
 value commits you to, what the run costs that nothing else warns you about.
-`docs/reference.md` says what each transition and key *means*. This document says
-what to do. A transition reaches its section through a link from its own
-section of the method ([the interpreter](reference.md#the-interpreter)).
-
-Sections are named after the **procedure**, not after the transition that
-links to one. A consumer's workflow has different transitions and the same
-procedures. The link is what joins the two, so nothing here is titled with a word out of
-the worked example, `examples/plan.toml`.
+`examples/docs/reference.md` says what each transition and key *means*. This
+document says what to do. A transition reaches its section through a link
+from its own section of the method
+([the interpreter](../examples/docs/reference.md#the-interpreter)).
 
 ## decomposing a section
 
@@ -18,9 +14,7 @@ out is a body of bullets, each one session's worth.
 
 1. **Ask the section's deferred questions, one per turn**, with
    `AskUserQuestion`. They are listed in the item under *Back burner to ask
-   when planned*, and they were held back deliberately to this moment.
-   Batching them hides the course-correction signal. That signal is what
-   deferring them buys.
+   when planned*.
 2. Propose the sub-phases, and propose **as few as the work needs**. Each is
    **one session**: plan it, accept, clear, run it, commit. Each carries a
    *done when* a stranger could check from the tree and the tool's output —
@@ -44,9 +38,10 @@ out is a body of bullets, each one session's worth.
 4. **Mint the bullets with the command**, one run per sub-phase, and mark the
    final one `--last`. The heading, the names and the *pending* bullet all
    come from the tool, in the strict form it counts and reads
-   ([bulleted](reference.md#bulleted)). The names take the form the state
-   declares, `<number>-<ordinal>` here. Until `--last` lands the section goes
-   on reading as pending, and a decomposition stopped half way says so.
+   ([bulleted](../examples/docs/reference.md#bulleted)). The names take the form
+   the state declares, `<number>-<ordinal>` here. Until `--last` lands the
+   section goes on reading as pending, and a decomposition stopped half way says
+   so.
 5. **Then fill each bullet in by hand.** `--title` mints only the bold line,
    and a title carrying `**`, a lone `*` or a newline refuses — so the
    sentences and the *done when* under each bullet are written after the
@@ -57,15 +52,15 @@ out is a body of bullets, each one session's worth.
 sub-phase sometimes shows it was cut wrong. Re-cut it with the commands, not
 by hand. **To split one sub-phase in two**, mint the new half with `decompose
 --title … --after` the old one, so it lands beside it rather than at the end
-([bulleted](reference.md#bulleted)). Then `annotate --replace` each half, so each
-says only its own part and carries its own *done when*. **To merge two**,
-`fold` the absorbed one `--into` the survivor ([fold](reference.md#fold)). Its
-prose moves under the survivor, and it is marked `merged` rather than deleted,
-so nothing naming it is left dangling. Then `annotate --replace` the survivor,
-if the two texts read better as one. **Ideas merged into the section**
-arrive as sub-phases at the end ([merge](reference.md#merge)), so re-cut them
-the same way, with `fold` and `annotate`. Commit the item, staging that one
-path.
+([bulleted](../examples/docs/reference.md#bulleted)). Then `annotate --replace`
+each half, so each says only its own part and carries its own *done when*. **To
+merge two**, `fold` the absorbed one `--into` the survivor
+([fold](../examples/docs/reference.md#fold)). Its prose moves under the
+survivor, and it is marked `merged` rather than deleted, so nothing naming it is
+left dangling. Then `annotate --replace` the survivor, if the two texts read
+better as one. **Ideas merged into the section** arrive as sub-phases at the end
+([merge](../examples/docs/reference.md#merge)), so re-cut them the same way,
+with `fold` and `annotate`. Commit the item, staging that one path.
 
 ## planning and working a sub-phase
 
@@ -76,15 +71,11 @@ carry no mark. Read the trio together. A count with no `next-sub-phase` and
 nothing left is a decomposition that is **finished**. No count at all is an
 item in a state that counts none.
 
-**Planning it.** Read the item, the draft section it decides from, and the
+**Planning it.** Read the item, the draft section it decides from and the
 code the sub-phase touches.
 
-- **The decomposition is a proposal, not a contract.** A sub-phase here has
-  been folded into its neighbour while that neighbour was being planned. The
-  two were one seam, and shipping them apart would have left a worse middle
-  state. Another's filed bullet was wrong about a record's shape and was
-  corrected before any code was written. If a bullet is wrong, say so and
-  propose the change — that is the gate working.
+- **The decomposition is a proposal, not a contract.** If a bullet is wrong,
+  say so and propose the change — that is the gate working.
 - **Decide what the documents already answer; ask what they do not.** Where
   you decide, record the short rationale in the plan, so it reaches the item
   body when the change commits. Where a real fork remains, ask **one**
@@ -98,37 +89,36 @@ code the sub-phase touches.
   graded on a number or a rule of its own. The done line has to name that
   measure. The suite and whatever else the sub-phase turns on go beside it. A
   done line that leaves the measure out lets work pass. The section then has
-  to redo it. One section gated a sub-phase on its pasted transcripts
-  matching. The prose floor was the measure, and the done line never named it.
-  Eight sections of two documents then shipped unread against that floor. A
-  later sub-phase had to widen to catch them.
+  to redo it.
 
 **`planned` means exactly that**: a plan is saved in `local/plans/` and is
 waiting for a session to pick it up
-([sub-phase-status](reference.md#sub-phase-status)). Say the plan is saved, and
-**stop**. The plan surviving a `/clear` is what stopping buys.
+([sub-phase-status](../examples/docs/reference.md#sub-phase-status)). Say the
+plan is saved, and **stop**.
 
 **Running it.** The plan is the spec. If it turns out to be wrong mid-flight,
 say so in a sentence and keep going under a stated assumption rather than
 silently re-scoping. If a fork appears that the plan did not anticipate, ask
 one question. Then verify and report faithfully. That means the suite green
-with its count, the listing in the shape the plan predicted, and
+with its count, the listing in the shape the plan predicted and
 `git show --stat` naming the paths the plan named and no others.
 
 **Then update the item body**: record the decisions made along the way in
 that sub-phase's own bullet, **with the command** rather than by hand. It is
 the transition the bare `fileplan` listing shows as a `write-bullet`, given
-`--text -` and a heredoc ([annotate](reference.md#annotate)). The tool indents
-the lines and refuses a write that would change the sub-phases counted. This
-is the durable record. The section's archive entry is assembled from it.
+`--text -` and a heredoc ([annotate](../examples/docs/reference.md#annotate)).
+The tool indents the lines and refuses a write that would change the sub-phases
+counted. This is the durable record. The section's archive entry is assembled
+from it.
 
 **Then mark the bullet with the command, never by hand.** It is the transition
 the bare `fileplan` listing shows declaring `marks`, whose subject is the
 *bullet* rather than the item. Pass `--note` for why, where the word alone
-does not say it ([marking](reference.md#marking)). The run takes the status key
-off the head as it goes, so the next listing shows a cursor and no status.
-That is where the last session was, with nothing claiming it is still at work
-([sub-phase-status](reference.md#sub-phase-status)).
+does not say it ([marking](../examples/docs/reference.md#marking)). The run
+takes the status key off the head as it goes, so the next listing shows a cursor
+and no status. That is where the last session was, with nothing claiming it is
+still at work
+([sub-phase-status](../examples/docs/reference.md#sub-phase-status)).
 
 **The cursor moves with the command, never by hand**, and it moves *before*
 the commit. The head change then rides in the sub-phase's own commit rather
@@ -137,8 +127,8 @@ cover it. That is how a cursor goes stale, left naming one sub-phase while two
 more are planned and shipped. **A stale key is worse than an absent one.** The
 listing presents it with the same authority as the fields the tool writes and
 cannot get wrong. Nothing auto-releases, and ending the session is its own run
-([release](reference.md#release)). Afterwards, `rm` the saved plan: it is spent,
-and its content is in the item body and the commit now.
+([release](../examples/docs/reference.md#release)). Afterwards, `rm` the saved
+plan: it is spent, and its content is in the item body and the commit now.
 
 ## when a handle changes
 
@@ -153,14 +143,15 @@ named the old slug, and it names each file it edited. What is left is prose.
 2. Rename any saved plan for the item, `local/plans/<old-slug>--N.md`, to
    the new slug.
 3. Stage the new path, the removed old path and each edited file. A run never
-   stages anything ([the head](reference.md#the-head)).
+   stages anything ([the head](../examples/docs/reference.md#the-head)).
 
 **Splitting a bullet** is a hand edit, because it is rare and each item
 pointing at the bullet has to be decided one by one.
 
 1. Edit the bullet into two, and give **both** halves new names: `f12`
    becomes `f12a` and `f12b`. A letter after the number is safe, because the
-   mint still counts `f12a` as 12 ([sub-phases](reference.md#sub-phases)).
+   mint still counts `f12a` as 12
+   ([sub-phases](../examples/docs/reference.md#sub-phases)).
 2. Run `fileplan list`. No bullet is named `f12` any more, so every item whose
    `carried` names it is an `unfound` line. Keeping `f12` as one half would
    leave those items quietly pointing at whichever half kept the name.
@@ -171,11 +162,9 @@ pointing at the bullet has to be decided one by one.
 
 Closing out is the **last** sub-phase's job, whether or not that sub-phase is
 only the close-out. Where it is only the close-out it is **not a writing
-session**. Each `docs/reference.md` section lands in the sub-phase that
+session**. Each `examples/docs/reference.md` section lands in the sub-phase that
 introduced its vocabulary. The one-home guards run at every commit, so a
-`doc =` written before its section is a red suite in between. A section of one
-sub-phase satisfies that rule the same way. Its vocabulary and its close-out
-are the same session, so nothing can land early. The close-out does three
+`doc =` written before its section is a red suite in between. The close-out does three
 things. It reconciles the method document. It fixes what the section
 superseded **outside** it, starting with whatever file every session reads
 first. And it writes the archive entry, mirroring the previous section's
@@ -188,11 +177,11 @@ close-out's own refusal. What it says is that a session *finished the
 sub-phase*, not that the done line was met. The entry's done lines are what
 the close rests on, and a test name is what each of them rests on.
 
-What the run costs, so the next close-out does not rediscover it:
+What the run costs:
 
 - the record is **required** and the item body is **deleted by the same run**,
   so compose the entry in full *before* running the command. Mint-then-fill
-  cannot work here ([dissolving](reference.md#dissolving));
+  cannot work here ([dissolving](../examples/docs/reference.md#dissolving));
 - the command mints the `## <number>. <title>` heading itself, so the record
   is **prose only**, with no `##` line of its own. `###` subheadings inside it
   are safe: the register grades `##` alone;
@@ -200,12 +189,14 @@ What the run costs, so the next close-out does not rediscover it:
   no referent is hand-edited;
 - **every named sub-phase has to carry a mark first**, the close-out's own
   included, and the run names the ones that do not. Where the cursor sits
-  gates nothing ([the close check](reference.md#the-close-check)). So `fileplan
-  list --has commands=VERB`, for the transition whose section links here, is
-  the read that says whether a section is closeable. A forgotten sub-phase blocks the close
-  rather than passing it;
+  gates nothing ([the close
+  check](../examples/docs/reference.md#the-close-check)). So `fileplan list
+  --has commands=VERB`, for the transition whose section links here, is the read
+  that says whether a section is closeable. A forgotten sub-phase blocks the
+  close rather than passing it;
 - the claim is freed by the run itself, so nothing is released afterwards;
 - `git add` the deleted path to stage the removal; there is no `git rm`,
-  and a run never stages anything ([the head](reference.md#the-head));
+  and a run never stages anything ([the
+  head](../examples/docs/reference.md#the-head));
 - if the entry needs fixing afterwards, edit the archive document. The item
   body is gone from the tree, and only git has it.

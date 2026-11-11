@@ -5,17 +5,13 @@ for that. [Initializing fileplan](initialization.md) is the walk for an empty
 directory, from the install onward. This walk assumes fileplan is installed,
 and starts at the first command you would run inside your own repo.
 
-Every command below was run on 2026-09-12 and its output pasted from that run.
-The three refusals that name a file were run again on 2026-09-13, when
-fileplan began naming a file from the folder holding `plan.toml`. The four
-`fileplan list` refusals were run again on 2026-09-28, when each clause of a
-refusal got a line of its own. The overview, the last listing and the
-`decide` blocks were run again on 2026-10-06, through `uv run` against a copy
-of the fixture rebuilt from this document and committed that day, which is
-why each item shows `stale-days 0`.
+Every command below was run and its output pasted from that run. The
+overview, the last listing and the `decide` blocks ran through `uv run`
+against a copy of the fixture rebuilt from this document and committed the
+same day, so each item shows `stale-days 0`.
 The tree it ran against is a **fixture**: a small repo built to provoke each
 thing a retrofit meets, rather than a copy of anybody's real notes. The tree is
-made up. The behaviour is not.
+made up. The behavior is not.
 
 ## a tree that already has work in it
 
@@ -51,8 +47,8 @@ Between them those notes carry one of each thing a retrofit trips over:
 Your own tree will have its version of most of these.
 
 The work is in four moves: **do not run `init`**, write the method headings and
-then the declaration, give the existing files heads, and list. Nothing is
-renamed and nothing is moved into a new directory — a retrofit that reorganised
+then the declaration, give the existing files heads and list. Nothing is
+renamed and nothing is moved into a new directory — a retrofit that reorganized
 your tree would break every link in your notes on its first command.
 
 ## do not run init here
@@ -87,11 +83,11 @@ are empty, and the new `plan.toml` says nothing about `adr/` or
 `someday-maybe/`.
 
 `fileplan init` refuses only where it would land on a file that is already
-there, and it writes only `plan.toml`, `archive.md` and `local/.gitignore`. In
-a tree you are retrofitting it will almost never refuse. Run `fileplan init`
-somewhere empty if you want a working example to crib from, and copy the
-lines you want out of it. The example declares one small loop, and
-[the method](reference.md) describes everything past it. Do not run
+there; [the method](../examples/docs/reference.md) *init* says what it writes.
+In a tree you are retrofitting it will almost never refuse. Run `fileplan init`
+somewhere empty if you want a working example to crib from, and copy the lines
+you want out of it. The example declares one small loop, and [the
+method](../examples/docs/reference.md) describes everything past it. Do not run
 `fileplan init` in the tree you are retrofitting.
 
 ## naming the directories you already have
@@ -228,8 +224,9 @@ ERROR: someday-maybe/Q3 2024 retro.md is not a usable item file
 That list is the whole job, and re-running `fileplan list` is how you know you
 are done.
 
-`adr/README.md` is on the list because a state directory holds items and
-nothing else. It is not an item, so it moves out:
+`adr/README.md` is on the list because every `*.md` in a state directory is
+read as an item unless `[fileplan] ignore` names it. It is not an item, so it
+moves out:
 
 ```
 $ git mv adr/README.md docs/adr.md
@@ -354,7 +351,7 @@ matters because renaming a note breaks every link into that note you or anyone
 else has written.
 
 Each command's own `--help` is its contract. It says what the command takes,
-where the item goes, and which sections of *your* prose say what it means:
+where the item goes and which sections of *your* prose say what it means:
 
 ```
 $ fileplan decide --help
@@ -431,11 +428,12 @@ Four things, named here rather than left for you to find out.
    your keys. It is hand work. Doing it is where you decide which of those
    keys were ever facts about the work, rather than artifacts of the tool that
    wrote them.
-3. **A `README.md` in a state directory is a refusal, not an exception.** Move
-   the file out, or give it a head and accept that it is an item. There is no
-   ignore list. A file in a state directory that cannot be read refuses rather
-   than being skipped. A skipped file never appears in a listing you trust,
-   and nothing tells you so.
+3. **A `README.md` in a state directory refuses until you say what it is.**
+   Move the file out or name it in `[fileplan] ignore` ([the
+   method](../examples/docs/reference.md) *ignore*). Otherwise give it a head
+   and accept that it is an item. Any other file in a state directory that
+   cannot be read refuses rather than being skipped. A skipped file never
+   appears in a listing you trust, and nothing tells you so.
 4. **Numbers and positions are not inferred.** `0001-store-notes-as-files.md`
    listed as an item with that handle and no number, rather than becoming
    `number = 1`. Declare a `numbered` or `queued` state later and every
@@ -448,10 +446,10 @@ Four things, named here rather than left for you to find out.
 
 Two states and one command is a start, not a ceiling. Everything else fileplan
 can do is a field or a flag you add to a table you already have. An order, a
-claim one session at a time takes, and minted numbers are each a line in
+claim one session at a time takes and minted numbers are each a line in
 `plan.toml`. So are bullets cut into an item's body, and dependencies. The example `plan.toml` that
 `fileplan init` writes shows an ordered, numbered state and a command that
 closes an item out. That is the pair most retrofits want next.
-[The method](reference.md) describes the rest. Add what your work actually has,
-write the section its `doc` field names, and ask `fileplan COMMAND --help`
-what the command now takes.
+[The method](../examples/docs/reference.md) describes the rest. Add what your
+work actually has, write the section its `doc` field names and ask `fileplan
+COMMAND --help` what the command now takes.

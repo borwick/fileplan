@@ -7,10 +7,8 @@ pointer, or an anchored citation from the code that implements it. Nothing
 here restates what is written elsewhere.
 
 `plan.toml` holds the *vocabulary* the tool needs to grade items and build the
-CLI: which states exist, which transitions move between them, and which keys
-an item may carry. The meaning of each of those names is here. The split
-between the vocabulary and its meaning is the whole design, and every section
-below is one half of it.
+CLI: which states exist, which transitions move between them and which keys
+an item may carry. The meaning of each of those names is here.
 
 ## States
 
@@ -65,7 +63,7 @@ The state declares **no capabilities**. Nothing here is ordered, numbered or
 claimed. An order is the sequence work is picked up in, and this work
 is not being picked up. The [number](#the-register) the item carried was
 dropped on the way out, like every other capability key. What is left is the
-item's title, its prose, and whatever declared keys it was carrying.
+item's title, its prose and whatever declared keys it was carrying.
 
 **Its files are free to delete**, whenever anyone wants the directory tidy.
 Deleting one is safe because [`decline`](#decline) files an [archive
@@ -117,10 +115,7 @@ claim is one session at a time, and reading a carrier is not holding it.
 
 **The carrier is the state that makes the name form load-bearing.** A
 finding's ident is an ordinal the tool supplies on its own, because there is
-no register here to take one off. So the form says `f{ordinal}`. Until the
-form was declared, [`bulleted`](#bulleted) required
-[`numbered`](#the-register), and a state shaped like this one could not be
-written down.
+no register here to take one off. So the form says `f{ordinal}`.
 
 **The pending bullet is required here too.** An open investigation reads as
 pending. The run that writes the last finding takes the marker out with
@@ -189,11 +184,9 @@ sub-phases go *todo / doing* declares those words instead, and nothing in
 
 **A sub-phase that is over says so on its own bullet**, as a
 [mark](#marking) — `done` here, from a transition that declares
-`marks = "done"`. The status key held a fourth word for it once. Written in
-both places, completion can disagree with itself, and of the two shapes a head
-key is the one that goes stale: a cursor here sat two sub-phases behind what
-had shipped. The bullet is also the shape that can say *5 done, 6 open, 7
-done*. A real corpus reaches that arrangement routinely, and one cursor naming
+`marks = "done"`. Written in both places, completion can disagree with
+itself, and of the two shapes a head key is the one that goes stale. The
+bullet is also the shape that can say *5 done, 6 open, 7 done*. A real corpus reaches that arrangement routinely, and one cursor naming
 one bullet cannot express it at all.
 
 **A sub-phase that is over leaves no status at all.** Every one of the words
@@ -213,9 +206,7 @@ So absence means two things. The **pair** is what tells them apart, the way
 
 The cursor stays because a cursor is a **true record**. `sub-phase 12-4` says
 where the last session was, and that does not stop being so when the sub-phase
-ends. The status is the key that would be lying. A head key whose declared
-meaning is false is exactly the defect completion-on-the-bullet was moved to
-fix, one field over.
+ends. The status is the key that would be lying.
 
 The first row is also what keeps a queued, undecomposed section out of the
 undecomposed report. The report reads the key's presence. So a section nobody
@@ -226,8 +217,8 @@ sub-phases exist.
 
 The carrier an item was [filed](#filing) from, by its slug. The transition
 that files writes the key, never a person. An ordinary declared key is what
-makes `fileplan list --carried-from cache-misses` one read: the filter every
-key gets is the whole of the machinery.
+makes `fileplan list --has carried-from=cache-misses` one read: the filter
+every key gets is the whole of the machinery.
 
 The key is optional, and its absence is the common case. Most items are not
 filed from anything. An item carrying `carried-from` carries
@@ -284,9 +275,8 @@ declared keys the item carries, one flat line each. The body is prose, which
 the tool never interprets and preserves byte for byte.
 
 **A comment inside a head is dropped when the tool writes the file.**
-`tomllib` reads TOML and does not surface comments. Keeping them would mean a
-second TOML parser beside `tomllib`, and this tool takes two runtime
-dependencies. The head is data. Commentary goes in the body, which survives
+`tomllib` reads TOML and does not surface comments, and the tool takes no
+second TOML parser. The head is data. Commentary goes in the body, which survives
 every write untouched. Dropping a comment is the one lossy point in the
 design.
 
@@ -310,7 +300,7 @@ reads from the directory it works in, such as `AGENTS.md`. With that file in
 place every `fileplan list` refuses, saying there is no `+++` head on line 1.
 `ignore` names such files, and every directory fileplan reads as documents
 skips them. Those are the state directories, a key's
-[`directory`](#directory), and a [register](#the-register) kept as a
+[`directory`](#directory) and a [register](#the-register) kept as a
 directory:
 
 ```toml
@@ -341,10 +331,9 @@ AGENTS.md` refuses as any handle that matches no item does. A refusal that
 says the declaration ignores the file would be a special case with nothing to
 buy.
 
-This repo's own list holds two agent files and not `README.md`. A state's
+The worked example lists agent files and not `README.md`. A state's
 meaning has one home, the section its `doc =` points at, and a README beside
-the items is a second copy of that meaning. A consumer may list a README; this
-tree does not.
+the items is a second copy of that meaning. A consumer may list a README.
 
 ### title
 
@@ -378,7 +367,7 @@ list-valued = true
 
 The head then holds a TOML list. Every reader treats the value as
 [the several values it holds](#the-listing) rather than as one value: a filter
-matches an entry, a comparison compares each entry, and a `refuses` fires on
+matches an entry, a comparison compares each entry and a `refuses` fires on
 an entry. The refusal names **that entry** rather than the list. A
 `refuses` of `true` fires on any list that is not empty. One filter
 asks about the **whole** list instead, and the filter that does is
@@ -405,16 +394,23 @@ Shapes that refuse **by name**, each a silent failure rather than a loud one:
   write, so [`--check`](#the-check) gives it in the same words.
 * a **field where the tool itself puts or reads exactly one value** naming a
   list-valued key, refused when the declaration loads. The fields are the two
-  [cursor](#the-cursor) fields, [the dangle check](#the-dangle-check)'s field,
+  [cursor](#the-cursor) fields, [the dangle check](#the-dangle-check)'s field
   and the two [filing](#filing) roles. Each writes or reads a bare value, so a
   list-valued key there would silently hold the wrong shape.
+* an **entry holding a comma**, given to a list-valued key by any
+  transition's option. [`--has 'KEY:a,b'`](#the-listing) reads the comma as a
+  separator between values, so an entry holding one could never be matched.
+  The refusal names the entry and the option, and says to repeat the option
+  once per entry. It comes before the first write, so
+  [`--check`](#the-check) gives it in the same words. A fixed value in a
+  list-valued key whose entry holds a comma refuses when the declaration
+  loads.
 
 [`dependencies`](#dependencies) is the deliberate exception and refuses
 nothing. A bare string is already one edge and a list is already many, so a
 list-valued dependency key is the case that works.
 
-A key says it holds several, or it holds one. Holding one is the default,
-which is what every key had before the field existed.
+A key says it holds several, or it holds one. Holding one is the default.
 
 ### directory
 
@@ -436,7 +432,7 @@ Each value is then a repo-relative path naming a file directly inside
 
 The files in the directory are the `*.md` files directly inside it, the same
 rule a [register](#the-register) kept as a directory reads by. A file below a
-subdirectory, a file with another extension, and a name
+subdirectory, a file with another extension and a name
 [`ignore`](#ignore) lists are left alone. Paths compare
 as POSIX paths, so `./sketches/a.md` and `sketches/a.md` name one file, and
 `sketches/` and `sketches` are one directory.
@@ -472,7 +468,7 @@ sessions.
 
 ### the claim
 
-A **claim** says an item is being worked on, by whom, and since when. A claim
+A **claim** says an item is being worked on, by whom and since when. A claim
 lives at `local/claims/<slug>.toml`, one flat TOML table. The record is the
 same shape as a head and unfenced, so `cat` shows something a reader can
 parse. The slug is the record's location and never a field inside it.
@@ -514,8 +510,7 @@ claim-holder=this-session` [lists what this session holds](#the-claimed-state).
 
 The liveness probe is `os.kill(pid, 0)`, asked only about a record written on
 **this** host. On any other host the tool reports the claim as held elsewhere
-and never signals anything. The answers are alive, dead, held elsewhere, and
-unknown — a record carrying no pid.
+and never signals anything. The answers are alive, dead, held elsewhere and unknown — a record carrying no pid.
 
 **A dead claim is named, never auto-released.** The listing reports the item
 as claimed by a session that is gone. Freeing the claim is a command somebody
@@ -610,10 +605,11 @@ there would deadlock a tree with no way out, since [`release`](#release) would
 have nothing to free either. Reading a missing record as unclaimed fails in
 the safe direction.
 
-A **malformed record refuses the listing by name**, which is the other half of
-the same rule. A record that is not there means unclaimed. A record that
-exists and cannot be read says something the tool does not understand about
-who holds an item. Reading an unreadable record as free is the one direction a
+A **malformed record refuses by name wherever it is read**: the listing, a
+transition touching its item, and `release`. This is the other half of the
+same rule. A record that is not there means unclaimed. A record that exists
+and cannot be read says something the tool does not understand about who
+holds an item. Reading an unreadable record as free is the one direction a
 claim must never fail in.
 
 Who may move a claimed item: the session that holds it, or anyone when the
@@ -653,7 +649,7 @@ removes it, and `release` may not resolve its slug at all. Counting it would
 give a refusal whose own fix fails.
 
 **A claiming run given nothing else is supported.** It takes the claim, leaves
-the item's file as it was, and exits 0, and stderr says the file is unchanged
+the item's file as it was and exits 0, and stderr says the file is unchanged
 because only the claim was taken. A session can therefore claim an item before
 a long read and write its result with the same transition afterwards, without
 a sibling picking the item up in between.
@@ -723,10 +719,9 @@ declaration. Nothing in the tool's source knows what the example calls them.
 The example ships as package data, because after an install there is no repo
 to walk up from.
 
-What `init` declares is **one loop and nothing else**: two states with
-placeholder names, the four transitions of capturing, queueing, working and
-closing an item, one key, and the two capabilities the close needs, `queued`
-and `numbered`. The starter fits one screen, and the initialization document
+What `init` declares is **one loop and nothing else**: states with
+placeholder names, the transitions that capture, queue, work and close an
+item, a key and the capabilities the close needs, `queued` and `numbered`. The starter fits one screen, and the initialization document
 says what each line does. The whole
 roster — [the queue](#the-queue), [the claim](#the-claim),
 [the register](#the-register), [sub-phases](#sub-phases),
@@ -813,8 +808,8 @@ ERROR: plan.toml needs fileplan 0.9.0 or newer, and this is fileplan 0.7.0: upgr
 ```
 
 **The check has one honest limit.** A release older than the first one to
-know `[fileplan]` cannot read the table either. That release says `fileplan
-is not a plan.toml table`, which names the table and not the cure.
+know `[fileplan]` cannot read the table either. That release says "fileplan
+is not a plan.toml table", which names the table and not the cure.
 
 ### the skills
 
@@ -858,7 +853,7 @@ makes.
 
 `fileplan list` is the one read, and it is **one traversal with two
 renderings**. The listing is a read rather than a transition: it moves
-nothing, writes nothing, and takes no lock. The traversal walks the declared
+nothing, writes nothing and takes no lock. The traversal walks the declared
 states in declared order. The traversal claims every `*.md` in a state to be
 an item. A file that is not an item refuses the listing by name rather than
 being skipped. Silence would make a broken file look merely absent. The one
@@ -874,7 +869,7 @@ slug. [`plan`](#plan) declares `sort = "position"`, so `plan` lists in the
 order [`queue`](#queue) and [`requeue`](#requeue) set.
 
 The load checks that a state's `sort` names a key an item in that state can
-carry. That covers `title`, every declared key, and the keys this state's own
+carry. That covers `title`, every declared key and the keys this state's own
 capabilities and fields give. `position` counts only on a
 [queued](#the-queue) state, and [`stale-days`](#stale-days) counts on every
 state. Any other key refuses by name, and the refusal lists
@@ -906,8 +901,7 @@ state by its declared **name**, never by its directory — one spelling per
 state.
 
 A row names its file by `path`, relative to the folder holding `plan.toml`.
-Every other message names a path the same way. That covers a refusal, a
-notice, and the path a run prints. So there is one spelling per file too. A
+Every other message names a path the same way. That covers a refusal, a notice and the path a run prints. So there is one spelling per file too. A
 consumer reading a refusal beside a row matches the two without stripping a
 prefix. Two paths are named as given. One is `plan.toml` itself, because it
 says which declaration was read. The other is any path outside that folder,
@@ -931,7 +925,7 @@ rather than written and there is nothing to set. The claim fields are `null`
 on an item nothing claims. They are present on every row whenever the
 declaration claims at all, so the shape does not depend on which items are
 filed. They filter like any declared key. `--lacks claimed-by` is the
-unclaimed work, `--has claim-status=dead` is what needs releasing, and `--has
+unclaimed work, `--has claim-status=dead` is what needs releasing and `--has
 claim-holder=this-session` is what this session holds.
 
 Beside the claim fields, every row carries
@@ -970,8 +964,8 @@ could take.
 
 **An empty tree says how to file the first item.** Where the traversal
 found nothing at all, the text form ends with one line per create
-transition, such as ``Nothing is filed. `fileplan capture TITLE --body
-TEXT` files one in inbox.`` A listing that filters a tree down to nothing
+transition, such as ``Nothing is filed. `fileplan idea TITLE --body TEXT`
+files one in someday-maybe.`` A listing that filters a tree down to nothing
 says nothing more, because the tree is not empty.
 
 A claim belongs to an item **in a claimed state**, and every other record is
@@ -979,7 +973,7 @@ A claim belongs to an item **in a claimed state**, and every other record is
 kind names an item that has since moved to a state which claims nothing. A
 transition already keeps that same rule, so the listing and the transition
 agree. Otherwise one of the two would report a claim the other will not
-honour. A stranded claim is **named, never filtered and never removed**. Each
+honor. A stranded claim is **named, never filtered and never removed**. Each
 stranded claim is one line on stderr in the text form, and one entry in a
 `stranded` array in `--json`'s envelope. The array is present whenever the
 declaration claims. [`release`](#release) or `rm` is how a stranded claim goes
@@ -1071,21 +1065,35 @@ because omission is how a record spells "absent". `--json` is one object on
 one line and keeps the `null`s. A consumer can test `null` and cannot test a
 dash. Neither rendering walks the tree itself, so the two cannot disagree.
 
+`--fields KEY`, repeated, prints each row on one line holding only the keys
+named, in the order named, under a header line of their names:
+`uv run fileplan list --state plan --fields number --fields slug --fields next-sub-phase --fields title`.
+The columns line up under the header. A column cannot leave a cell out, so
+`-` stands in the cell where the item lacks the key or holds it empty. A
+list-valued key joins as the record joins it. `--fields` takes `slug`,
+`state` and `path` beside every key `--has` names. An unknown key refuses by
+name before the walk, listing the fields a row carries, and so does a key
+named twice. With `--json`, each row holds only the keys named, the envelope
+is unchanged, and `null` stays the absent value there. The projection comes
+after every filter and every sort, so `--sort` may order the rows by a key
+that `--fields` leaves out. `show` does not take `--fields`, because its
+record already holds every key.
+
 `--json` puts the counts in its envelope and leaves **stderr silent**, so a
 consumer parses one thing. In the text form the counts go to stderr, so
 `fileplan list | ...` carries the records and nothing else. A refusal emits
 **no JSON** either way: rc 2, an `ERROR:` line and one indented line for each
 further defect, empty stdout.
 
-There are **three** filters, and several narrow together. `--has
-KEY[OP]VALUE` is the filter over a key. `--has` names a key, then says
-something about that key. A value may carry a **comparison**: `--has
-'size>=L'`, `--has 'stale-days>=14'`. A key with declared `values` orders by
-that list. So `>=` means something only because `plan.toml` puts the values in
-order. A key the filter does not know refuses by name, listing what an item
-can carry. A field the row reads off the tree (`slug`, `state`, `path`) is not
-a key. It refuses as a row field, and `state` points at `--state`. A value
-outside a key's `values` refuses by name too.
+Several filters narrow together. `--has KEY[OP]VALUE` is the filter over a
+key. `--has` names a key, then says something about that key. A value may
+carry a **comparison**: `--has 'size>=L'`, `--has 'stale-days>=14'`. A key
+with declared `values` orders by that list. So `>=` means something only
+because `plan.toml` puts the values in order. A key the filter does not know
+refuses by name, listing what an item can carry. A field the row reads off the
+tree (`slug`, `state`, `path`) is not a key. It refuses as a row field, and
+`state` points at `--state`. A value outside a key's `values` refuses by name
+too.
 
 `:` reads as **drawn from**, and `:` is the one operator naming several
 values. `--has 'pest:aphid,scab'` asks whether every value the key carries is
@@ -1099,12 +1107,13 @@ names itself. A declared value carrying a comma cannot be named this way. A
 `~` reads as **contains**. `--has 'title~review'` finds every item whose
 title holds the word, ignoring case. Over a list-valued key it asks each
 entry. It is a substring and not a pattern, because a pattern would be a
-second language to document. The body is not searched, since the body is not
-in the row. A key with declared `values` refuses `~` by name. Those values
-compare by order, so a substring of one is the wrong question.
+second language to document. `~` reaches only what a row holds, and the body
+is reached by the bare WORD below. A key with declared `values` refuses `~` by
+name. Those values compare by order, so a substring of one is the wrong
+question.
 
 `--has` reaches **every key an item can carry** — intrinsic, declared, given
-by a capability, and derived from outside the item file — off one roster. So
+by a capability and derived from outside the item file — off one roster. So
 no key needs a filter of its own: a key that reaches a row reaches `--has`.
 `--has KEY` with no comparison asks about **presence**. A key present but
 empty carries nothing, the same rule `requires` uses. `--lacks KEY` is the
@@ -1116,9 +1125,20 @@ item with no `size` is genuinely not `L`, and absence is what `--lacks` asks
 about. `--has 'KEY:VALUE,…'` is false of that item. `--has` is the presence
 word, and a guard has to be conservative about an item saying nothing.
 
-`--state [OP]STATE` is the third filter, and the one that is not a key.
-`--state` says where an item **is**, which is the tool's own axis rather than
-the workflow's vocabulary. The declared states are a closed list like a key's
+A bare **WORD** is the filter that reaches the body. `fileplan list table`
+finds every item whose title or body holds the word "table", ignoring case. The
+match is the rule `~` uses: a substring and not a pattern. Within each state,
+an item whose title holds the word comes before an item whose body alone holds
+it, and each of the two groups keeps the state's usual order. The row printed
+for a hit is the row the listing always prints, with no matched line added,
+in the text form and in `--json` alike. The WORD narrows together with
+`--state`, `--has`, `--lacks` and `--sort`. A `list` given a WORD and no
+`--state` still leaves out the states that are not listed, and the footer
+still says what it left out.
+
+`--state [OP]STATE` is the filter that is neither a key nor a word. `--state`
+says where an item **is**, which is the tool's own axis rather than the
+workflow's vocabulary. The declared states are a closed list like a key's
 `values`. So `--state '!=plan'` is spelled the same way, and `--state zzz`
 refuses by name rather than matching nothing. `--state ':plan,carrier'` is
 that operator over the same closed list, and nothing reaches for it.
@@ -1126,8 +1146,10 @@ that operator over the same closed list, and nothing reaches for it.
 **`--state` is given once.** `--has` and `--lacks` repeat and narrow
 together, so a repeated `--state` looks as if it should too. Click would keep
 the last one and drop the rest without a word. So a second `--state` refuses,
-naming both. `fileplan list plan` names a state as an argument, and click
-refuses it. The line after click's says `did you mean --state plan?`.
+naming both. `fileplan list plan` is a search for the word "plan", since a
+bare word is a WORD. A second bare word is refused by click, and when that
+second word names a state, as in `fileplan list table plan`, the line after
+click's says `did you mean --state plan?`.
 
 A state can leave its rows out of a `list` given no `--state`, and the read
 says what it left out. [`listed`](#listed) is that field's home.
@@ -1230,10 +1252,9 @@ spelled a second time. So the row and the run agree by construction, instead
 of by a test that two lists match.
 
 **What could a command take is a filter.** `fileplan list --has
-commands=archive-plan` is the sections that could close right now, which is
-the old tool's `--closeable`. Earlier releases spelled it as a third read,
-`fileplan next COMMAND`. Folding it into the row left two reads, `list` and
-[`show`](#show), and every filter, sort and rendering a listing has.
+commands=archive-plan` is the sections that could close right now. It needs
+no read of its own: `list` and [`show`](#show) are the reads, with every
+filter, sort and rendering a listing has.
 
 **A transition that stays in its state is named again after it runs.**
 Running it again is legal. A workflow that means "once" says so in the
@@ -1282,15 +1303,14 @@ row. So `show` prints what `list` would print, narrowed to one item.
 
 `show` takes **no filters**. A filter narrows a *set*, and `show` has already
 been told which item. Worse, `--state` on an item that is somewhere else would
-report "no such item" about an item that plainly exists. `show` reporting no
-such item is the exact failure tree-wide resolution was adopted to end. The
+report "no such item" about an item that plainly exists. The
 one flag `show` does take is `--json`, because how a row is rendered is not a
 narrowing.
 
 `show` prints the **row**, never the body. `cat` the `path` the row names to
 read the prose. What the row adds is everything the file does not hold —
 `claimed-by`, `claim-status` and `claim-holder`, `blocked-by` and `blocks`,
-`stale-days`, `commands`, and the fields counted off the body. Putting the body in the row would put the body in
+`stale-days`, `commands` and the fields counted off the body. Putting the body in the row would put the body in
 *every* `list --json` as well. The token budget rules that out. Putting the
 body in only one rendering would break the very thing that makes both
 renderings agree.
@@ -1333,7 +1353,7 @@ about one item would be the first read to hide one.
 
 `fileplan COMMAND --help` is what a transition promises. First the options the
 command takes, then the **contract**. The contract says where the item goes,
-what the transition requires, what it refuses, and what it takes off the head.
+what the transition requires, what it refuses and what it takes off the head.
 The contract also says the transition's [kind](#kinds) and the options it
 declares, and names the sections that hold the meaning of all of it.
 
@@ -1355,24 +1375,20 @@ The contract is generated from the same `Transition` the command itself is
 generated from. So a consumer's transitions get the same contract, and no
 transition of this repo's is written anywhere in the tool.
 
-The **`Reading` block** hands the pointers over. `doc =` has been graded at
-every invocation since the loader existed. A pointer at a document the repo
+The **`Reading` block** hands the pointers over. `doc =` is graded at every
+invocation. A pointer at a document the repo
 does not ship refuses. The transition's own `doc` is the **program**: the
 section that says what running this transition means, and what a session reads
 before doing the work. Each key the transition takes as an option names the
 section that says what the key's value means, and so does each key a filing
-transition writes onto the filed item. The key's `help` was always on the option, and
+transition writes onto the filed item. The key's `help` is on the option, and
 the `help` says what to pass rather than what the key is.
 
 **`doc` is optional on every entry.** A transition or a key whose meaning
 needs no section of its own names none, and its line is left out of
 `Reading`. A transition naming none, with no key naming one either, carries
 no `Reading` block at all, and then its `help` line is the whole of what a
-session reads. That pulls against the design's rule that the process lives
-in documents a transition points at, and the way through is that the rule
-is still kept by any workflow that writes a section: the pointer is graded
-exactly as before wherever it is given. What changed is that a new repo is
-no longer made to write an empty heading per word before its first run.
+session reads. The pointer is graded wherever it is given.
 
 The tool surfaces the pointers rather than leaving a reader to find them. A
 skill that opened `plan.toml` to look up a pointer would be **a second parser
@@ -1381,7 +1397,7 @@ that it interprets rather than reimplements.
 
 `Reading` is keyed by name. So a transition setting a key of the transition's
 own name refuses at load. The two pointers would share one line, the key's
-pointer would win, and the transition's own program would be lost. The loader
+pointer would win and the transition's own program would be lost. The loader
 names the collision rather than dropping a pointer.
 
 A key refused on presence reads `KEY (any value)` in `Refuses`, and `true`
@@ -1420,9 +1436,8 @@ takes for a key lands on the item the run moves. So the `Files` block is how
 the declared table with its `sets`, or `null` for a transition that files
 nothing.
 
-**`--help` describes the declaration.** [`list`](#the-listing), [`next
-COMMAND`](#commands) and [`show`](#show) walk the **tree** and are the
-whole of that read surface. `--help` and the bare `fileplan` table of contents
+**`--help` describes the declaration.** [`list`](#the-listing) and
+[`show`](#show) walk the **tree** and are the whole of that read surface. `--help` and the bare `fileplan` table of contents
 answer a different question, with different answers and no items in them.
 Nothing in a contract counts, filters or resolves a handle.
 
@@ -1461,7 +1476,7 @@ The entries are read off the same click parameters `--help` renders, so the
 JSON and the help cannot disagree. A test runs `--help` for every command and
 holds each option it prints to the JSON.
 
-`commands` holds the tool's own words: `list`, `show`, `init`, and `release`
+`commands` holds the tool's own words: `list`, `show`, `init` and `release`
 where some state is claimed. Each command has a `name`, a `help`, `options`
 and `commands`, which is empty: none of them nests another. The tool's own
 words are not transition objects, because a transition object's `from`, `to`
@@ -1469,9 +1484,6 @@ and blocks would all be empty for them.
 
 `keys` holds every declared key, with its `name`, `help`, `doc` and `values`.
 `values` is the closed set, or `null` for free text.
-
-Adding these fields did not change `version`. A field added is never a bump,
-as [the listing](#the-listing)'s "What `version` promises" says.
 
 A command beside the flag **refuses**. `fileplan --json list` asks about the
 declaration and about the tree at once. A read spells its own `--json`, after
@@ -1509,7 +1521,7 @@ runs are brief.
 
 The sentence is built from the effects the run has **already computed**. The
 effects are the place and number the run would write, the keys it would take
-off the head, the claim, the archive entry, and the edges it would clear. None
+off the head, the claim, the archive entry and the edges it would clear. None
 of those effects is re-read off the declaration, so the sentence cannot claim
 something the run would not do. [The register](#the-register) computes its
 notices from what the head actually got, for the same reason.
@@ -1572,8 +1584,8 @@ help = "Write the next sub-phase into a section."
 from = "plan"
 ```
 
-There are ten kinds, and the kind decides which other fields the
-transition takes. A field the kind does not take refuses by name, and the
+The kind decides which other fields the transition takes. A field the
+kind does not take refuses by name, and the
 refusal lists the fields the kind does take.
 
 | Kind | What it does | `from` and `to` | Its own fields |
@@ -1603,19 +1615,10 @@ says to write `edit` or `reorder`. A reorder refuses in a state that is not
 `queued`, because the items there have no order to change. An edit that names
 no `sets`, no `drops` and no `claims` refuses, because it would write nothing.
 
-**Why a kind is declared.** Before kinds, a transition never said what
-it was. Six true/false fields said it between them, and each refused some of
-the others: `mints` and `marks` could not go together, `absorbs` needed
-`dissolves`, and `dissolves` refused a `to`. A reader had to learn those rules
-to predict which options a command would take. The command line was then
-worked out from the fields in many separate places. Every transition in this
-repo, in the starter and in the consumer's workflow fits exactly one kind, so
-the kind is now written down and those rules collapse into the table above.
-
 A plan.toml written before kinds refuses by name, and the refusal says the
 line to write. The kind it suggests is read off the fields that used to spell
 it: no `from` is a create, `mints` an add-bullet, `marks` a mark-bullet,
-`retitles` a rename, `dissolves` a close, and `dissolves` with `absorbs` a
+`retitles` a rename, `dissolves` a close and `dissolves` with `absorbs` a
 merge. A `to` that differs from `from` is a move. A transition staying where
 it is becomes an edit if it writes a key or a claim, and a reorder if it does
 not. The four fields that did nothing but spell a kind (`mints`, `retitles`,
@@ -1627,7 +1630,7 @@ One skill runs any single declared transition, and the sections the contract
 names are the program that skill runs. The skill asks the tool for the
 [contract](#the-contract), then asks with [`--check`](#the-check) whether this
 item passes. The skill then reads the sections the contract names, does what
-those sections say, and runs the command. The skill branches on the
+those sections say and runs the command. The skill branches on the
 [kind](#kinds) and the options the contract says the transition **declares**,
 never on the transition's name. So one procedure covers a create, an edit and
 a close. A stranger can follow the same procedure for a transition nobody has seen
@@ -1645,14 +1648,13 @@ warns about — that section links to a section of the procedures document:
 
 ```
 What a session does around a run of `decompose` is [decomposing a
-section](procedures.md#decomposing-a-section).
+section](../../docs/procedures.md#decomposing-a-section).
 ```
 
 Most transitions have no procedure beyond their meaning, and their section
 links to none. One pointer per transition keeps the declaration to one field
-for one question. Earlier releases had a second field, `policy =`, and a
-`Running it` block in the contract. A plan.toml that still declares `policy`
-refuses by name and says to move the link into the section. This repo's
+for one question. A plan.toml that declares `policy` refuses by name and
+says to move the link into the section. This repo's
 tests grade that every section of the procedures document is linked from the
 section of a transition that uses it.
 
@@ -1714,7 +1716,7 @@ Every row then carries **`blocked-by`**. The field holds the slugs this item
 waits on that are **still filed**, and `null` where it waits on nothing.
 `blocked-by` is present whenever the declaration has such a state at all,
 whether or not any item is filed in one. The field filters like any other:
-`--has blocked-by=<slug>`, `--has blocked-by`, and `--lacks blocked-by` for
+`--has blocked-by=<slug>`, `--has blocked-by` and `--lacks blocked-by` for
 the work nothing filed is in the way of. A state that names no key reads none.
 So an item carrying the key *there* carries a fact nothing was declared to
 read.
@@ -1724,13 +1726,11 @@ the filed items whose edges name this one, or `null` where nothing waits on
 it. It comes off the walk that gives `blocked-by`, so it costs no second one.
 Before declining or reworking an item, `show` says who depends on it.
 
-**An edge naming nothing is named, never read as satisfied.** The old tool's
-rule was the other way round. A dependency was satisfied by *absence*, and
-deliberately so: a closed section's file is deleted, so "has it finished?" and
-"is its file gone?" were one question. The cost was that a **typo'd slug is
-never present either**. It read as satisfied, and nothing ever said so. Here
-the complement is kept. What is filed is `blocked-by`, and an edge naming
-nothing filed is a line in the **default** read —
+**An edge naming nothing is named, never read as satisfied.** A closed
+section's file is deleted, but a **typo'd slug is never present either**, so
+reading absence as satisfied would hide the typo. What is filed is
+`blocked-by`, and an edge naming nothing filed is a line in the **default**
+read —
 
 ```
 unknown dependency: skills-as-interpreter names "exits-archve" in after, and
@@ -1884,8 +1884,7 @@ Every row carries **`stale-days`**: the whole days between the item file's
 
 **Nothing is stored to make that number.** There is no head key, no stamp a
 transition writes, no counter anywhere. The anchor is already in git, and git
-is read when the listing runs. (John settled that, asked as: the
-file's last commit, its first commit, or a sha a transition stamps.) A stored
+is read when the listing runs. A stored
 grade would be true on the day it was written, and true-looking forever after.
 The rule this repo keeps is that stale data is worse than none, and that
 nothing cheap to re-derive gets stored. Unlike `claims` or an `add-bullet`
@@ -1913,11 +1912,10 @@ not a git repo, or a file git has never been given. A tree that is not a repo
 **lists normally**: every value `null`, no traceback, rc 0. A consumer's tree
 need not be in git, and that costs them nothing.
 
-**Why there is no switch.** Earlier releases had a state opt into a `dated`
-capability, so no history was walked where nobody asked for one. The walk
-costs milliseconds, and a switch is a setting a newcomer has to learn about
-before seeing a number that every listing can show. A plan.toml that still
-names `dated` refuses by name and says to drop it.
+**There is no switch.** The walk costs milliseconds, and a switch is a
+setting a newcomer has to learn about before seeing a number that every
+listing can show. A plan.toml that names `dated` refuses by name and says to
+drop it.
 
 `stale-days` filters like any other field. `--has 'stale-days>=14'` is what
 nobody has been near in a fortnight. The comparison is numeric, because both
@@ -2012,7 +2010,7 @@ on the run that opens the carrier, and no transition writes it by itself.
 declares `archives` takes the item away and writes the record that outlives
 it. So the transition **refuses** while a carrier still
 names that item and holds a finding nothing has [marked](#marking). The
-refusal names the carrier's file, the declared key it names the item in, and
+refusal names the carrier's file, the declared key it names the item in and
 how many of its bullets carry no mark. The kind and the option are both
 needed, because the harm is the **dangle**. Only a transition that takes the
 file away creates a dangle. A section given up on instead lives on where the
@@ -2100,9 +2098,8 @@ and the old one left where it is.
 holds still comes from the two writers above. The floor says only where the
 walk starts. The floor claims nothing about what is below it. A stored
 high-water mark is a fact about the corpus kept somewhere the corpus does not
-control, and it can therefore disagree with the corpus. The old tool's
-archived range line was such a mark, and a `numbered-through = 191` would
-assert one in its own name. A source that *does* claim a number below the
+control, and it can therefore disagree with the corpus. A
+`numbered-through = 191` would assert one in its own name. A source that *does* claim a number below the
 floor **refuses at the mint**, naming the number and the source that holds it.
 The declaration and its own corpus contradict each other. Clamping the mint up
 to the floor instead would leave a hole the gap walk starts above and could
@@ -2114,7 +2111,7 @@ refuse a filing below is the same rule, one field over.
 `archive`. An archive is a document that must exist to be read, and a floor is
 a bound with a correct default. This repo declares none. Its register starts
 at 1, so absence is the worked example. A declared floor is graded at load. A
-value that is not a whole number, one below 1, and one on a state that opts
+value that is not a whole number, one below 1 and one on a state that opts
 into no register each refuse by name.
 
 **The read carries the register itself**, one record per numbered state. The
@@ -2139,9 +2136,7 @@ and [the listing](#the-listing) names it on every read. There is no allowlist,
 because an allowlist covers only the lost close-outs somebody remembered to
 name. A closed item's heading is the **only** record that its number is taken.
 So a heading the parse cannot read drops that number silently, and frees the
-next item to mint it again. It happened in the old tool: `## Section 168:`
-shipped where `## 168.` was needed. The gap check below structurally cannot
-catch it.
+next item to mint it again. The gap check below structurally cannot catch it.
 
 Three more rules, and then what is left blind:
 
@@ -2459,9 +2454,8 @@ item's number in the archive, what it decided and what it shipped.
 **A move that archives takes `--record` too, and there it is optional.** The
 moved item survives in its new state, so mint-then-fill still works.
 [`decline`](#decline) given `--record` files the heading with the prose under
-it in one run. Without `--record`, `decline` mints the heading alone, exactly
-as it did before the option existed, and the prose is written under it by
-hand. A move can declare `sets`, so a key called `record` there refuses **by
+it in one run. Without `--record`, `decline` mints the heading alone, and the
+prose is written under it by hand. A move can declare `sets`, so a key called `record` there refuses **by
 name**, which is [the check](#the-check)'s rule.
 
 **What the run prints.** stdout is the **archive document** when the
@@ -2487,14 +2481,13 @@ is not queued refuses by name.
 
 **A queued state sorts by `position` unless it says otherwise.** The
 `queued` capability holds places, and the state's `sort` is what lists items
-by them, so `position` is the one sensible default. Earlier releases refused
-a queued state with no `sort` and said to add the line; a default does the
-same job without the refusal, and the bare `fileplan` overview prints
-`sorted by position` beside the state, so the choice is never hidden. Any key
+by them, so `position` is the one sensible default. The bare `fileplan`
+overview prints `sorted by position` beside the state, so the choice is never
+hidden. Any key
 the state carries may be the sort.
 
 **Places are 100 apart**, so there is room between any two. A new place is
-the midpoint of its two neighbours. So filing something between two items
+the midpoint of its two neighbors. So filing something between two items
 touches no other row, and a place cited last sitting still means the same
 item. A bare placement appends 100 past the last. `--above ITEM` and `--below
 ITEM` take the midpoint beside that item. `--at N` names the place outright,
@@ -2510,9 +2503,7 @@ and **does nothing else**. Where the item goes in the order is the whole of
 what a reorder has to say. [`requeue`](#requeue) is the shape, and it is the
 only one this repo declares. Every other kind takes none of them.
 [`work`](#work) says which sub-phase a session is on, and
-[`finish`](#finish) marks a bullet. Neither is about the order. A command that
-offered three options about the item's place while writing something else was
-the surface saying it did more than it does.
+[`finish`](#finish) marks a bullet. Neither is about the order.
 
 No field declares this. A command that loses an option it used to take refuses
 by name at rc 2, click's own `no such option`. The refusal is the loud failure
@@ -2523,7 +2514,7 @@ transition has to opt into.
 asks otherwise. Naming no place is not a request to be moved. Appending
 instead would let a run silently destroy an order somebody set deliberately.
 
-**Nothing renumbers a neighbour.** A gap can be exhausted, with two rows
+**Nothing renumbers a neighbor.** A gap can be exhausted, with two rows
 already adjacent. The tool then refuses and names the respacing, rather than
 shifting rows to make room: give the rows around it places 100 apart with
 `--at`, then ask again. A queue that respaces itself is one the operator
@@ -2562,7 +2553,7 @@ question, and taking the first silently is the drift counting was chosen to
 avoid.
 
 **Only bullet-shaped lines are graded**, and only `- ` counts. A line is
-bullet-shaped when a marker (`-`, `*`, `+`, or `1.`) is followed by
+bullet-shaped when a marker (`-`, `*`, `+` or `1.`) is followed by
 whitespace. Every other bullet-shaped line refuses, naming the line and what
 it holds. Prose at column zero is ignored however it starts. An italic
 `*Each is one session…*` opens a body and is not a bullet, which is how
@@ -2660,35 +2651,29 @@ was ever the cursor's to hold twice.
 
 The two keys are the **workflow's**, declared like any other, and the state
 says which is which. The worked example, `examples/plan.toml`, declares them
-so:
+so (its cursor lines):
 
 ```toml
 [states.plan]
-path             = "plan"
-doc              = "../docs/reference.md#plan"
-capabilities     = ["queued", "claimed"]
-sort             = "position"
-sub-phases       = "Sub-phases"
-sub-phase-cursor = "sub-phase"
-sub-phase-status = "sub-phase-status"
+sub-phase-cursor  = "sub-phase"
+sub-phase-status  = "sub-phase-status"
 
 [keys.sub-phase]
-doc  = "../docs/reference.md#the-cursor"
+doc  = "docs/reference.md#the-cursor"
 help = "Which sub-phase is current, by the name its bullet carries."
 
 [keys.sub-phase-status]
-doc    = "../docs/reference.md#sub-phase-status"
+doc    = "docs/reference.md#sub-phase-status"
 help   = "How far the current sub-phase has got."
 values = ["open", "planned", "in progress"]
 ```
 
 The cursor key's own home is this section. The status key's is
-[`sub-phase-status`](#sub-phase-status), because its three *words* are a
+[`sub-phase-status`](#sub-phase-status), because its *words* are a
 meaning of their own.
 
 **Name the pair.** A status key is the cursor key plus `-status`. So the two
-read as halves of one thing wherever they appear. The two appear in a head, in
-a row, and in the options the transitions that write them take. The state
+read as halves of one thing wherever they appear. The two appear in a head, in a row and in the options the transitions that write them take. The state
 names both keys, so any two words would work. The alternative is a reader
 having to open `plan.toml` to learn which status belongs to which cursor.
 
@@ -2707,7 +2692,7 @@ more status. The closed set is the shape the tool needs, rather than the
 words, which stay the workflow's.
 
 **A cursor holds a sub-phase's name**, not its ordinal. An ordinal is not a
-stable reference. Insert a bullet, reorder two, or expand a *pending further
+stable reference. Insert a bullet, reorder two or expand a *pending further
 decomposition* bullet into three real ones. Then "sub-phase 3" silently means
 different work. Within a single session that drift is survivable. The drift
 stops being survivable the moment a reference outlives the session. A claim
@@ -2720,16 +2705,16 @@ is a [name](#sub-phases) from the start.
 A cursor is checked **before anything is written**, on any transition that
 sets it. A value naming no sub-phase this body carries refuses, naming the
 value and the names available. That catches a typo'd reference as well as one
-that points past the end. A range check caught only the second. A value
+that points past the end. A value
 naming an unnamed bullet refuses the same way, saying which body line needs a
 name. Nothing falls back to an ordinal, because a silent fallback is the
 failure being removed. A section that has not started carries no cursor at
 all, which is the ordinary case and is not a defect.
 
 **What says a sub-phase is over is a [mark](#marking) on its bullet**, and
-the head says nothing about it at all. There is no third field naming which
-status word is terminal. There was one, and it went, because completion
-written in both places is completion that can disagree with itself. Any
+the head says nothing about it at all. No field names which status word is
+terminal, because completion written in both places can disagree with
+itself. Any
 declared mark ends a sub-phase. Which one it is says *how* it ended, and nothing in `src/`
 knows either word.
 
@@ -2757,14 +2742,12 @@ something left to pick up. And `[keys.next-sub-phase]` refuses as a
 redeclaration, because it too is read off the body.
 
 **`next-sub-phase` is in the default read, behind no flag.** The failure it
-exists to catch is a cursor somebody forgot to move. A cursor here sat two
-sub-phases behind what had shipped, and nothing in the written process moved
-it. A process step is a flag you have to know to pass. A line in the default
+exists to catch is a cursor somebody forgot to move. A process step is a flag you have to know to pass. A line in the default
 listing saying the next sub-phase is one already behind needs no flag at all.
 
 **And a cursor is refused onto a marked bullet, at the moment it is
-written.** This is the one place the rule reversed. What reversed it is that a
-mark is data the tool wrote, rather than `**Done**` read out of prose. A run
+written.** This is safe because a mark is data the tool wrote, rather than
+`**Done**` read out of prose. A run
 that *sets* the cursor onto a sub-phase already marked refuses before anything
 is written. The refusal names the value and the mark the bullet carries.
 Picking a cursor **up** and putting it on something already disposed of is the
@@ -2778,9 +2761,7 @@ a cursor may be written exactly when the section could close.
 
 **A transition that *marks* moves the cursor onto the bullet it marks**,
 wherever the state keeps a cursor. [`archive-plan`](#archive-plan) requires
-the cursor key. Three sections in a row marked every sub-phase without a
-session ever running [`work`](#work), and each was locked out of the close
-until somebody ran it by hand. A process step is a flag you have to know to
+the cursor key. A process step is a flag you have to know to
 pass. The mark is the run every sub-phase ends with, so writing the cursor
 there keeps it current by construction. The cursor then says
 which sub-phase a session last picked up **or** last finished.
@@ -2827,8 +2808,8 @@ halves too. Coupling the two to arrival would put `--title` on every
 transition into the state, and any of them could cut a section up on a run
 about something else. Either half alone refuses by name.
 
-`bulleted` is the first capability whose state is the item's **body**. The
-other three write a head key or a file beside the item. `bulleted` writes
+Unlike the other capabilities, `bulleted`'s state is the item's **body**.
+`bulleted` writes
 prose, in the strict form the reader already knows. So a mint and a count
 cannot drift into two parsers that disagree.
 
@@ -2861,9 +2842,7 @@ is; or leaving a brace unclosed. Its *fields* are graded too, against what an
 item in that state can actually hold. `{number}` on a state that is not
 [numbered](#the-register) refuses, saying which capability gives it. And a
 field nothing declares refuses as itself. The second rule is why `bulleted`
-does **not** require `numbered`. One hard coupling in the code became one
-graded rule in the declaration. The graded rule is the stricter of the two,
-because it can also see a field the coupling never spelled.
+does **not** require `numbered`.
 
 `bulleted` also requires a `sub-phases` heading, since there is nothing to
 mint under without one. It requires a `sub-phase-name` too, and each
@@ -2933,10 +2912,7 @@ rather than refusing. A finished section is one whose heading is there with no
 pending bullet under it. A body with no heading was never decomposed, so its
 first mint re-opens nothing and says nothing. The last step is unconditional and asks nothing about
 what came before. So the section simply is unfinished again, which is true,
-and is what the operator just asked for. The old tool needed a `--reopen` flag
-and three refusals around it, purely to guard a `decomposed = true` head key
-somebody had to clear. With the marker in the document there is nothing left
-to refuse. The re-open **is announced on stderr**, because a state change
+and is what the operator just asked for. The re-open **is announced on stderr**, because a state change
 nobody asked for should be loud.
 
 A title carrying `**`, a lone `*` or a newline refuses and writes nothing.
@@ -3036,7 +3012,7 @@ Each of these refuses **by name** at load:
   no bullet for the word to go on;
 - two transitions marking one state with the **same word**. That is one rule
   with two spellings, and the bullet afterwards could not say which ran;
-- a word that is empty, carries a newline, or carries `**`. Each breaks the
+- a word that is empty, carries a newline or carries `**`. Each breaks the
   form the writer exists to write, graded through the reader that has to find
   it again.
 
@@ -3080,7 +3056,7 @@ Three notes refuse, and for two different reasons rather than one stated three
 times. **Empty** says a finding was disposed of for a reason and does not give
 it. A **newline** is a measured corruption. A second line opening with `- ` is
 a counted, *named* bullet nobody wrote. So the count moves, the names gain
-one, and [the ordinal](#sub-phases) jumps past it. `**` breaks nothing today,
+one and [the ordinal](#sub-phases) jumps past it. `**` breaks nothing today,
 since the mark is read out of the second bold run and stops there. It refuses
 on the ownership rule above instead. The tool owns every character of this
 bullet's punctuation, so emphasis typed into it is a second author of the
@@ -3090,12 +3066,10 @@ form.
 bullet record, not a head. A field would have to be read out of prose by
 pattern, everything after the second bold run. Every other ident this tool
 carries is minted and referenced as data. The note is already in `show`'s
-verbatim text, which is the read that was buying it before the tool would
-write one.
+verbatim text.
 
 The run writes **one line** and leaves every other byte of the file identical.
-Before the run writes any of it, [`--check`](#the-check) says which bullet,
-which word, and whether there is a note. The check says the note's presence,
+Before the run writes any of it, [`--check`](#the-check) says which bullet, which word and whether there is a note. The check says the note's presence,
 never its content, which is a sentence the operator typed a moment ago. All
 three refusals above happen before that first write.
 
@@ -3126,14 +3100,14 @@ over the moved prose is the tool's own, with no workflow word in it, as a
 
 A fold refuses, writing nothing, on a bullet that is already marked, as every
 disposition does. It also refuses on a survivor the body has not got (the
-pending bullet included), on the bullet itself as its own survivor, and on a
+pending bullet included), on the bullet itself as its own survivor and on a
 marked survivor: prose moved under a finished sub-phase is work nobody will
 pick up. Last, it refuses on a move that would change the bullets the reader
 counts, as [a `write-bullet`](#bulleted) does. Each moved line gives up one
 indent and the writer adds it back. So prose lines up as it did, and a fenced
 line at column zero gains the indent.
 
-At load, `merges` must be true or false, it is refused beside `files`, and it
+At load, `merges` must be true or false, it is refused beside `files` and it
 is refused on any kind but a mark-bullet. A declared key called `into`
 refuses by name, as one called `note` does. [`fold`](#fold) is this repo's.
 
@@ -3163,7 +3137,7 @@ fileplan file-it cache-misses f1 --body "Cache it across calls."
 ```
 
 One run does three things. It writes the item, it stamps it with where it came
-from, and it marks the bullet. Dealing with a carrier means doing that eight
+from and it marks the bullet. Dealing with a carrier means doing that eight
 times. The stamping is what turns the carrier's judgment from something thrown
 away at filing into a **join**. "Which items came from this carrier" is one
 read, and so is "which of its findings are still open".
@@ -3192,7 +3166,7 @@ undone. `files` on any other kind refuses at load, by name.
 
 **A filed item is filed, not placed.** A `files.state` naming a state that
 declares `queued`, `numbered` or `claimed` refuses **by name**, saying which
-capability. Each of those writes a head key on arrival. Honouring them would
+capability. Each of those writes a head key on arrival. Honoring them would
 mean running the entry arms against a second destination. Machinery with one
 caller is the trap this design is against. The refusal says what to do
 instead. File into a plain state, and move the item afterwards with the
@@ -3237,8 +3211,7 @@ a `Files` block: `into someday-maybe, writing defect`.
 **`sets` beside `files` refuses at load, by name.** A key in a transition's
 own `sets` is written onto the item the run moves, and for a filing
 transition that item is the carrier. A workflow writing `sets = ["defect"]`
-there almost always meant the filed item. Before the refusal, the run put the
-key on the carrier and said nothing. So the refusal names `files.sets` as the
+there almost always meant the filed item. So the refusal names `files.sets` as the
 place to write the key. A [close or a merge](#dissolving) takes no `sets` for
 the same reason: the transition's own kind makes the field wrong.
 `files.sets` also refuses the two provenance keys, because the tool writes
@@ -3356,6 +3329,9 @@ one substitution: the run writes its local date there, in the shape
 `--decided 2026-10-18` writes. It is a calendar date, not a timestamp, so it
 names the writer's day rather than a UTC instant. Any other brace refuses at
 load, so there is no escape syntax to learn.
+An entry of a list-valued key may not hold a comma, because a filter reads
+the comma as a separator between values. Write each value as its own list
+entry ([list-valued](#list-valued)).
 
 **A fixed value is never an option, and never a default.** A session cannot
 override it. If it could, `deprecate` could write `status = "accepted"`, and
@@ -3394,7 +3370,7 @@ both a terminal, a create given no `--body` opens the editor on a short
 template whose `#` lines are left out of the item. Closing it with nothing
 written files nothing. Anywhere else — a script, a pipe, an agent's session
 — the run refuses in one line, `capture needs a body: pass --body TEXT, or
---body - to read it from stdin`, exactly as before the editor existed. The
+--body - to read it from stdin`. The
 reason an item needs prose lives here rather than in the refusal.
 
 ### queue
@@ -3480,7 +3456,7 @@ dependency:` lines, and the default read names both.
 or punctuation is one. Nothing moves and nothing is repointed. A new slug held
 by any other file refuses, and so does a title with no letters or digits.
 
-[When a handle changes](procedures.md#when-a-handle-changes) says what a
+[When a handle changes](../../docs/procedures.md#when-a-handle-changes) says what a
 session does after the run.
 
 ### retitle-idea
@@ -3488,7 +3464,7 @@ session does after the run.
 Give an idea a new title. It is [`retitle`](#retitle) in
 [`someday-maybe`](#someday-maybe), and everything said there holds here. What
 a session does afterwards is the same too:
-[when a handle changes](procedures.md#when-a-handle-changes).
+[when a handle changes](../../docs/procedures.md#when-a-handle-changes).
 
 ```
 fileplan retitle-idea a-worked-example "A better name"
@@ -3521,7 +3497,7 @@ Two sessions running the pick read — `list --state plan --lacks claimed-by` �
 disjoint items.
 
 What a session does around a run of `work` is [planning and working a
-sub-phase](procedures.md#planning-and-working-a-sub-phase).
+sub-phase](../../docs/procedures.md#planning-and-working-a-sub-phase).
 
 ### decompose
 
@@ -3554,7 +3530,7 @@ ownership check still runs here: a section somebody else holds refuses before
 anything is written.
 
 What a session does around a run of `decompose` is [decomposing a
-section](procedures.md#decomposing-a-section).
+section](../../docs/procedures.md#decomposing-a-section).
 
 ### finish
 
@@ -3572,9 +3548,7 @@ fileplan finish out-of-order 12-1 --note "The premise held."
 **Completion is a fact about the sub-phase, and it lives on the sub-phase.**
 [The cursor](#the-cursor) is one pair naming **one** bullet. So a section whose
 5th and 7th sub-phases are finished, while its 6th is not, has nowhere in its
-head to say so. A bullet each has somewhere. That is what the word moving home
-buys, and the word itself does not change: `done` is what a finished sub-phase
-has always been called.
+head to say so. A bullet each has somewhere.
 
 Same state on both sides, like [`decompose`](#decompose) and [`work`](#work) —
 a section is worked where it stands. It takes **no claim**: marking a bullet
@@ -3609,7 +3583,7 @@ carrying either word refuses [by name](#marking).
 
 ### annotate
 
-Write under a sub-phase: what was planned, what was decided in building, or
+Write under a sub-phase: what was planned, what was decided in building or
 what was found. It is a `write-bullet`, so its subject is one bullet, named
 as [`finish`](#finish) names one:
 
@@ -3633,13 +3607,13 @@ note. So a marked bullet takes a write too. This repo writes a sub-phase's
 holds refuses before anything is written.
 
 It refuses, writing nothing, on a name the body has not got (in the words
-[`show`](#show) uses), on empty text, and on text that would change the
+[`show`](#show) uses), on empty text and on text that would change the
 bullets the reader counts ([bulleted](#bulleted)). `--check` says which bullet
 and how many lines, never the text: `append 3 lines under 12-1`, or `replace
 12 lines under 12-1 with 3`.
 
 What a session does around it is [planning and working a
-sub-phase](procedures.md#planning-and-working-a-sub-phase).
+sub-phase](../../docs/procedures.md#planning-and-working-a-sub-phase).
 
 ### fold
 
@@ -3665,7 +3639,7 @@ move 3 lines under 12-3`. To split a sub-phase instead, see
 [`decompose`](#decompose)'s `--after`.
 
 What a session does around it is [decomposing a
-section](procedures.md#decomposing-a-section).
+section](../../docs/procedures.md#decomposing-a-section).
 
 ### decline
 
@@ -3726,11 +3700,6 @@ readable in `abandoned/`.
 
 It takes **no claim**. The ownership check still runs.
 
-Without it an idea could be committed to or absorbed and never simply set
-aside. [`queue`](#queue) and [`merge`](#merge) were the only ways out, so the
-one state whose whole job is holding what nobody has committed to had no way
-of letting go.
-
 Any state may declare a transition of this shape. `discard` is out of
 [`someday-maybe`](#someday-maybe) here because that is where this workflow's
 uncommitted ideas live. The tool knows the transition only as "moves an item",
@@ -3757,16 +3726,11 @@ requires = ["sub-phase"]
 The `requires` is on this transition. There it grades one way out of `plan`,
 and leaves [`decline`](#decline) alone. What a `requires` **cannot** express
 lives in [the close check](#the-close-check) instead.
-`fileplan list --has commands=archive-plan` is the listing of sections that
-could close right now. That is the old tool's `--closeable`, read off
-[`commands`](#commands) rather than a flag of its own, and it narrows through
-both.
 
 `requires` is the floor a head can carry, and it is what stops a queued,
 never-decomposed item closing clean. "Every named bullet is marked" is
-**vacuously true** of a section carrying no bullets at all. Which *value* the
-status holds gates nothing any more: completion left the head in favour of the
-bullet ([the cursor](#the-cursor)).
+**vacuously true** of a section carrying no bullets at all. Which value the
+status holds gates nothing ([the cursor](#the-cursor)).
 
 It takes **no claim**, like [`decline`](#decline). The ownership check still
 runs: a section somebody else is holding refuses before anything is deleted.
@@ -3781,13 +3745,12 @@ lives. The tool knows the transition only as "leaves a
 [numbered](#the-register) state, files an entry and takes the file away".
 
 What a session does around a run of `archive-plan` is [closing a section
-out](procedures.md#closing-a-section-out).
+out](../../docs/procedures.md#closing-a-section-out).
 
 ### merge
 
 Absorb an idea into another: the work continues as that one. It is the way out
-of [`someday-maybe`](#someday-maybe) that is not [`queue`](#queue). It is
-also the fourth way an item leaves.
+of [`someday-maybe`](#someday-maybe) that is not [`queue`](#queue).
 
 ```
 fileplan merge a-second-take-on-drafts --into workflow-as-data
@@ -3839,7 +3802,7 @@ two bullets ahead of the pending bullet:
 of its work as a sub-phase, so the idea arrives where the section's other
 work already is. Every bullet transition works on it at once:
 [`annotate`](#annotate) writes under it, [`fold`](#fold) moves its prose under
-another bullet, and [`finish`](#finish) or [`skip`](#skip) closes it. Without
+another bullet and [`finish`](#finish) or [`skip`](#skip) closes it. Without
 this, the section's body has to be rewritten by hand to turn each `###`
 block into a bullet, and the commit message is the only list of what went
 in.
@@ -3866,9 +3829,7 @@ transition, because no section here has needed one.
 
 **This is not a second copy.** The absorbed file is deleted in the same run,
 so only one copy of the text remains. The fact has moved house rather than
-been duplicated. Earlier releases kept the survivor byte-identical unless the
-run passed `--carry`. Nobody merged without it, so the carry is now what a
-merge does, and a plan.toml still declaring `carries` refuses by name.
+been duplicated. A plan.toml declaring `carries` refuses by name.
 
 A merge has two refusals of its own beside the ones every run has, and both
 come before any write. The first is a composed body that its state's
@@ -3900,7 +3861,7 @@ Any state may declare a transition of this shape. `merge` is out of
 [`someday-maybe`](#someday-maybe) here for two reasons. That is where this
 workflow's uncommitted ideas live, and it is the state that is safe to delete
 from. The tool knows the transition only as "leaves its state, takes the file
-away, points the edges at a survivor, and carries the body there".
+away, points the edges at a survivor and carries the body there".
 
 ### investigate
 
@@ -3946,14 +3907,13 @@ fileplan show listing-is-slow           # next-sub-phase names the first open on
 fileplan fix-it listing-is-slow f1      # take one
 ```
 
-**If it's simple, consider just fixing it.** Dealing with a carrier very often
+**If it is simple, consider just fixing it.** Dealing with a carrier very often
 means filing eight new items. Some of them are trivial things that would have
 been cheaper to do on the spot than to file, triage and pick up again. The rule
 lives here rather than in prose nobody opens, because a session that asks this
 transition for its contract meets it on the way past.
 
-It declares `marks`. That is what gives it the second positional, and what
-makes `next fix-it` a read of findings rather than of items. It is otherwise
+It declares `marks`. That is what gives it the second positional. It is otherwise
 the same state on both sides, like [`note`](#note): a carrier is disposed of
 where it stands.
 
@@ -3977,12 +3937,8 @@ two say a finding is dealt with, and this one says it is **work**.
 fileplan file-it cache-misses f1 --body "Cache it across calls."
 ```
 
-**If it's simple, consider just fixing it.** Dealing with a carrier very often
-means filing eight new items. Some of them are trivial things that would have
-been cheaper to do on the spot than to file, triage and pick up again. So
-[`fix-it`](#fix-it) carries the same rule, and this is the transition the rule
-is aimed away from. It lives here rather than in prose nobody opens, because a
-session that asks this transition for its contract meets it on the way past.
+**If it is simple, consider just fixing it** ([`fix-it`](#fix-it) says why).
+This is the transition that rule is aimed away from.
 
 It declares `marks` **and** [`files`](#filing). That is what gives it the
 second positional, `--title` and `--body`, and what makes one run file the item

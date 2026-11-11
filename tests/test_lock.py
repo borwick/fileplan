@@ -2,8 +2,8 @@
 
 Contention needs two processes. ``flock`` is held on the *open file
 description*, so a second acquisition inside this process would either
-succeed (same description) or deadlock (a second one) — neither of which is
-what a second session does. Both probes below therefore run in a subprocess.
+succeed (same description) or deadlock (a second one), and a second session
+does neither. So both probes below run in a subprocess.
 """
 
 from __future__ import annotations
@@ -13,14 +13,12 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import FIXTURE_FILES
+from conftest import copy_fixture
 
 from fileplan import item
 from fileplan.declaration import Declaration, Refusal, load
 from fileplan.lock import LOCAL_DIR, LOCK_NAME, run_lock
 from fileplan.transition import execute
-
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 #: Report whether the lock is held, without waiting for it.
 PROBE = """
@@ -47,8 +45,7 @@ time.sleep(float(sys.argv[2]))
 
 @pytest.fixture
 def tree(tmp_path: Path) -> Declaration:
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    copy_fixture(tmp_path)
     declaration = load(tmp_path / "plan.toml")
     for state in declaration.states.values():
         (tmp_path / state.path).mkdir(parents=True)
@@ -91,10 +88,9 @@ def test_the_lock_file_lives_under_local(tmp_path: Path) -> None:
 def test_contention_is_announced_once_and_then_waited_out(
     tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """John runs concurrent sessions in one tree: a silent wait reads as a
-    hang. The holder line carries the host as well as the pid, because this
-    tree is on a syncing filesystem and a pid means nothing on another
-    machine."""
+    """Concurrent sessions share one tree, and a silent wait reads as a hang.
+    The holder line carries the host as well as the pid: on a syncing
+    filesystem a pid means nothing on another machine."""
     lock_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
     holder = subprocess.Popen(
         [sys.executable, "-c", HOLD, str(lock_file(tmp_path)), "0.4"],
@@ -138,10 +134,9 @@ def test_a_holder_line_is_cleared_on_release(tmp_path: Path) -> None:
 def test_a_creating_transition_holds_the_lock_while_it_writes(
     tree: Declaration, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The old tool skipped the lock for its creating verb, because
-    `open(..., "x")` is the reservation. True of one filename — and not of the
-    tree-wide uniqueness check, which is a check-then-act across other states.
-    One rule beats a rule with an exception."""
+    """`open(..., "x")` reserves one filename, not the tree-wide uniqueness
+    check, which is a check-then-act across other states. So a creating
+    transition takes the lock like any other."""
     seen: list[bool] = []
     written = item.write
 

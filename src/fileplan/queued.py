@@ -10,12 +10,12 @@ happens before the executor writes anything.
 The spacing is what makes an insert cheap. Places are `SPACING` apart. A new
 place goes between two others at their midpoint, touching no other row. When a
 gap is exhausted the tool refuses and names the respacing. Shifting a
-neighbour instead would move places a person has already cited.
+neighbor instead would move places a person has already cited.
 
 A place is a bare integer, never a quoted one. As text, `"1000"` sorts ahead
 of `"200"`.
 
-See docs/reference.md#the-queue
+See examples/docs/reference.md#the-queue
 """
 
 from __future__ import annotations
@@ -23,7 +23,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from fileplan.declaration import CAPABILITY_KEYS, QUEUED, Refusal
+from fileplan.declaration import (
+    CAPABILITY_KEYS,
+    QUEUED,
+    Refusal,
+    whole,
+    whole_errors,
+)
 
 #: The capability a state opts into. The same word plan.toml spells.
 NAME = QUEUED
@@ -74,7 +80,7 @@ def place(
             "place. Say where it goes once"
         )
 
-    held = sorted(position for position in taken.values() if isinstance(position, int))
+    held = sorted(position for position in taken.values() if whole(position))
     if at is not None:
         return _at(taken, at)
     if above is not None or below is not None:
@@ -91,7 +97,9 @@ def _at(taken: Mapping[str, Any], at: int) -> int:
             f"--at {at} is not a place. A place is a positive whole number, "
             f"and the first row takes {SPACING}"
         )
-    holders = [slug for slug, position in taken.items() if position == at]
+    holders = [
+        slug for slug, position in taken.items() if whole(position) and position == at
+    ]
     if holders:
         raise Refusal(
             f'{at} is already held by "{holders[0]}". Two items at one place '
@@ -104,10 +112,10 @@ def _at(taken: Mapping[str, Any], at: int) -> int:
 def _beside(
     taken: Mapping[str, Any], held: list[int], *, anchor: str | None, ahead: bool
 ) -> int:
-    """The midpoint of the anchor and its neighbour on the side asked for."""
+    """The midpoint of the anchor and its neighbor on the side asked for."""
     assert anchor is not None
     position = taken.get(anchor)
-    if not isinstance(position, int):
+    if not whole(position):
         raise Refusal(
             f'"{anchor}" carries no place of its own, so there is nothing to '
             f"sit beside. Give it one with --at first"
@@ -135,18 +143,5 @@ def _beside(
 
 
 def errors(head: Mapping[str, Any]) -> list[str]:
-    """Every way `head`'s place is not one. Pure.
-
-    A place is arithmetic, so a quoted one refuses rather than being read as
-    text that happens to look like a number.
-    """
-    value = head.get(KEY)
-    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
-        return []
-    return [
-        (
-            f"{KEY} holds {value!r}, which is not a whole number. A place is "
-            f'arithmetic — "1000" sorts ahead of "200" as text — so it is '
-            "written as a bare integer"
-        )
-    ]
+    """Every way `head`'s place is not one. Pure."""
+    return whole_errors(KEY, head.get(KEY), "place", ("1000", "200"))

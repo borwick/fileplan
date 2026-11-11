@@ -1,24 +1,25 @@
-"""Section 36's close-out: the consumer's decision-record workflow, end to end.
+"""The consumer's decision-record workflow, end to end.
 
 ``tests/fixtures/decision-records.toml`` is the ``plan.toml`` the consumer
-asked for, so this test is what grades the snippet it is handed. Each of its
-five requests is declared there and run here: the numbered state with no way
-out (36-1's exit rule has nothing to refuse), the required option and the
-fixed value on `finalise` (36-1), the derived `superseded-by` (36-2), and
-`decisions` left out of a plain `list` (36-3).
+asked for, so this test grades the snippet it is handed. Each of its
+requests is declared there and run here: the numbered state with no way out
+(the exit rule has nothing to refuse), the required option and the fixed
+value on `finalise`, the derived `superseded-by`, and `decisions` left out
+of a plain `list`.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
+from conftest import FIXTURES
+from test_cli import rows as listed
 
 from fileplan.cli import main
 from fileplan.declaration import load
 
-FIXTURE = Path(__file__).resolve().parent / "fixtures" / "decision-records.toml"
+FIXTURE = FIXTURES / "decision-records.toml"
 
 
 @pytest.fixture
@@ -33,9 +34,8 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def rows(capsys: pytest.CaptureFixture[str], *given: str) -> dict[str, dict]:
-    capsys.readouterr()
-    assert main(["list", "--json", *given]) == 0
-    return {row["slug"]: row for row in json.loads(capsys.readouterr().out)["rows"]}
+    """``list --json`` over ``given``, keyed by slug."""
+    return {row["slug"]: row for row in listed(capsys, *given)}
 
 
 def test_the_snippet_loads_with_no_refusal(tree: Path) -> None:

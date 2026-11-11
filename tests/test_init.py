@@ -26,15 +26,14 @@ from importlib import resources
 from pathlib import Path
 
 import pytest
+from conftest import REPO
 
 from fileplan import scaffold
 from fileplan.cli import SKILLS_FLAG, main
 from fileplan.declaration import PLAN_TOML_ENV, PLAN_TOML_NAME, Refusal, load
 
-REPO = Path(__file__).resolve().parent.parent
-
-#: The starter declaration's own vocabulary — the four verbs of its loop and
-#: the two states they run between. Named here rather than inlined: these are
+#: The starter declaration's own vocabulary: the verbs of its loop and the
+#: states they run between. Named here rather than inlined: these are
 #: the *example's* words, and a test asserting on them should say so.
 CAPTURE = "capture"
 QUEUE = "queue"
@@ -44,12 +43,20 @@ INBOX = "inbox"
 PLAN = "plan"
 
 #: A comment line that is really a declaration: an assignment or a table
-#: header, commented out in place. The starter used to teach every capability
-#: this way, which put four lines in five of it beyond the funnel it declared.
-COMMENTED_OUT = re.compile(r"^\s*#\s*(\[[\w.-]+\]|[\w-]+\s*=)")
+#: header, commented out in place.
+COMMENTED_OUT = re.compile(
+    r"""
+    ^\s*\#\s*         # a comment's hash, indented or not
+    (
+      \[[\w.-]+\]     # a table header
+    | [\w-]+\s*=      # or an assignment
+    )
+    """,
+    re.VERBOSE,
+)
 
-#: One of the lines this pattern was written to catch, kept as the mutation
-#: check on it: the guard below passes trivially if the pattern never fires.
+#: A line this pattern catches, kept as the mutation check on it: the guard
+#: below passes trivially if the pattern never fires.
 WAS_COMMENTED_OUT = '# archive           = "docs/archive.md"'
 
 
@@ -86,10 +93,9 @@ def test_init_on_an_empty_directory_writes_a_tree_the_loader_accepts(
 def test_the_four_command_loop_runs_end_to_end_against_a_fresh_install(
     installed: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Log an idea, move it into the plan, work it, archive it — the ideal
-    13-4 was opened on, run in the example's own vocabulary. A starter that
-    could file and move but never close would be the loop with no end, which
-    is what the funnel it replaced was."""
+    """Log an idea, move it into the plan, work it, and archive it: 13-4's
+    loop, run in the example's own vocabulary. A starter that could file and
+    move but never close would be a loop with no end."""
     assert main([CAPTURE, "A first thing", "--body", "Prose."]) == 0
     captured = installed / INBOX / "a-first-thing.md"
     assert captured.is_file()
@@ -142,8 +148,8 @@ def test_init_writes_only_what_the_first_run_needs(tmp_path: Path) -> None:
 
 def test_the_starter_fits_one_screen() -> None:
     """32-3: a newcomer reads the whole starter without scrolling. Forty
-    lines is the screen, comments and blank lines included; what the
-    comments used to explain is the initialization document's."""
+    lines is the screen, comments and blank lines included. Longer
+    explanation belongs to `docs/initialization.md`."""
     starter = REPO / "src/fileplan/starter" / PLAN_TOML_NAME
     assert len(starter.read_text().splitlines()) <= 40
 
@@ -152,11 +158,9 @@ def test_the_starter_declares_no_capability_commented_out_in_place(
     tmp_path: Path,
 ) -> None:
     """What is live in the starter is the whole of what it teaches. The
-    catalogue of every capability the tool has used to sit under the tables
-    as commented lines, so four lines in five of the file were about a
-    workflow it did not declare; the reference is that catalogue's home. A
-    comment saying what a table means is fine — one that *is* a table, or an
-    assignment, is the catalogue growing back."""
+    catalog of every capability lives in the method, not under the tables
+    as commented lines. A comment saying what a table means is fine; one that
+    *is* a table, or an assignment, is the catalog growing back."""
     assert main(["init", str(tmp_path)]) == 0
 
     offenders = [
@@ -328,9 +332,8 @@ def test_the_skills_flag_refuses_an_extra_argument_before_the_declaration_loads(
     """`--skills` takes nothing else, and the refusal has to reach the operator
     from *outside* a plan tree — the arm runs before the declaration loads, so a
     refusal that only fired where a `plan.toml` exists would be the wrong one.
-    Found by section 10's pysmelly pass rather than by a check: the arm shipped
-    with no test reaching it, which is the shape `docs/reference.md#the-skills`'s
-    "answers before the declaration loads" makes easy to leave uncovered."""
+    An arm that answers before the declaration loads
+    (`examples/docs/reference.md#the-skills`) is easy to leave with no test reaching it."""
     monkeypatch.delenv(PLAN_TOML_ENV, raising=False)
     monkeypatch.chdir(tmp_path)
 

@@ -1,12 +1,10 @@
-# Composed by roots from: python, the product.
-# Edit those fragments, not this file; `roots compose` regenerates it.
 
 [project]
-# fileplan ships to PyPI, so it keeps its own floor, which wins over
-# python's (C4). `make test-floor` runs the tests on it.
+# fileplan keeps its own floor, which wins over python's (PYTHON-LOCAL.md
+# says why). `make test-floor` runs the tests on it.
 requires-python = ">=3.12"
 name = "fileplan"
-version = "0.13.0"
+version = "0.14.0"
 description = "A plan.toml interpreter: declared states, transitions and keys for filing work across sessions"
 readme = "README.md"
 authors = [
@@ -18,9 +16,6 @@ dependencies = [
 ]
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
-# PEP 639 forbids a `License ::` classifier beside the expression above, and
-# the build refuses one — so the habit of adding it is the mistake to make
-# loud rather than to remember. `tests/test_packaging.py` asserts its absence.
 classifiers = [
     # A judgment, not a measurement: the tool is complete and tested, and its
     # interfaces have not yet been through anybody else's hands. Beta is what
@@ -50,19 +45,21 @@ requires = ["uv_build>=0.12.9,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = ["pytest>=8.0", "pytest-xdist>=3.8", "ruff>=0.17"]
+dev = [
+    # 8.2 sets PYTEST_VERSION, which django's settings read as TESTING.
+    "pytest>=8.2",
+    "pytest-xdist>=3.8",
+    "ruff>=0.17",
+]
 
 [tool.uv]
-# Resolve only releases at least a week old. Days or weeks: uv takes
-# "1 month" with a warning and then applies no cutoff. A security release
-# is exempted per package with exclude-newer-package in the override.
+# PYTHON.md, *Resolve only releases at least a week old*.
 exclude-newer = "1 week"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.ruff.lint]
-# ruff's default rule set, which ruff changes only in a minor release, plus
-# print() (T20) and naive datetimes (DTZ). No select; the version comes
-# from requires-python.
-extend-select = ["T20", "DTZ"]
+# PYTHON.md, *ruff is the gate*. No select, so ruff's default set
+# stays; the version comes from requires-python.
+extend-select = ["T20", "DTZ", "B", "PTH", "RUF043", "RUF100"]

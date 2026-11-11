@@ -14,14 +14,14 @@ number it found. A number lost at the top is a loss the walk cannot catch.
 
 Everything here is pure and raises nothing but `Refusal`.
 
-See docs/reference.md#the-register
+See examples/docs/reference.md#the-register
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import Any, TypedDict
 
 from fileplan.declaration import (
     ARCHIVE,
@@ -31,6 +31,8 @@ from fileplan.declaration import (
     NUMBERED,
     RESERVED_KEYS,
     Refusal,
+    whole,
+    whole_errors,
 )
 
 #: The capability a state opts into, and the key it gives an item: both
@@ -69,15 +71,42 @@ LINE, TEXT = "line", "text"
 FLOOR, HIGHEST = "floor", "highest"
 
 
+class GapRecord(TypedDict):
+    """A number in neither source: the `gaps` report's record. Its keys are
+    `STATE`, `ARCHIVE` and `KEY`."""
+
+    state: str
+    archive: str
+    number: int
+
+
+class LostRecord(TypedDict):
+    """A `##` the register cannot read: the `lost` report's record. Its keys
+    are `STATE`, `ARCHIVE`, `LINE` and `TEXT`."""
+
+    state: str
+    archive: str
+    line: int
+    text: str
+
+
+class RegisterRecord(TypedDict):
+    """What a register holds: the `register` record. Its keys are `STATE`,
+    `ARCHIVE`, `FLOOR` and `HIGHEST`."""
+
+    state: str
+    archive: str
+    floor: int
+    highest: int | None
+
+
 def missing(held: Mapping[int, Iterable[str]], *, first: int = FIRST) -> list[int]:
     """Every number the register is short of, in order. Pure.
 
     `first` is where this register begins (`FIRST_NUMBER`): everything below
     it is recorded in an archive this does not read, so a cutover at 192 is a
-    register with no gaps rather than one with 191. One arithmetic, two
-    readers — `next_number` refuses on it at the mint, the listing reports it
-    on every read. The walk bounds itself by `max`, so a number lost at the
-    top leaves what remains gapless. See docs/reference.md#the-register
+    register with no gaps rather than one with 191. The walk bounds itself by `max`, so a number lost at the
+    top leaves what remains gapless. See examples/docs/reference.md#the-register
     """
     if not held:
         return []
@@ -89,8 +118,7 @@ def unreadable(text: str) -> list[tuple[int, str]]:
 
     The complement of `numbers`, and the assertion that walk cannot make on
     its own: a parse that silently matches nothing looks exactly like an empty
-    archive. Every `##` is graded, with no allowlist. `heading_errors` refuses
-    on this walk and the listing reports it.
+    archive.
     """
     return [
         (number, line.strip())
@@ -107,7 +135,7 @@ def unreadable_entry(text: str) -> list[tuple[int, str]]:
     is a lost close-out, named at line 1 with the file's first line. A stray
     `README.md` is reported rather than ignored, which is the loud polarity.
     A file whose only `##` is unreadable is already named by `unreadable`, so
-    it is not named twice. See docs/reference.md#the-register
+    it is not named twice. See examples/docs/reference.md#the-register
     """
     found = unreadable(text)
     if found or numbers(text):
@@ -116,10 +144,10 @@ def unreadable_entry(text: str) -> list[tuple[int, str]]:
     return [(1, first)]
 
 
-def lost(state: str, archive: str, line: int, text: str) -> dict[str, Any]:
+def lost(state: str, archive: str, line: int, text: str) -> LostRecord:
     """One heading the register cannot read as the record a listing carries.
 
-    Named for the defect, the word docs/reference.md#the-register already uses. A
+    Named for the defect, the word examples/docs/reference.md#the-register already uses. A
     second record shape rather than a discriminator on the gap record.
     """
     return {STATE: state, ARCHIVE: archive, LINE: line, TEXT: text}
@@ -130,7 +158,7 @@ def taken(numbers: Mapping[str, Any]) -> dict[int, list[str]]:
     can be refused naming both."""
     held: dict[int, list[str]] = {}
     for slug, value in numbers.items():
-        if isinstance(value, int) and not isinstance(value, bool):
+        if whole(value):
             held.setdefault(value, []).append(slug)
     return held
 
@@ -148,14 +176,14 @@ def next_number(
     number, so an in-place verb does not re-mint. `first` is where this
     register begins, the same number `missing` walks from.
 
-    Three refusals and one bootstrap. A number two sources claim refuses
+    A number two sources claim refuses
     naming both. A number below the floor refuses naming it and its source,
     rather than being clamped into a hole the gap walk could never report. A
     gap refuses, the number above it possibly being spoken for. An empty
     register mints `first`, which `heading_errors` running on every mint is
     what makes safe: an unreadable archive has already refused.
 
-    Only the duplicate refusal runs before `current`, the other two being
+    Only the duplicate refusal runs before `current`, the others being
     about minting where `entry` is about filing.
     """
     for number, slugs in sorted(held.items()):
@@ -226,18 +254,8 @@ def heading_errors(lost: list[tuple[int, str]], where: str) -> list[str]:
 
 
 def errors(head: Mapping[str, Any]) -> list[str]:
-    """Every way `head`'s number is not one: a quoted number refuses rather
-    than being read as text that happens to look like one."""
-    value = head.get(KEY)
-    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
-        return []
-    return [
-        (
-            f"{KEY} holds {value!r}, which is not a whole number. A number is "
-            f'arithmetic — "10" sorts ahead of "9" as text — so it is written as '
-            "a bare integer"
-        )
-    ]
+    """Every way `head`'s number is not one. Pure."""
+    return whole_errors(KEY, head.get(KEY), "number", ("10", "9"))
 
 
 def heading(number: int, title: str) -> str:
@@ -261,23 +279,29 @@ def archived(text: str, where: str) -> dict[str, int]:
     return {f"{where} § {one}.": one for one in numbers(text)}
 
 
+def refuse_duplicate(held: Mapping[str, Any], number: int, title: str) -> None:
+    """Refuse where `held`, archived numbers by source, already holds `number`.
+
+    Through `next_number`, called with `current` so the duplicate loop runs
+    and the mint arithmetic does not.
+    """
+    next_number(taken({**held, f'"{title}"': number}), current=number)
+
+
 def entry(text: str, number: int, title: str, record: str = "") -> str:
     """`text` with `## <number>. <title>` inserted at its register place.
 
     `record` is the prose that goes under the heading, stripped of its blank
     lines and separated by one. Empty — the default — writes the heading
     alone, which is what a verb that moves the item files; a verb that
-    dissolves it hands the record in with the run (docs/reference.md#dissolving).
+    dissolves it hands the record in with the run (examples/docs/reference.md#dissolving).
 
     Inserted, never appended: before the first readable heading whose number
     is greater, and at the end when there is none, so the archive stays in
     register order however out of order the close-outs were. A duplicate
-    refuses through `next_number`, called with `current` so the duplicate loop
-    runs and the mint arithmetic does not.
+    refuses through `refuse_duplicate`.
     """
-    held: dict[str, Any] = dict(archived(text, "the archive"))
-    held[f'"{title}"'] = number
-    next_number(taken(held), current=number)
+    refuse_duplicate(archived(text, "the archive"), number, title)
 
     lines = text.splitlines()
     cut = len(lines)

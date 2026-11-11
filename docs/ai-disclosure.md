@@ -1,7 +1,6 @@
 # How this was written
 
-`fileplan` was written with Claude Code. This page says what that means, so
-nobody has to guess from the commit log.
+`fileplan` was written with Claude Code.
 
 ## the level
 
@@ -12,11 +11,11 @@ no part of it is hand-written code an assistant only tidied.
 
 ## who did what
 
-John Borwick directed the work. He made every design call, and reviewed every
+John Borwick directed the work. He made every design call and reviewed every
 line before it landed. Claude Code wrote the code, the tests and the
 documents. The models were Claude Opus 5 and Claude Fable 5.1.
 
-The copyright and the licence are John Borwick's, in [LICENSE](../LICENSE).
+The copyright and the license are John Borwick's, in [LICENSE](../LICENSE).
 Claude is not named as an author in `pyproject.toml`, and that is deliberate.
 The US Copyright Office holds that purely machine-generated material carries
 no copyright. A co-author line there would assert something this project does
@@ -26,13 +25,12 @@ not mean.
 
 Claude Code writes a `Co-Authored-By` trailer into each commit it makes. The
 history behind this repository was rewritten before publication, and those
-trailers did not survive it. This page is where that record lives now. That
-is why the disclosure is a document rather than a commit convention.
+trailers did not survive it.
 
 ## the history the tree mentions
 
 Two kinds of reference here point at history that is not published. A number
-like `13-2`, in a test or in the reference, names a piece of this project's
+like `13-2`, in a test or in the method, names a piece of this project's
 own plan: section 13, sub-phase 2. "The old tool" is the project's
 predecessor, which `fileplan` replaced. The record behind both was kept while
 the work was done. It is not part of this repository, so there is nothing to

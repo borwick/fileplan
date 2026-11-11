@@ -2,9 +2,8 @@
 
 **No ``tmp_path`` anywhere in this file.** `fileplan.queued.place` is a
 total function of the places already taken plus what the operator asked for,
-and every refusal happens there — before the executor writes anything. That is
-the split 1-1, 1-2, 1-3 and 1-4 all keep, and it is why the interesting half
-of this sub-phase costs no filesystem to test.
+and every refusal happens there — before the executor writes anything. That
+split is why the interesting half costs no filesystem to test.
 
 The vocabulary is the fixture's — `orchard` is the ``queued`` state — but
 nothing here needs a declaration at all: a place is a number and a slug is a
@@ -51,11 +50,11 @@ def test_the_last_row_is_the_largest_place_not_the_last_entry() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_above_takes_the_midpoint_of_its_two_neighbours() -> None:
+def test_above_takes_the_midpoint_of_its_two_neighbors() -> None:
     assert queued.place(TAKEN, above="second") == 150
 
 
-def test_below_takes_the_midpoint_of_its_two_neighbours() -> None:
+def test_below_takes_the_midpoint_of_its_two_neighbors() -> None:
     assert queued.place(TAKEN, below="second") == 250
 
 
@@ -65,7 +64,7 @@ def test_an_insert_touches_no_other_row() -> None:
     item. The mapping it was given is not touched either."""
     before = dict(TAKEN)
     assert queued.place(TAKEN, above="third") == 250
-    assert TAKEN == before
+    assert before == TAKEN
 
 
 def test_above_the_first_row_halves_it() -> None:
@@ -79,7 +78,7 @@ def test_below_the_last_row_appends() -> None:
 
 
 def test_an_exhausted_gap_refuses_and_names_the_respacing() -> None:
-    """**Nothing renumbers a neighbour.** A queue that respaces itself is one
+    """**Nothing renumbers a neighbor.** A queue that respaces itself is one
     the operator cannot cite between two sittings, so the refusal says what to
     do rather than doing it — and says it in the vocabulary the tool owns, not
     by naming a verb."""
@@ -152,33 +151,31 @@ def test_a_place_that_is_not_positive_refuses(at: int) -> None:
 # Staying put: an item already in the state keeps its place
 # --------------------------------------------------------------------------
 #
-# 4-4 is what forced this: `work` is the first in-place verb into an ordered
-# state, and without the rule it would have moved section 4 from 100 to the
-# back of the queue every time a session said which sub-phase it was on —
-# silently destroying an order somebody set deliberately, on a verb about
-# something else entirely.
+# 4-4: an in-place verb into an ordered state, such as this repo's `work`,
+# leaves the item where it is. Without the rule, every time a session said
+# which sub-phase it was on the item would move to the back of the queue,
+# silently undoing an order somebody set, on a verb about something else.
 #
-# The cost, taken with eyes open: a bare `requeue` stops meaning "send it to
-# the back". That behaviour was undocumented and untested, and the new one is
-# what `#requeue` says in words — "move an item to *another place*", and
-# naming no place is not a request.
+# So a bare `requeue` does not mean "send it to the back".
+# `examples/docs/reference.md#requeue` says "another place", and naming no
+# place is not a request.
 
 
 def test_an_item_already_here_keeps_its_place() -> None:
-    """The rule. `current` is the place the item holds today; a verb that asks
+    """`current` is the place the item holds; a verb that asks
     for no placement is not asking to be moved."""
     assert queued.place({"first": 100, "third": 300}, current=200) == 200
 
 
 def test_an_item_arriving_from_elsewhere_still_appends() -> None:
     """`current` is `None` for an item that is not in this state yet, which is
-    every move between states — so nothing about arriving changed."""
+    every move between states, so an arriving item appends."""
     assert queued.place(TAKEN, current=None) == 400
 
 
 def test_the_first_row_of_an_empty_state_keeps_its_place_too() -> None:
-    """No other rows to append past, and still nothing to move it: the two
-    arms cannot disagree because staying put is decided first."""
+    """No other rows to append past, and still nothing to move it: the arms
+    cannot disagree because staying put is decided first."""
     assert queued.place({}, current=700) == 700
 
 
@@ -193,8 +190,8 @@ def test_the_first_row_of_an_empty_state_keeps_its_place_too() -> None:
 def test_a_placement_option_still_moves_an_item_that_is_here(
     request_: dict, expected: int
 ) -> None:
-    """Staying put is the *default*, not a refusal to move. Each of the three
-    ways to ask still names the place, which is what keeps `requeue` a
+    """Staying put is the *default*, not a refusal to move. Each way to ask
+    names the place, which is what keeps `requeue` a
     respacing tool."""
     assert queued.place(TAKEN, current=999, **request_) == expected
 
@@ -226,6 +223,28 @@ def test_two_requests_at_once_refuse(request_: dict) -> None:
 
 
 # --------------------------------------------------------------------------
+# A stored `true` is no place
+# --------------------------------------------------------------------------
+#
+# A bool is an `int` in Python, so `position = true` would read as place 1.
+# It is not a place, as `declaration.whole()` says everywhere else.
+
+
+def test_a_bare_place_ignores_an_item_carrying_true() -> None:
+    assert queued.place({"stray": True}) == queued.SPACING
+
+
+def test_an_anchor_carrying_true_has_no_place_to_sit_beside() -> None:
+    with pytest.raises(Refusal) as refusal:
+        queued.place({"stray": True}, above="stray")
+    assert '"stray" carries no place of its own' in str(refusal.value)
+
+
+def test_at_one_is_not_held_by_an_item_carrying_true() -> None:
+    assert queued.place({"stray": True}, at=1) == 1
+
+
+# --------------------------------------------------------------------------
 # The value: a place is arithmetic
 # --------------------------------------------------------------------------
 
@@ -248,6 +267,6 @@ def test_a_quoted_place_refuses_because_the_key_is_arithmetic() -> None:
 
 @pytest.mark.parametrize("value", [1.5, True, ["100"], "not a number"])
 def test_anything_that_is_not_a_whole_number_refuses(value: object) -> None:
-    """`True` included: a bool is an `int` in Python, and 1-2's writer already
+    """`True` included: a bool is an `int` in Python, and the item writer
     keeps that distinction on the way out."""
     assert queued.errors({queued.KEY: value})

@@ -8,40 +8,60 @@ outside.
 import os
 from pathlib import Path
 
-FIXTURE = Path(__file__).parent / "fixtures" / "plan.toml"
+import pytest
 
-#: The worked example, the declaration fileplan ships for a reader to copy
-#: (38-7). Every test that grades the product against a real declaration reads
-#: this one: the vocabulary, the contracts, the orphans and the self-load.
-#: This repo's own `plan.toml` at the root is a different file with a different
+REPO = Path(__file__).resolve().parent.parent
+FIXTURES = REPO / "tests" / "fixtures"
+FIXTURE = FIXTURES / "plan.toml"
+
+#: The worked example, the declaration fileplan ships for a reader to copy.
+#: Every test that grades the product against a real declaration reads this
+#: one: the vocabulary, the contracts, the orphans and the self-load. This
+#: repo's own `plan.toml` at the root is a different file with a different
 #: job, and a built tree does not have it.
-EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "plan.toml"
+EXAMPLE = REPO / "examples" / "plan.toml"
 
 os.environ.setdefault("FILEPLAN_PLAN_TOML", str(FIXTURE))
 
 
 #: Every file a tmp-tree copy of the fixture declaration needs beside it: the
 #: declaration, the document its `doc =` pointers resolve against, and the
-#: archive the `numbered` register reads. Named here rather than repeated in
-#: each module's `tree` fixture — 4-5 added a name, 6-2 another and 9-1 two more,
-#: and six copies of a two-name tuple is how the seventh copy ends up missing
-#: one. Every one of them is graded at **every** invocation, so a copy short
-#: of one refuses rather than quietly running.
+#: archive the `numbered` register reads. Every one of them is graded at
+#: **every** invocation, so a copy short of one refuses rather than quietly
+#: running.
 FIXTURE_FILES = (
     "plan.toml",
     "method.md",
     "orchard-archive.md",
 )
 
+#: The fixture's pending bullets: `orchard`'s, and `propagator`'s, whose
+#: vocabulary is its own down to the marker, so the name form is shown to be
+#: the state's business.
+UNPRUNED = "**unpruned — Say what the rest of the training is.**"
+UNSTRUCK = "**unstruck — Say what the rest of the batch is.**"
 
-#: Every name `fileplan.declaration.DERIVED_KEYS` could give a row,
-#: gates ignored. The suite's own flatten, and test scaffolding rather than a
-#: constant in the tool: nothing under `src/` compares against the ungated
-#: roster — `Declaration.derived` is the *gated* one and is what the row
-#: layer and the filters read — so a copy there was a name only the tests
-#: loaded. Imported here, after the environment above is set, so the three
-#: modules that grade "no key is carried and unreachable" share one answer
-#: instead of spelling the flatten three times.
-from fileplan.declaration import DERIVED_KEYS
+#: The record a deleting verb is given.
+RECORD_TEXT = "What it was, and why it came down."
 
-DERIVABLE_KEYS = tuple(name for group in DERIVED_KEYS for name in group.names)
+#: The identity variables the fixture declares, in its order.
+DECLARED = ("GREENHOUSE_PID", "SPROUT_PID")
+
+
+def copy_fixture(into: Path, plan: str | None = None) -> Path:
+    """Copy `FIXTURE_FILES` into `into` and return its `plan.toml`, written
+    as `plan` when one is given."""
+    for name in FIXTURE_FILES:
+        (into / name).write_text((FIXTURES / name).read_text())
+    if plan is not None:
+        (into / "plan.toml").write_text(plan)
+    return into / "plan.toml"
+
+
+@pytest.fixture(autouse=True)
+def _no_declared_pid(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Start every test from an environment naming no declared identity
+    variable, so a real ``GREENHOUSE_PID`` in the operator's shell cannot
+    decide a result."""
+    for name in DECLARED:
+        monkeypatch.delenv(name, raising=False)

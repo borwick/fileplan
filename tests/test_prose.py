@@ -1,27 +1,21 @@
 """The reading test, as a thing that runs rather than a number somebody quoted.
 
-Section 13 asked whether every part of fileplan earns its cost, and one of the
-costs is **the language**. John set the target: prose that reads
-easily, with the lever named in his own analysis. The pieces already reading
-well run about 14 words a sentence. The longest documents ran 23 to 26.
+John's ruling: the read is **words per sentence, per section, at 15 or
+under**.
 *"A sentence that holds three qualifications is teaching three things at once."*
+Reading ease is reported beside it and does not decide. Sentence length is the
+lever, and it is the half that survives vocabulary: a section about the
+register carries long words at any sentence length, so an ease floor there
+would penalize the subject rather than the writing. The read is per section,
+so no dense section hides behind easy neighbors.
 
-He decided what the read is: **words per sentence, per section,
-at 15 or under**. Reading ease is reported beside it and does not decide.
-Sentence length is the lever, and it is the half that survives vocabulary — a
-section about the register carries long words at any sentence length, so an
-ease floor there would penalise the subject rather than the writing. The read
-is per section, so no dense section hides behind easy neighbours.
-
-Until 13-8 every ease number quoted in this repo came from an uncommitted
-heuristic, a number that could not be reproduced. So the reader ships,
-and from here it is the number of record. Numbers written down before it
-existed do not match it and were left as written, being dated records.
+This reader is the number of record. A number in a dated record may not match
+it.
 
 **It gates nothing.** No test here asserts any document's ease or words per
 sentence. The suite grades that the reader works; a person reads the table:
 
-    uv run python tests/test_prose.py docs/reference.md
+    uv run python tests/test_prose.py examples/docs/reference.md
 
 This module measures the prose, and `test_docs.py` grades what the documents
 say.
@@ -50,18 +44,41 @@ WORD = re.compile(r"[A-Za-z0-9_]+(?:[-'’][A-Za-z0-9_]+)*")
 
 #: A sentence ends at terminal punctuation before whitespace or the end of the
 #: text. `3.12` keeps its dot, because nothing follows it but a digit.
-SENTENCE = re.compile(r"[.!?]+(?=\s|$)")
+SENTENCE = re.compile(
+    r"""
+    [.!?]+          # terminal punctuation
+    (?=\s|$)        # before whitespace or the end
+    """,
+    re.VERBOSE,
+)
 
-#: The three line shapes that begin a block: a heading, a list item, a table
+#: The line shapes that begin a block: a heading, a list item, and a table
 #: row. A line before one of them ends whatever it was saying.
 HEADING = re.compile(r"^\s{0,3}#{1,6}\s")
-ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
+ITEM = re.compile(
+    r"""
+    ^\s*
+    (?:
+      [-*+]         # a bullet
+    | \d+[.)]       # or a number
+    )
+    \s
+    """,
+    re.VERBOSE,
+)
 ROW = re.compile(r"^\s*\|")
 
 #: What is taken out before counting: a link's target but not its text, then
 #: the marks that are punctuation for the eye rather than words on the page.
 LINK = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
-MARKUP = re.compile(r"[`*>]|^\s{0,3}#{1,6}\s*|^\s*(?:[-*+]|\d+[.)])\s+")
+MARKUP = re.compile(
+    r"""
+      [`*>]                       # code, emphasis and quote marks
+    | ^\s{0,3}\#{1,6}\s*          # a heading's hashes
+    | ^\s*(?:[-*+]|\d+[.)])\s+    # a list item's marker
+    """,
+    re.VERBOSE,
+)
 
 VOWELS = "aeiouy"
 
@@ -98,8 +115,6 @@ def _syllables(word: str) -> int:
 def _prepared(text: str) -> str:
     """*text* as sentences, with everything that is not prose taken out.
 
-    Three of the reader's four decisions live here.
-
     **Every fenced block goes**, not only the transcripts. A TOML example is
     no more prose than a shell transcript is, and neither is read as sentences.
     `test_docs.py`'s `prose()` keeps a non-transcript fence, because it is
@@ -112,11 +127,11 @@ def _prepared(text: str) -> str:
     Twelve bullets with no full stops are twelve statements, not one 200-word
     sentence, and a paragraph introducing a fenced block with a colon does not
     run on into the paragraph after it. So a full stop goes in wherever a line
-    is the last of its block — before a heading, a list item, a table row or a
-    blank line, or at the end of the text.
+    is the last of its block: before a heading, a list item, a table row, or
+    a blank line, or at the end of the text.
 
     **Markdown is reduced**: a link's text survives and its target does not,
-    and backticks, emphasis, quote marks, heading marks and list markers go.
+    and backticks, emphasis, quote marks, heading marks, and list markers go.
     Left in, the URL of every cross-reference would count as words.
     """
     lines = FENCED.sub("", text).splitlines()
@@ -131,9 +146,8 @@ def _prepared(text: str) -> str:
 
     prepared = []
     for index, line in enumerate(lines):
-        line = LINK.sub(r"\1", line)
-        line = MARKUP.sub(" ", line).replace("|", " ")
-        stripped = line.strip()
+        plain = MARKUP.sub(" ", LINK.sub(r"\1", line)).replace("|", " ")
+        stripped = plain.strip()
         if stripped and opens(index + 1) and not stripped.endswith((".", "!", "?")):
             stripped += "."
         prepared.append(stripped)
@@ -143,7 +157,7 @@ def _prepared(text: str) -> str:
 def rate(text: str) -> Rating | None:
     """How *text* reads, or ``None`` if there is too little of it.
 
-    Flesch reading ease, words per sentence and the word count. Under
+    Flesch reading ease, words per sentence, and the word count. Under
     `MINIMUM_WORDS` the answer is no answer.
     """
     prepared = _prepared(text)
@@ -245,11 +259,11 @@ def _rated(name: str) -> str:
 
 
 def test_a_python_path_is_read_as_its_module_docstring(tmp_path: Path) -> None:
-    """Without this the reader could go back to scoring a module's code.
+    """Without this the reader could score a module's code.
 
     A module docstring is prose a person reads and the code under it is not.
-    Pointed at the file whole, the reader counted the code too and reported the
-    module's length. So a `.py` path is read as its docstring and as nothing
+    Pointed at the file whole, the reader would count the code too and report
+    the module's length. So a `.py` path is read as its docstring and as nothing
     else, and the docstring carries no headings, which is one row in the table.
     """
     sentence = "The module holds the arithmetic and one read of the plan file."
@@ -292,4 +306,4 @@ def _table(paths: list[str]) -> str:
 
 
 if __name__ == "__main__":
-    print(_table(sys.argv[1:]))  # noqa: T201 — a script's report, and printing is its output
+    print(_table(sys.argv[1:]))  # noqa: T201  a script's report, and printing is its output

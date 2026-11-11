@@ -2,7 +2,7 @@
 
 A state says which declared key holds an item's dependencies, and which keys
 hold its references. So the words a workflow spells them with appear nowhere
-in `src/`. `edges`, `without`, `repoint`, `unknown` and `inverse` are about
+in `src/`. `edges`, `without`, `repoint`, `unknown`, and `inverse` are about
 edges of either kind. Only `blocking` and `misordered` are about dependencies,
 because only a dependency waits: a reference is a record that blocks nothing.
 
@@ -16,22 +16,22 @@ away. So the tree never holds a dependency on a closed item. Nothing stores a
 closed slug, so the tool cannot tell "gone because closed" from "never
 existed", and does not try.
 
-A dependency pointing later in the queue than the item holding it is
-`misordered`. A misordered dependency is named rather than acted on. Nothing
-here refuses and nothing gates.
+Nothing here refuses and nothing gates.
 
 Everything is pure.
 
-See docs/reference.md#dependencies and docs/reference.md#references
+See examples/docs/reference.md#dependencies and examples/docs/reference.md#references
 """
 
 from __future__ import annotations
 
 from collections.abc import Container, Iterable, Mapping
-from typing import Any
+from typing import Any, TypedDict
+
+from fileplan.whole import whole
 
 # The import runs one way: `fileplan.declaration` imports this module, so
-# this module imports nothing from the package.
+# this module imports nothing from the package but `fileplan.whole`, a leaf.
 
 #: The state field naming which declared key holds an item's dependencies:
 #: the field name is the tool's and the key name is the workflow's.
@@ -51,12 +51,30 @@ DERIVED = (BLOCKED, BLOCKS)
 
 #: The fields an exception report's record carries: which item the edge is
 #: written on, which key it is written in, and what it names. Both reports
-#: spell them the same way, being the same three facts.
+#: spell them the same way, being the same facts.
 SLUG, KEY, NAMES = "slug", "key", "names"
 
 #: The two places `misordered` compares: the item's own, and the one it waits
 #: on. Spelled here rather than imported from `fileplan.queued`.
 PLACE, NAMED_PLACE = "place", "names-place"
+
+
+class UnknownRecord(TypedDict):
+    """An edge naming nothing filed: the `unknown` and `unresolved` reports'
+    record. Its keys are `SLUG`, `KEY` and `NAMES`."""
+
+    slug: str
+    key: str
+    names: str
+
+
+#: An edge naming an item later in the order: the `misordered` report's
+#: record, `UnknownRecord`'s keys and then `PLACE` and `NAMED_PLACE`. Written
+#: in the functional form because a key holds a hyphen.
+MisorderedRecord = TypedDict(
+    "MisorderedRecord",
+    {"slug": str, "key": str, "names": str, "place": int, "names-place": int},
+)
 
 
 def edges(head: Mapping[str, Any], key: str | None) -> tuple[str, ...]:
@@ -70,11 +88,18 @@ def edges(head: Mapping[str, Any], key: str | None) -> tuple[str, ...]:
     """
     if key is None:
         return ()
-    value = head.get(key)
+    return tuple(str(one) for one in entries(head.get(key)) if str(one).strip())
+
+
+def entries(value: Any) -> list[Any]:
+    """The several values a head value holds, whether it holds one or many.
+
+    The one shape question, so no reader of a value comes to a different
+    answer about what a list is. `None` holds none.
+    """
     if value is None:
-        return ()
-    entries = value if isinstance(value, list) else [value]
-    return tuple(str(entry) for entry in entries if str(entry).strip())
+        return []
+    return list(value) if isinstance(value, list) else [value]
 
 
 def without(value: Any, slug: str) -> Any | None:
@@ -86,10 +111,9 @@ def without(value: Any, slug: str) -> Any | None:
 
     Shape in, shape out: a list stays a list and a bare string stays one. A
     value the clearing empties comes back `None`, and the caller drops the key
-    rather than writing an empty one. See docs/reference.md#dissolving
+    rather than writing an empty one. See examples/docs/reference.md#dissolving
     """
-    entries = value if isinstance(value, list) else [value]
-    kept = [entry for entry in entries if str(entry) != slug]
+    kept = [entry for entry in entries(value) if str(entry) != slug]
     if not kept:
         return None
     return kept if isinstance(value, list) else kept[0]
@@ -104,12 +128,12 @@ def repoint(value: Any, slug: str, into: str, *, own: str) -> Any | None:
     write a self-edge, and an `into` already among the entries, since a
     referent that waited on both still waits on one thing. Everything else is
     kept verbatim, and `without`'s shape rules hold. See
-    docs/reference.md#dissolving
+    examples/docs/reference.md#dissolving
     """
-    entries = value if isinstance(value, list) else [value]
-    present = {str(entry) for entry in entries if str(entry) != slug}
+    held = entries(value)
+    present = {str(entry) for entry in held if str(entry) != slug}
     kept: list[Any] = []
-    for entry in entries:
+    for entry in held:
         if str(entry) != slug:
             kept.append(entry)
             continue
@@ -153,6 +177,13 @@ def unknown(edges: Iterable[str], filed: Container[str]) -> tuple[str, ...]:
     return tuple(slug for slug in edges if slug not in filed)
 
 
+def unknown_records(
+    slug: str, key: str, edges: Iterable[str], filed: Container[str]
+) -> list[UnknownRecord]:
+    """`unknown`, as the records an exception report carries."""
+    return [{SLUG: slug, KEY: key, NAMES: named} for named in unknown(edges, filed)]
+
+
 def misordered(
     slug: str,
     place: Any,
@@ -160,19 +191,19 @@ def misordered(
     places: Mapping[str, Any],
     *,
     key: str,
-) -> list[dict[str, Any]]:
+) -> list[MisorderedRecord]:
     """Every edge of `slug`'s naming an item later in the order.
 
     Named, never acted on: an order somebody set is not rearranged by a key
     about something else. An item with no place at either
     end is ignored.
     """
-    if not isinstance(place, int) or isinstance(place, bool):
+    if not whole(place):
         return []
-    found: list[dict[str, Any]] = []
+    found: list[MisorderedRecord] = []
     for named in edges:
         against = places.get(named)
-        if not isinstance(against, int) or isinstance(against, bool):
+        if not whole(against):
             continue
         if against > place:
             found.append(

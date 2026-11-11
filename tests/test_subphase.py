@@ -1,9 +1,8 @@
 """Counting the sub-phase bullets a section's body carries.
 
 Every test here runs with **no ``tmp_path``**: `fileplan.subphase` is
-pure over a string, so the whole table is a table. That is the split 1-1
-through 2-5 all keep, and it is why the counting rule can be argued about in
-one place rather than through a tree.
+pure over a string, so the whole table is a table, and the counting rule is
+argued about in one place rather than through a tree.
 
 The heading is fixture vocabulary — ``Steps`` rather than this repo's own
 ``Sub-phases`` — so nothing here passes by accidentally agreeing with
@@ -67,16 +66,15 @@ def test_bold_prose_does_not_close_a_span_and_that_is_deliberate():
     on it would mean interpreting prose to guess where a list stops, and the
     guesses are unbounded — ``**Done when:**``, ``_Done when:_``, ``Done
     when:``. The rule stays mechanical, and the convention it asks for is
-    written into ``docs/reference.md#sub-phases``: put the sub-phases last, or
+    written into ``examples/docs/reference.md#sub-phases``: put the sub-phases last, or
     close them with a real heading."""
     text = body("### Steps", "- one", "", "**Done when:**", "- counted, by design")
     assert subphase.count(text, HEADING) == 2
 
 
 def test_an_indented_bullet_is_continuation_rather_than_a_sub_phase():
-    """A sub-phase's own bullet carries nested lists and paragraphs — section
-    2's carried numbered decisions under four of its six. None of that is a
-    sub-phase, and indentation is the whole of the rule."""
+    """A sub-phase's own bullet carries nested lists and paragraphs. None of
+    that is a sub-phase, and indentation is the whole of the rule."""
     text = body(
         "### Steps",
         "- one",
@@ -128,9 +126,8 @@ def test_the_heading_is_matched_on_its_text_at_any_depth():
     ],
 )
 def test_a_bullet_shaped_line_in_any_other_form_refuses_naming_it(line, marker):
-    """John's constraint from the big project: the bullets there are written
-    inconsistently, and that is what causes parsing errors. The answer is to
-    count the one form and **name** the rest rather than guess."""
+    """John's constraint: bullets written inconsistently cause parsing errors,
+    so the tool counts the one form and **names** the rest rather than guess."""
     text = body("### Steps", "- fine", line)
     (message,) = subphase.errors(text, HEADING)
     assert "body line 3" in message
@@ -203,13 +200,13 @@ def test_a_name_is_the_first_token_of_the_bullets_leading_bold():
 def test_a_hyphen_stays_in_the_name_and_a_dash_or_a_space_ends_it(line, expected):
     """``4-1`` has to survive whole, so a bare hyphen is not a separator; a
     dash with or without spaces around it is. The name is one token either
-    way, which is what a person types and — from 4-4 on — what a claim record
-    carries in its filename."""
+    way, which is what a person types and what a claim record carries in its
+    filename."""
     assert subphase.names(body("### Steps", line), HEADING) == [expected]
 
 
 def test_inserting_a_bullet_above_leaves_every_other_name_unchanged():
-    """The whole reason a name replaced the ordinal. Under ordinals this
+    """Why a sub-phase is named rather than numbered. Under ordinals this
     insert renumbers everything below it and every reference silently
     re-points; under names nothing moves."""
     before = subphase.names(NAMED_BODY, HEADING)
@@ -225,8 +222,8 @@ def test_inserting_a_bullet_above_leaves_every_other_name_unchanged():
 
 
 def test_a_bullet_with_no_bold_run_is_counted_and_has_no_name():
-    """Naming is additive: 4-1's count is what it always was, and an unnamed
-    sub-phase is simply not something anything may point at."""
+    """Naming is additive: an unnamed sub-phase still counts, and nothing may
+    point at it."""
     text = body("### Steps", "- **named — one.**", "- plain, with no bold at all")
     assert subphase.count(text, HEADING) == 2
     assert subphase.names(text, HEADING) == ["named"]
@@ -289,8 +286,8 @@ def test_a_head_carrying_no_cursor_is_not_graded():
 )
 def test_a_cursor_the_body_does_not_carry_refuses_naming_the_names_available(value):
     """Membership rather than arithmetic, which is the strictly better check:
-    it catches a typo'd reference as well as one past the end, and an ordinal
-    left over from before this sub-phase is caught rather than honoured."""
+    it catches a typo'd reference as well as one past the end, and a bare
+    ordinal is caught rather than honored."""
     (message,) = cursor({"graft": value})
     assert f'names sub-phase "{value}"' in message
     assert "graft-1, graft-2, graft-3" in message
@@ -310,8 +307,8 @@ def test_a_cursor_on_a_body_with_no_sub_phases_refuses():
 
 
 def test_a_cursor_on_a_body_whose_bullets_are_unnamed_says_which_line_needs_one():
-    """Nothing falls back to an ordinal — a silent fallback is the failure
-    being removed — so the refusal says what to do instead."""
+    """Nothing falls back to an ordinal, since a silent fallback is the
+    failure this guards, so the refusal says what to do instead."""
     (message,) = subphase.cursor_errors(
         {"graft": "graft-1"},
         body("### Steps", "- one", "- two"),
@@ -348,7 +345,7 @@ RIPENED, THINNED = "ripened", "thinned"
 
 
 def marked(*marks: str | None) -> str:
-    """`NAMED_BODY`'s three steps with the marks given put on them."""
+    """`NAMED_BODY`'s steps with the marks given put on them."""
     lines = ["### Steps", "*Prose that opens the span, and is not a bullet.*"]
     for number, mark in enumerate(marks, start=1):
         said = f" **{mark}**" if mark else ""
@@ -361,10 +358,9 @@ def test_a_cursor_moved_onto_a_marked_sub_phase_refuses_naming_its_mark():
     The refusal names the value and the mark, so what is wrong is readable out
     of the refusal rather than out of the body.
 
-    One half of the rule 16-1 narrowed: ``graft-3`` carries no mark here, so
-    open work remains and the refusal is the one that fires. The other half is
-    below, where nothing is open at all. The body is left exactly as it was,
-    because what changed is when the arm is reached rather than what it says.
+    One half of 16-1's rule: ``graft-3`` carries no mark here, so open work
+    remains and the refusal fires. The other half is below, where nothing is
+    open at all.
     """
     (message,) = subphase.cursor_errors(
         {"graft": "graft-2"},
@@ -395,10 +391,10 @@ def test_a_cursor_already_resting_on_a_marked_sub_phase_is_not_re_refused():
 
 
 def test_a_cursor_onto_a_marked_sub_phase_is_fine_where_nothing_is_open():
-    """The deadlock 16-1 removed. Once every named step is marked there is no
-    open bullet left for a cursor to point at, so the refusal protects nothing
-    — and the cursor is still the true record of where the last session was.
-    Refused, the cursor key becomes unwritable, and a verb that requires it
+    """16-1: no deadlock. Once every named step is marked there is no open
+    bullet left for a cursor to point at, so a refusal would protect nothing,
+    and the cursor is still the true record of where the last session was.
+    Refused, the cursor key would be unwritable, and a verb that requires it
     could never run again on that section."""
     assert (
         subphase.cursor_errors(
@@ -434,7 +430,7 @@ def test_the_pending_marker_counts_as_open():
 
 
 def test_the_cursor_and_the_close_check_read_one_list():
-    """The property the narrowing rests on, asserted rather than described.
+    """The property 16-1's rule rests on, asserted rather than described.
     Both arms read `unmarked`, so a cursor may be written onto a marked bullet
     **exactly** when the section could close. Two spellings of the condition
     could drift; one reader with two callers cannot."""
@@ -496,7 +492,7 @@ def test_a_cursor_on_a_marked_sub_phase_advances_to_the_next_unmarked_one():
 
 
 def test_a_cursor_on_a_marked_bullet_is_not_what_comes_next_and_an_earlier_unmarked_one_is():
-    """The case section 12 exists for, and the one a `(cursor, status)` pair
+    """The case marks on bullets exist for, and the one a `(cursor, status)` pair
     could not say: *C5 done, C6 open, C7 done*. The cursor sits on the last,
     the first and the last carry marks, and the answer is the middle one."""
     assert upcoming(cursor="graft-3", text=marked(RIPENED, None, THINNED)) == "graft-2"
@@ -526,8 +522,7 @@ def test_a_body_whose_bullets_are_all_marked_has_no_next_sub_phase():
 def test_a_body_whose_bullets_are_all_marked_has_no_next_sub_phase_without_a_cursor():
     """A **carrier** is the shape this arm is really about: no cursor, no
     register, and a name form of its own. Every finding disposed of means the
-    row leaves the listing, where reading `found[0]` had it still pointing at
-    the first one long after the pass closed."""
+    row leaves the listing."""
     findings = body(
         "### Findings",
         "- **f1 — the first.** **fixed**",
@@ -554,8 +549,7 @@ def test_unnamed_bullets_are_counted_and_cannot_be_next():
 
 
 def test_the_pending_marker_is_still_what_comes_next_once_every_bullet_is_marked():
-    """`bullets` is asked with ``pending=None`` deliberately, and this is the
-    answer that would have gone silently otherwise: a decomposition that is
+    """`bullets` is asked with ``pending=None``, so a decomposition that is
     not finished says so, and a composed session reads exactly this to tell
     "cut this up" from "work the next one". The marker can carry no mark and
     sits last, so it is reached only once every real bullet is marked."""
@@ -590,7 +584,7 @@ def test_a_cursor_the_body_does_not_carry_falls_to_the_first_unmarked_bullet():
 
 # --- minting: the declared name form -----------------------------------------
 
-#: The two forms the worked example and the fixture between them
+#: The forms the worked example and the fixture between them
 #: prove: one over a key the state mints, one over nothing but the ordinal.
 NUMBERED_FORM, BARE_FORM = "{number}-{ordinal}", "c{ordinal}"
 
@@ -697,7 +691,7 @@ PREFIX = "7-"
     ],
 )
 def test_the_next_ordinal_is_the_leading_integer_after_the_prefix(names, expected):
-    """The old tool's rule, and the two things that fall out of it rather than
+    """The highest ordinal plus one, and what falls out of it rather than
     needing an arm each: `7-2a` — a sub-phase split while it was planned —
     contributes 2, and a name that is not an ordinal contributes nothing."""
     assert subphase.next_ordinal(names, PREFIX) == expected
@@ -711,7 +705,7 @@ def test_the_ordinal_is_not_the_count():
     assert len(names) == 4 and subphase.next_ordinal(names, PREFIX) == 4
 
 
-# --- minting: the three steps ------------------------------------------------
+# --- minting: the steps ------------------------------------------------------
 
 
 def minted(*lines: str, title=None, last=False) -> str:
@@ -734,8 +728,8 @@ def test_opening_a_decomposition_writes_the_heading_and_the_pending_bullet():
 
 
 def test_opening_leaves_everything_the_body_already_said_alone():
-    """Nothing but the heading and the bullet is added: 4-5a writes a body and
-    must not rewrite one."""
+    """Nothing but the heading and the bullet is added: minting writes into a
+    body and must not rewrite one."""
     prose = ("", "Some prose.", "", "**Done when:**", "- a bullet under prose", "")
     assert minted(*prose).startswith(body(*prose).rstrip("\n").rstrip())
 
@@ -774,10 +768,9 @@ def test_last_with_a_title_mints_and_closes_in_one_run():
 
 
 def test_minting_into_a_finished_decomposition_re_opens_it():
-    """The old tool needed `--reopen` and three refusals around it, because
-    the marker was a head key somebody had to clear. Here the third step is
-    unconditional and asks nothing about what came before, so the section
-    simply is unfinished again — which is true."""
+    """No flag reopens: the marker is a bullet, not a head key somebody has to
+    clear. Adding it back is unconditional and asks nothing about what came
+    before, so the section is unfinished again, which is true."""
     assert minted("### Steps", "- **7-1 — The register**", title="More") == body(
         "### Steps",
         "- **7-1 — The register**",
@@ -794,7 +787,7 @@ def test_last_on_a_body_with_nothing_pending_changes_nothing():
 
 
 def test_the_existing_heading_is_left_at_whatever_depth_it_carries():
-    """The reader matches the heading's text at any depth on purpose, so a
+    """The reader matches the heading's text at any depth, so a
     consumer writing `## Steps` is never rewritten into this repo's nesting."""
     assert minted("## Steps", title="One") == body(
         "## Steps", "- **7-1 — One**", f"- {PENDING}"
@@ -824,10 +817,10 @@ def test_a_bullet_joins_the_list_rather_than_the_end_of_the_span():
 
 
 def test_a_bullet_joins_the_list_after_the_last_ones_continuation():
-    """A consumer's defect: 231-5 was written under 231-4's first
-    line, so 231-4's indented description read as 231-5's. The last bullet is
-    the lines `text` says it owns, and the new one goes after all of them —
-    ahead of the blank lines that close the span, as before."""
+    """The last bullet is the lines `text` says it owns, and the new one goes
+    after all of them, ahead of the blank lines that close the span. Written
+    under the last bullet's first line, it would take that bullet's indented
+    description as its own."""
     assert minted(
         "### Steps",
         "- **7-1 — One**",
@@ -1084,7 +1077,7 @@ def test_a_second_bold_run_is_a_mark_only_where_the_state_declares_its_word():
     """Section 23 (John): `**Note:** prose` has a mark's shape
     and nobody marked it. So a run is a mark only where a declared verb marks
     that word into the state, and otherwise the bullet is open and
-    unmarkable. `None` is a state nothing marks into, read as before."""
+    unmarkable. With ``marks`` left out, any second bold run is a mark."""
     lines = body("### Steps", "- **c1 — Parse** **Note:** fences are hard")
     (one,) = subphase.bullets(lines, HEADING, pending=None, marks=frozenset({"rooted"}))
     assert (one.mark, one.unmarkable) == (None, True)
@@ -1095,7 +1088,7 @@ def test_a_second_bold_run_is_a_mark_only_where_the_state_declares_its_word():
 
 def test_a_declared_mark_with_a_note_after_it_still_reads():
     """Why the reader is not anchored at the end of the line: `--note` writes
-    prose after the mark, and that is the shape of the bug."""
+    prose after the mark."""
     written = subphase.mark(
         MARKED_BODY, heading=HEADING, name="c2", word="potted", note="To the wall."
     )
@@ -1150,7 +1143,7 @@ def test_a_body_with_no_such_heading_carries_no_bullets():
 
 
 def test_a_one_line_bullet_is_its_own_line_and_nothing_else():
-    """The shape this repo's own carrier has today."""
+    """The shape this repo's own carrier has."""
     assert subphase.text(MARKED_BODY, HEADING, name="c2") == "- **c2 — The second**"
 
 
@@ -1171,7 +1164,7 @@ def test_an_indented_continuation_comes_back_verbatim():
     """Indentation and the blank line inside it, exactly as written: what a
     person reads is the file, so anything reflowed here would be a second
     rendering of a document the tool does not own."""
-    assert subphase.text(CONTINUED, HEADING, name="c1") == "\n".join(  # noqa: FLY002 — one row per line of the expected text
+    assert subphase.text(CONTINUED, HEADING, name="c1") == "\n".join(  # noqa: FLY002  one row per line of the expected text
         (
             "- **c1 — The first**",
             "  Said at more length,",
@@ -1201,8 +1194,8 @@ def test_a_fenced_transcript_comes_back_whole():
     """**The case this exists for.** A consumer's finding quotes what it saw, and
     a transcript carries column-zero lines that are somebody else's document
     — a bullet, a heading, a blank line. None of them ends the continuation,
-    because a fenced line is not a line at all (`subphase.FENCE`). This
-    is 11-1's mask read the other way round."""
+    because a fenced line is not a line at all (`subphase.FENCE`): the fence
+    mask read the other way round."""
     found = subphase.text(TRANSCRIPT, HEADING, name="c1")
     assert found is not None
     assert found.startswith("- **c1 — The first**")
@@ -1238,9 +1231,9 @@ def test_a_name_the_body_does_not_carry_has_no_text():
 
 def test_text_is_total_and_ungated():
     """It reads `_counted` rather than `bullets`, so it will hand back the
-    pending marker's own line. That is deliberate: the gate belongs to the
-    caller, and it is the same gate a disposition uses — which is what makes
-    the two refusals identical for free rather than by agreement. A gate here
+    pending marker's own line. The gate belongs to the caller, and it is the
+    same gate a disposition uses, which makes the two refusals identical for
+    free rather than by agreement. A gate here
     would give the caller two."""
     assert subphase.text(MARKED_BODY, HEADING, name="unpruned") == f"- {PENDING}"
     assert "unpruned" not in [
@@ -1252,9 +1245,8 @@ def test_text_is_total_and_ungated():
 
 
 def test_unknown_names_the_value_and_the_names_the_body_carries():
-    """`cursor_errors`' message shape, whose docstring already said so — now
-    one function rather than two spellings, because `show` needs it byte for
-    byte (`docs/reference.md#marking`)."""
+    """`cursor_errors`' message shape, in one function because `show` needs it
+    byte for byte (`examples/docs/reference.md#marking`)."""
     carried = subphase.bullets(MARKED_BODY, HEADING, pending=PENDING)
     said = subphase.unknown("propagator/a-batch.md", "c9", carried, HEADING)
     assert said == (
@@ -1284,7 +1276,9 @@ def test_marking_changes_one_line_and_leaves_every_other_byte_alone():
     written = subphase.mark(MARKED_BODY, heading=HEADING, name="c2", word="potted")
     before, after = MARKED_BODY.splitlines(), written.splitlines()
     assert len(before) == len(after)
-    differing = [n for n, (one, two) in enumerate(zip(before, after)) if one != two]
+    differing = [
+        n for n, (one, two) in enumerate(zip(before, after, strict=True)) if one != two
+    ]
     assert [before[n] for n in differing] == ["- **c2 — The second**"]
 
 
@@ -1356,7 +1350,7 @@ def test_marking_touches_the_first_matching_bullet_only():
     ],
 )
 def test_a_declared_mark_that_could_not_be_written_is_named(word, said):
-    """`title_errors`' three cases, for its reason: each is a way the strict
+    """`title_errors`' cases, for its reason: each is a way the strict
     form the writer exists to write would come out unreadable."""
     (complaint,) = subphase.mark_errors(word, "transitions.pot-on.marks")
     assert complaint.startswith("transitions.pot-on.marks")
@@ -1371,7 +1365,7 @@ def test_an_ordinary_word_is_no_complaint():
 
 
 def test_a_note_is_written_outside_the_bold_run_the_mark_is_read_from():
-    """What the whole change rests on: the word stays the second bold run and
+    """What a note rests on: the word stays the second bold run and
     the note is prose after it, so the reader is untouched."""
     written = subphase.mark(
         MARKED_BODY,
@@ -1389,8 +1383,8 @@ def test_a_note_is_written_outside_the_bold_run_the_mark_is_read_from():
 
 
 def test_no_note_writes_what_it_always_wrote():
-    """The parameter defaults, so every existing caller is untouched — and
-    what it writes is byte-identical to the run before it existed."""
+    """``note=None`` is the default, and writes byte for byte what a call
+    without it writes."""
     assert subphase.mark(
         MARKED_BODY, heading=HEADING, name="c2", word="potted", note=None
     ) == subphase.mark(MARKED_BODY, heading=HEADING, name="c2", word="potted")
@@ -1425,7 +1419,7 @@ def test_a_note_spelling_the_mark_word_changes_nothing_the_reader_reads():
     ],
 )
 def test_a_note_that_may_not_ride_on_a_bullet_is_named(note, said):
-    """`title_errors`' three cases, one function over: a note is the
+    """`title_errors`' cases, one function over: a note is the
     operator's text, so it is graded at the run the way a title is."""
     (complaint,) = subphase.note_errors(note)
     assert said in complaint
@@ -1438,9 +1432,9 @@ def test_an_ordinary_note_is_no_complaint():
 def test_a_note_carrying_a_newline_mints_a_bullet_nobody_wrote():
     """**The measurement, pinned.** This is why the newline refuses, and it is
     not a matter of taste: the second line is a counted, *named* bullet the
-    carrier's register now has to live with. `count` moves, `names` gains a
-    finding nobody wrote, and `next_ordinal` jumps past it — 11-1's class of
-    bug, punching a permanent hole in a register.
+    carrier's register has to live with. `count` moves, `names` gains a
+    finding nobody wrote, and `next_ordinal` jumps past it, punching a
+    permanent hole in the register.
 
     The `**` case beside it is the ownership rule instead, and this test says
     nothing about it, because there is nothing here to measure."""
@@ -1541,8 +1535,8 @@ def test_a_tilde_fence_is_a_fence_too():
 
 
 def test_an_indented_fence_is_a_fence_too():
-    """Section 10's own body carries 2-space-indented fenced controls, so a
-    column-zero-only rule would miss the realistic shape in this very tree."""
+    """Real bodies carry 2-space-indented fenced controls, so a
+    column-zero-only rule would miss a realistic shape."""
     indented = body(
         "### Steps",
         "- **f1 — One.**",
@@ -1613,8 +1607,8 @@ def test_a_mint_leaves_a_fenced_pending_marker_in_the_body():
 
 # --- minting: what a reader reads back ---------------------------------------
 
-#: Every body shape the module builds, plus the ones a consumer writes that
-#: this repo's own one-line carrier never did. Indexed by what each is for.
+#: Every body shape the module builds, plus the ones a consumer writes by
+#: hand. Indexed by what each is for.
 SHAPES = {
     "named": NAMED_BODY,
     "marked": MARKED_BODY,
@@ -1649,13 +1643,13 @@ SHAPES = {
 @pytest.mark.parametrize("last", [False, True], ids=["open", "last"])
 @pytest.mark.parametrize("shape", SHAPES.values(), ids=SHAPES.keys())
 def test_a_mint_changes_no_bullet_a_reader_already_reads(shape, last):
-    """What a consumer's 231-5 broke, stated for every shape rather than one:
-    minting adds a bullet and takes the pending one out, and every other
-    bullet's `text` comes back exactly as it did. The new bullet owns its own
-    line and nothing else, so it cannot have taken a neighbour's description.
+    """For every shape: minting adds a bullet and takes the pending one out,
+    and every other bullet's `text` comes back exactly as it did. The new
+    bullet owns its own line and nothing else, so it cannot have taken a
+    neighbor's description.
 
-    `count` and `names` agreeing was never enough: the defect kept both right
-    and moved four lines of prose from one bullet to the next."""
+    `count` and `names` agreeing is not enough: a bullet minted in the wrong
+    place keeps both right and moves prose from one bullet to the next."""
     before = {
         one.name: subphase.text(shape, HEADING, name=one.name)
         for one in subphase.bullets(shape, HEADING, pending=PENDING)
@@ -1725,8 +1719,8 @@ def test_a_replace_swaps_only_the_owned_lines():
 @pytest.mark.parametrize("replace", [False, True], ids=["append", "replace"])
 @pytest.mark.parametrize("name", ["7-1", "7-2", "7-3"])
 def test_a_write_leaves_every_other_line_byte_for_byte(name, replace):
-    """The bullet's own line, the bullets either side, a fenced transcript and
-    the prose after the span all come back exactly as they were."""
+    """The bullet's own line, the bullets either side, a fenced transcript,
+    and the prose after the span all come back exactly as they were."""
     before = {
         one.name: subphase.text(WRITTEN_BODY, HEADING, name=one.name)
         for one in subphase.bullets(WRITTEN_BODY, HEADING, pending=None)
@@ -1786,7 +1780,7 @@ def test_ordinary_text_is_no_complaint():
 
 
 def test_the_indent_is_as_wide_as_the_counted_marker_and_its_space():
-    assert subphase.INDENT == " " * len(f"{subphase.COUNTED} ")
+    assert " " * len(f"{subphase.COUNTED} ") == subphase.INDENT
 
 
 # --- carrying an absorbed item in as a sub-phase ----------------------------
@@ -1800,9 +1794,9 @@ def carried(shape: str, text: str) -> tuple[str, str]:
 
 @pytest.mark.parametrize("shape", SHAPES.values(), ids=SHAPES.keys())
 def test_a_carry_mints_at_the_next_free_ordinal_and_changes_no_other_bullet(shape):
-    """A merge's half of 231-5's rule: the new bullet carries the text
-    indented under it, and every bullet a reader already read comes back byte
-    for byte."""
+    """A merge's half of `test_a_mint_changes_no_bullet_a_reader_already_reads`'s
+    rule: the new bullet carries the text indented under it, and every bullet
+    a reader already read comes back byte for byte."""
     before = {
         one.name: subphase.text(shape, HEADING, name=one.name)
         for one in subphase.bullets(shape, HEADING, pending=PENDING)
@@ -1835,7 +1829,7 @@ def test_a_carry_still_ends_the_list_with_the_pending_bullet():
 @pytest.mark.parametrize("last", [False, True], ids=["open", "last"])
 @pytest.mark.parametrize("shape", SHAPES.values(), ids=SHAPES.keys())
 def test_a_mint_after_a_bullet_lands_behind_it_and_changes_no_other(shape, last):
-    """The split's half of 231-5's rule: the new bullet goes directly behind
+    """A split's half of the same rule: the new bullet goes directly behind
     the anchor and everything it owns, and every bullet a reader already read
     comes back byte for byte."""
     carried = subphase.bullets(shape, HEADING, pending=PENDING)
@@ -1929,7 +1923,7 @@ FOLD_BODY = body(
 
 def test_absorb_moves_the_continuation_under_the_survivor_headed_once():
     written = subphase.absorb(FOLD_BODY, heading=HEADING, name="7-2", into="7-1")
-    assert subphase.text(written, HEADING, name="7-1") == "\n".join(  # noqa: FLY002 — one row per line of the expected text
+    assert subphase.text(written, HEADING, name="7-1") == "\n".join(  # noqa: FLY002  one row per line of the expected text
         [
             "- **7-1 — One**",
             "  Planned for one.",

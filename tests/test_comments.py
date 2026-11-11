@@ -1,9 +1,8 @@
 """Comments in `src/` state, they do not argue.
 
-This module grades the tells the rule names: arguing and narrating
-history, over every
-comment and docstring under `src/` and over nothing a person reads at the
-command line: a refusal may say "on purpose" to the person it refuses.
+This module grades the tells the rule names, arguing and narrating history,
+over every comment and docstring under `src/` and over nothing a person reads
+at the command line: a refusal may say "on purpose" to the person it refuses.
 
 The two dating tells, a dated ruling and a date, are graded over the
 comments and docstrings in `tests/` as well. A ruling there keeps its name
@@ -19,21 +18,32 @@ import tokenize
 from pathlib import Path
 
 import pytest
+from conftest import REPO
 
-ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT / "src" / "fileplan"
+SRC = REPO / "src" / "fileplan"
 
 #: The tree graded for a date only.
-DATED = sorted((ROOT / "tests").rglob("*.py"))
+DATED = sorted((REPO / "tests").rglob("*.py"))
 
 #: The dating tells: a dated ruling and a date.
-DATES = re.compile(r"\(John, |\b20\d\d-\d\d-\d\d\b")
+DATES = re.compile(
+    r"""
+      \(John,\                    # a dated ruling, "(John, <date>)"
+    | \b20\d\d-\d\d-\d\d\b        # or a date
+    """,
+    re.VERBOSE,
+)
 
 #: The tells: arguing ("deliberately", "on purpose") and history (the dating
 #: tells, "used to").
 TELLS = re.compile(
-    rf"\bdeliberate(ly)?\b|\bon purpose\b|{DATES.pattern}|\bused to\b",
-    re.IGNORECASE,
+    rf"""
+      \bdeliberate(ly)?\b         # arguing
+    | \bon\ purpose\b
+    | {DATES.pattern}
+    | \bused\ to\b                # history
+    """,
+    re.IGNORECASE | re.VERBOSE,
 )
 
 
@@ -55,7 +65,7 @@ def _prose(source: str) -> list[tuple[int, str]]:
 
 @pytest.mark.parametrize("path", sorted(SRC.rglob("*.py")), ids=lambda p: p.name)
 def test_no_comment_in_src_argues_or_narrates_history(path: Path) -> None:
-    """34-3's done line, per module."""
+    """No comment or docstring in a module under `src/` holds a tell."""
     said = [
         (line, match.group(0))
         for line, text in _prose(path.read_text())
@@ -64,7 +74,7 @@ def test_no_comment_in_src_argues_or_narrates_history(path: Path) -> None:
     assert said == [], said
 
 
-@pytest.mark.parametrize("path", DATED, ids=lambda p: p.relative_to(ROOT).as_posix())
+@pytest.mark.parametrize("path", DATED, ids=lambda p: p.relative_to(REPO).as_posix())
 def test_no_comment_in_tests_dates_a_ruling(path: Path) -> None:
     """No comment or docstring in `tests/` dates a ruling or holds a date.
     A date in a fixture string is data, so only comments and docstrings are

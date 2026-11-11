@@ -12,8 +12,8 @@ Every `*.md` in a declared state directory is claimed to be an item. So a
 `README.md` filed among them refuses the listing by name. Every defect is
 collected and reported at once.
 
-See docs/reference.md#the-listing for the traversal and its filters.
-See docs/reference.md#the-handle for the prefix rule `resolve` applies.
+See examples/docs/reference.md#the-listing for the traversal and its filters.
+See examples/docs/reference.md#the-handle for the prefix rule `resolve` applies.
 """
 
 from __future__ import annotations
@@ -22,11 +22,11 @@ import datetime as dt
 import difflib
 import operator as operators
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any
+from typing import Any, TypedDict
 
 from fileplan import claim, depends, item, numbered, queued, stale, subphase
 from fileplan.declaration import (
@@ -39,6 +39,7 @@ from fileplan.declaration import (
     Declaration,
     Refusal,
     State,
+    capability_keys,
     collecting,
     named,
 )
@@ -50,56 +51,75 @@ from fileplan.item import Item
 SLUG, STATE, PATH = RESERVED_KEYS
 
 #: The row field naming the commands that could take an item right now.
-#: See docs/reference.md#commands
+#: See examples/docs/reference.md#commands
 COMMANDS = COMMAND_KEYS[0]
 
 #: The fields of a bullet, as `show ITEM NAME`'s record spells them first and
 #: the `unmarkable` and `unread` reports carry them. `mark` is present and
-#: `null` on an unmarked bullet. See docs/reference.md#show
+#: `null` on an unmarked bullet. See examples/docs/reference.md#show
 BULLET_NAME, BULLET_ITEM, BULLET_TITLE, BULLET_MARK = "name", "item", "title", "mark"
 
 #: What a bullet carries after its name's bold run, spelled after
 #: `subphase.Bullet.rest` — one spelling for one meaning, and the refusal
 #: quotes the same value. It appears in the `unmarkable` report's records
-#: rather than in a row. See docs/reference.md#marking
+#: rather than in a row. See examples/docs/reference.md#marking
 BULLET_REST = "rest"
 
 #: The 1-based line a bullet is on in its item file, head included, so a
 #: record's `path` and this are where an editor opens. Report-only, like
-#: `BULLET_REST`. See docs/reference.md#the-listing
+#: `BULLET_REST`. See examples/docs/reference.md#the-listing
 BULLET_LINE = "line"
 
 #: The two fields an `undeclared` record adds to the item's slug and path:
 #: which key, and the entry it carries that the key does not declare.
-#: See docs/reference.md#the-listing
+#: See examples/docs/reference.md#the-listing
 KEY, VALUE = "key", "value"
 
 #: The field a `missing` or `orphaned` record adds: the directory the key
-#: declares. See docs/reference.md#directory
+#: declares. See examples/docs/reference.md#directory
 DIRECTORY = "directory"
 
 #: The field an `unfound` record adds to those two: the carrier the filed
-#: item names, which no longer has the bullet. See docs/reference.md#carried
+#: item names, which no longer has the bullet. See examples/docs/reference.md#carried
 CARRIER = "carrier"
 
 #: Why the reader passed a bullet over, in the `unread` report's records.
-#: Report-only, like `BULLET_REST`. See docs/reference.md#sub-phases
+#: Report-only, like `BULLET_REST`. See examples/docs/reference.md#sub-phases
 BULLET_REASON = "reason"
 
 #: The field an `unlisted` record adds to the state it names: how many rows
-#: this read left out of it. See docs/reference.md#listed
+#: this read left out of it. See examples/docs/reference.md#listed
 COUNT = "count"
 
 #: How many candidates an ambiguous prefix names, one per line, before it
-#: says how many more there are. See docs/reference.md#the-handle
+#: says how many more there are. See examples/docs/reference.md#the-handle
 CANDIDATES = 10
 
 #: How like a slug's start a handle has to be to be offered as a near miss.
 NEAR = 0.6
 
 #: A number-shaped handle: a section's number, then perhaps a sub-phase's
-#: rest. See docs/reference.md#the-handle
-NUMBERED = re.compile(r"^(\d+)(-\S+)?$")
+#: rest. See examples/docs/reference.md#the-handle
+NUMBERED = re.compile(
+    r"""
+    ^(\d+)      # the section's number
+    (-\S+)?$    # perhaps a sub-phase's rest
+    """,
+    re.VERBOSE,
+)
+
+#: Any handle that opens with a number, whole or followed by a hyphen: one
+#: `NUMBERED` may not read, said to be archived when no live item carries it.
+NUMBER_LIKE = re.compile(
+    r"""
+    \d+      # a number
+    (-|$)    # then a hyphen, or nothing
+    """,
+    re.VERBOSE,
+)
+
+#: Why a slug held twice refuses, as every refusal of one says it.
+UNIQUE = "A slug is unique across every state, because it is the one handle an item answers to"
 
 #: The comparison operators a filter value may carry, longest first so `>=`
 #: is never read as `>`. A bare value means `=`.
@@ -112,8 +132,11 @@ DRAWN = ":"
 
 #: `contains`: a case-insensitive substring of a value's text, or of any entry
 #: of a list. Over a key with declared values it refuses, since those compare
-#: by order. See docs/reference.md#the-listing
+#: by order. See examples/docs/reference.md#the-listing
 CONTAINS = "~"
+
+#: The intrinsic key a bare WORD searches beside the body.
+(TITLE,) = INTRINSIC_KEYS
 
 #: The two tests that ask about presence rather than value. They come from
 #: `--has` / `--lacks`, not from a value's prefix, and carry no value.
@@ -152,7 +175,7 @@ def documents(declaration: Declaration, directory: Path) -> list[Path]:
     """Every `*.md` directly inside `directory` whose name `[fileplan].ignore`
     does not list. The one filter every directory walk shares: a
     state's, a key's `directory`, and a register kept as a directory. Each
-    caller keeps its own order. See docs/reference.md#ignore
+    caller keeps its own order. See examples/docs/reference.md#ignore
     """
     return [
         p for p in directory.glob(f"*{item.SUFFIX}") if p.name not in declaration.ignore
@@ -209,7 +232,7 @@ def archive(declaration: Declaration, state: State) -> list[Archived]:
     other extension left alone, and a name `[fileplan].ignore` lists skipped.
     There a file with no readable heading is a
     lost close-out (`fileplan.numbered.unreadable_entry`). The load check
-    guarantees the path exists. See docs/reference.md#the-register
+    guarantees the path exists. See examples/docs/reference.md#the-register
     """
     # A `numbered` state with no `archive` refuses at load.
     assert state.archive is not None
@@ -243,17 +266,45 @@ def head_keys(declaration: Declaration) -> tuple[str, ...]:
 
     One answer to "which keys does a row carry because of where an item is",
     read by the listing, by the filters the CLI generates and by the grading
-    in `fileplan.item`. A fifth copy of the question is how a capability ends
+    in `fileplan.item`. A second copy of the question is how a capability ends
     up carried by the row and unreachable by the filter.
 
     Present whenever the declaration has such a state, never depending on
     which items happen to be filed.
     """
-    return tuple(
-        key
-        for capability, key in CAPABILITY_KEYS.items()
-        if declaration.has(capability)
+    return capability_keys(filter(declaration.has, CAPABILITY_KEYS))
+
+
+def bullets_of(body: str, state: State) -> list[subphase.Bullet]:
+    """The named bullets `body` carries by `state`'s rules, none where it counts
+    none: the one reading of an item's sub-phases in its own state."""
+    if not state.sub_phases:
+        return []
+    return subphase.bullets(
+        body, state.sub_phases, pending=state.pending, marks=state.marks
     )
+
+
+def bullet_named(body: str, state: State, wanted: Any, where: str) -> subphase.Bullet:
+    """The bullet called `wanted`, or refuse in `subphase.unknown`'s words: the
+    gate a disposition and `show ITEM NAME` share. See examples/docs/reference.md#marking
+    """
+    carried = bullets_of(body, state)
+    found = next((one for one in carried if one.name == wanted), None)
+    if found is None:
+        assert state.sub_phases is not None
+        raise Refusal(subphase.unknown(where, wanted, carried, state.sub_phases))
+    return found
+
+
+def today() -> dt.date:
+    """Today on this session's own calendar: local, the date a person writes."""
+    return dt.datetime.now().astimezone().date()
+
+
+def _path(one: Item, declaration: Declaration) -> str:
+    """A row's `path`: the item's file, relative to the declaration root."""
+    return str(one.path.relative_to(declaration.root))
 
 
 def rows(
@@ -275,21 +326,21 @@ def rows(
 
     The derived fields come between `state` and the declared keys, each
     present whenever the declaration has such a state at all: a capability's
-    key, then the three counted off the body, then `blocked-by`, then
+    key, then the fields counted off the body, then `blocked-by`, then
     `stale-days`, then `commands`, then each inverse a state's `references`
     declares. A `0` sub-phase count is a section nobody has decomposed,
     where `None` is a state that counts none, and the pair is what tells a
     finished decomposition from a state with no bullets at all. See
-    docs/reference.md#the-listing and docs/reference.md#the-cursor
+    examples/docs/reference.md#the-listing and examples/docs/reference.md#the-cursor
 
-    `claimed`, `blocking` and `ages` are the facts read from outside the item
+    `claimed`, `blocking`, and `ages` are the facts read from outside the item
     file, each a mapping by slug, and `referenced` is one such mapping per
     inverse. Working them out is `listing`'s, so this
     function stays pure over what it is handed. `blocked-by` names only what
     is still filed, because "waiting on X" and "X does not exist" are
-    different facts (docs/reference.md#dependencies). A slug git could not answer
+    different facts (examples/docs/reference.md#dependencies). A slug git could not answer
     about is absent from `ages`, so the `None` is spelled once, here
-    (docs/reference.md#stale-days).
+    (examples/docs/reference.md#stale-days).
     """
     given = head_keys(declaration)
     held = CLAIM_KEYS if declaration.has(CLAIMED) else ()
@@ -352,10 +403,107 @@ def rows(
             },
             **{key: one.get(key) for key in INTRINSIC_KEYS},
             **{key: one.get(key) for key in declaration.keys},
-            PATH: str(one.path.relative_to(declaration.root)),
+            PATH: _path(one, declaration),
         }
         for one in found
     ]
+
+
+# The record shapes a listing carries beside its rows, one per envelope key.
+# TypedDicts rather than dataclasses: each is a plain dict at runtime, so the
+# envelope serializes them as they are. Keys are the constants above, in the
+# order each builder writes them, which `tests/test_read.py` holds them to.
+
+#: A claim record no item in a claimed state answers to: `SLUG`, the claim's
+#: three row fields, and `PATH`. Functional, since its keys hold hyphens.
+StrandedRecord = TypedDict(
+    "StrandedRecord",
+    {
+        "slug": str,
+        "claimed-by": str,
+        "claim-status": str,
+        "claim-holder": str,
+        "path": str,
+    },
+)
+
+
+class UnmarkableRecord(TypedDict):
+    """A bullet no verb could mark: `BULLET_ITEM`, `BULLET_NAME`,
+    `BULLET_REST`, `BULLET_LINE`, `PATH`."""
+
+    item: str
+    name: str
+    rest: str
+    line: int
+    path: str
+
+
+class UnreadRecord(TypedDict):
+    """A bullet the reader passes over: `UnmarkableRecord`'s keys with
+    `BULLET_REASON` in place of the rest."""
+
+    item: str
+    name: str
+    reason: str
+    line: int
+    path: str
+
+
+class UndeclaredRecord(TypedDict):
+    """A head value outside its key's `values`: `SLUG`, `KEY`, `VALUE`,
+    `PATH`."""
+
+    slug: str
+    key: str
+    value: Any
+    path: str
+
+
+class MissingRecord(TypedDict):
+    """An entry naming no file in its key's directory: `UndeclaredRecord`'s
+    keys and `DIRECTORY`."""
+
+    slug: str
+    key: str
+    value: Any
+    path: str
+    directory: str
+
+
+class OrphanedRecord(TypedDict):
+    """A file in a key's directory no item names: `KEY`, `DIRECTORY`,
+    `PATH`."""
+
+    key: str
+    directory: str
+    path: str
+
+
+class UnfoundRecord(TypedDict):
+    """A name a filed item carries that its carrier's bullets do not: `SLUG`,
+    `PATH`, `KEY`, `VALUE`, `CARRIER`."""
+
+    slug: str
+    path: str
+    key: str
+    value: Any
+    carrier: str
+
+
+class UnlistedRecord(TypedDict):
+    """An unlisted state that lost rows to this read: `STATE`, `COUNT`."""
+
+    state: str
+    count: int
+
+
+class UnsortedRecord(TypedDict):
+    """A row missing a key its state sorts by: `SLUG`, `KEY`, `PATH`."""
+
+    slug: str
+    key: str
+    path: str
 
 
 @dataclass(frozen=True)
@@ -367,74 +515,74 @@ class Listing:
     """
 
     rows: list[dict[str, Any]]
-    stranded: list[dict[str, Any]]
+    stranded: list[StrandedRecord]
     #: How many items the traversal read, which is not `len(rows)` once an
     #: offering narrows them. It is what the frame counts of: a read that
     #: offers three of twelve says `3 of 12` rather than `3 of 3`.
     walked: int
     #: The slugs of started sections carrying no sub-phases at all. An
     #: exception report about the tree rather than a row of it, said by both
-    #: renderings and narrowed by no filter. See docs/reference.md#the-cursor
+    #: renderings and narrowed by no filter. See examples/docs/reference.md#the-cursor
     undecomposed: list[str] = field(default_factory=list)
     #: The edges naming nothing filed, and the edges pointing later in the
     #: order — one record each, naming the item, the key and what it named.
-    #: Exception reports like the one above. See docs/reference.md#dependencies
+    #: Exception reports like the one above. See examples/docs/reference.md#dependencies
     #:
     #: Separate reports and no merged `notices` array: each carries a different
     #: shape, and the envelope key is how a consumer selects one. A merged
     #: array would be a union mostly empty at every read.
-    unknown: list[dict[str, Any]] = field(default_factory=list)
-    misordered: list[dict[str, Any]] = field(default_factory=list)
-    #: The references naming nothing filed, in `unknown`'s three fields. A
+    unknown: list[depends.UnknownRecord] = field(default_factory=list)
+    misordered: list[depends.MisorderedRecord] = field(default_factory=list)
+    #: The references naming nothing filed, in `unknown`'s fields. A
     #: report of its own, because `unknown` says dependency in its gate, its
-    #: line and its docs. See docs/reference.md#references
-    unresolved: list[dict[str, Any]] = field(default_factory=list)
+    #: line and its docs. See examples/docs/reference.md#references
+    unresolved: list[depends.UnknownRecord] = field(default_factory=list)
     #: The two register reports, one record each: a number in neither the
     #: state nor the document its `archive` names, and a `##` in that document
     #: the register cannot read. The arithmetic is
     #: `fileplan.numbered.missing`, the same one the mint refuses on. See
-    #: docs/reference.md#the-register
-    gaps: list[dict[str, Any]] = field(default_factory=list)
-    lost: list[dict[str, Any]] = field(default_factory=list)
+    #: examples/docs/reference.md#the-register
+    gaps: list[numbered.GapRecord] = field(default_factory=list)
+    lost: list[numbered.LostRecord] = field(default_factory=list)
     #: The bullets no verb could mark: unmarked, in a state some verb marks
     #: into, and carrying text after the name's bold run. One record each,
     #: naming the item, the bullet, where it is and what is in the way. See
-    #: docs/reference.md#marking
-    unmarkable: list[dict[str, Any]] = field(default_factory=list)
+    #: examples/docs/reference.md#marking
+    unmarkable: list[UnmarkableRecord] = field(default_factory=list)
     #: The bullets that look named and that the reader passes over: a bold run
     #: it cannot read, or a name in the state's form after the heading that
     #: ended the span. One record each, naming the item, what the name would
-    #: be, where it is and why. See docs/reference.md#sub-phases
-    unread: list[dict[str, Any]] = field(default_factory=list)
+    #: be, where it is and why. See examples/docs/reference.md#sub-phases
+    unread: list[UnreadRecord] = field(default_factory=list)
     #: The head values outside their key's declared `values`, one record per
     #: entry. A value is graded when a verb writes it and never again, so a
     #: hand edit is found here. It gates nothing: grading at read would break
-    #: the whole listing over one item. See docs/reference.md#the-listing
-    undeclared: list[dict[str, Any]] = field(default_factory=list)
+    #: the whole listing over one item. See examples/docs/reference.md#the-listing
+    undeclared: list[UndeclaredRecord] = field(default_factory=list)
     #: The two reports of a key declaring a `directory`, one record each: an
     #: entry naming no file directly inside the key's directory, and a `*.md`
     #: there that no filed item names in that key. They gate nothing, for the
-    #: reason `unknown` gives. See docs/reference.md#directory
-    missing: list[dict[str, Any]] = field(default_factory=list)
-    orphaned: list[dict[str, Any]] = field(default_factory=list)
+    #: reason `unknown` gives. See examples/docs/reference.md#directory
+    missing: list[MissingRecord] = field(default_factory=list)
+    orphaned: list[OrphanedRecord] = field(default_factory=list)
     #: The filed items naming a bullet their carrier no longer has, one record
     #: per entry: what a split leaves behind until each is repointed. Only
     #: while the carrier is filed, because provenance outlives its carrier.
-    #: It gates nothing. See docs/reference.md#carried
-    unfound: list[dict[str, Any]] = field(default_factory=list)
+    #: It gates nothing. See examples/docs/reference.md#carried
+    unfound: list[UnfoundRecord] = field(default_factory=list)
     #: **Not** an exception report. One record per numbered state, saying what
     #: the register holds rather than what is wrong with it: its name, its
     #: archive, its floor and the highest number it holds. A report is silent
     #: when nothing is wrong; this prints on every read. See
-    #: docs/reference.md#the-register
-    register: list[dict[str, Any]] = field(default_factory=list)
+    #: examples/docs/reference.md#the-register
+    register: list[numbered.RegisterRecord] = field(default_factory=list)
 
 
 #: The `Listing` fields the envelope carries beside the rows, in envelope
 #: order, each with the gate it is present under: whenever the declaration
 #: could fill it, empty or not, and absent otherwise. One roster, read by the
 #: JSON envelope and by the text form's reports, so a report added to
-#: `Listing` is added here or reaches neither. See docs/reference.md#the-listing
+#: `Listing` is added here or reaches neither. See examples/docs/reference.md#the-listing
 REPORTS: tuple[tuple[str, Callable[[Declaration], bool]], ...] = (
     ("stranded", lambda one: one.has(CLAIMED)),
     # Started means a status key on a state that counts sub-phases, which is
@@ -465,6 +613,7 @@ def listing(
     declaration: Declaration,
     *,
     taking: Callable[[Item, Sequence[Item]], list[str]] | None = None,
+    word: str | None = None,
 ) -> Listing:
     """The composed read: the traversal, the claims, and the rows they make.
 
@@ -474,11 +623,9 @@ def listing(
 
     A claim belongs to an item in a claimed state, and every other record is
     stranded: one whose slug names no item, and one naming an item that has
-    since moved to a state which claims nothing. The executor keeps the same
-    rule by path rather than by traversal, so one malformed item cannot
-    refuse a claim; the listing reads the tree it has already walked. A stranded claim is
+    since moved to a state which claims nothing. A stranded claim is
     named, never filtered and never removed. A declaration with no claimed
-    state reads no records at all. See docs/reference.md#the-listing
+    state reads no records at all. See examples/docs/reference.md#the-listing
 
     `taking` says which commands could take an item, handed the item and the
     whole tree. The predicate is the caller's, so this module goes on knowing
@@ -486,10 +633,15 @@ def listing(
     because a row spells an absent key `None` and a precondition read over one
     would pass everything. Without it, `commands` is `None` on every row.
 
+    `word` keeps only the rows of items whose title or body `holds` it. It
+    is answered here because the body is not in the row. Everything else is
+    computed over the whole walk, so `walked` and every report are narrowed
+    by no filter.
+
     This is where the clock is read, once, beside `local/claims/`
-    (docs/reference.md#stale-days), and where each numbered state's archive is
+    (examples/docs/reference.md#stale-days), and where each numbered state's archive is
     read, for the two reports and the register record `_register` builds
-    (docs/reference.md#the-register).
+    (examples/docs/reference.md#the-register).
     """
     found = items(declaration)
     blocking, unknown, misordered = _dependencies(found)
@@ -503,7 +655,7 @@ def listing(
     ages = stale.ages(
         declaration.root,
         [(one.slug, one.path) for one in found],
-        dt.datetime.now().astimezone().date(),
+        today(),
     )
     # Started means the item carries the status key at all, never that its
     # status has passed some particular word: the words are the workflow's.
@@ -518,7 +670,7 @@ def listing(
     # The claims first, then the rows, then one return: what varies between
     # the two row kinds is the two lines below, so that is what branches.
     held: dict[str, Mapping[str, Any]] = {}
-    stranded: list[dict[str, Any]] = []
+    stranded: list[StrandedRecord] = []
     if declaration.has(CLAIMED):
         claimed = claim.holders(declaration)
         here = {one.slug for one in found if one.state.has(CLAIMED)}
@@ -542,7 +694,7 @@ def listing(
     )
     made = rows(
         declaration,
-        found,
+        found if word is None else [one for one in found if holds(one, word)],
         claimed=held,
         blocking=blocking,
         ages=ages,
@@ -573,16 +725,16 @@ def listing(
 
 def _unmarkable(
     declaration: Declaration, found: Sequence[Item]
-) -> list[dict[str, Any]]:
+) -> list[UnmarkableRecord]:
     """The bullets in marked-into states that no mark could be read on.
 
     `subphase.Bullet.unmarkable` is the question, so the report and the
     refusal that stops the run cannot disagree about where a bold run ends.
     A state nothing marks into contributes nothing: a bullet there is not
-    waiting on a verb. See docs/reference.md#marking
+    waiting on a verb. See examples/docs/reference.md#marking
     """
     marked = declaration.marked_states
-    said: list[dict[str, Any]] = []
+    said: list[UnmarkableRecord] = []
     for one in found:
         heading = one.state.sub_phases
         if heading is None or one.state.name not in marked:
@@ -593,11 +745,9 @@ def _unmarkable(
                 BULLET_NAME: bullet.name,
                 BULLET_REST: bullet.rest,
                 BULLET_LINE: one.opening + bullet.line,
-                PATH: str(one.path.relative_to(declaration.root)),
+                PATH: _path(one, declaration),
             }
-            for bullet in subphase.bullets(
-                one.body, heading, pending=one.state.pending, marks=one.state.marks
-            )
+            for bullet in bullets_of(one.body, one.state)
             if bullet.unmarkable
         ]
     return said
@@ -621,7 +771,7 @@ def unread(state: State, body: str, head: Mapping[str, Any]) -> list[subphase.Un
     return subphase.unread(body, state.sub_phases, prefix=prefix)
 
 
-def _unread(declaration: Declaration, found: Sequence[Item]) -> list[dict[str, Any]]:
+def _unread(declaration: Declaration, found: Sequence[Item]) -> list[UnreadRecord]:
     """The `unread` report: every bullet `unread` finds, over the whole tree.
 
     `_unmarkable`'s record shape with a reason in place of the rest.
@@ -632,7 +782,7 @@ def _unread(declaration: Declaration, found: Sequence[Item]) -> list[dict[str, A
             BULLET_NAME: bullet.name,
             BULLET_REASON: bullet.reason,
             BULLET_LINE: one.opening + bullet.line,
-            PATH: str(one.path.relative_to(declaration.root)),
+            PATH: _path(one, declaration),
         }
         for one in found
         for bullet in unread(one.state, one.body, one.head)
@@ -641,7 +791,7 @@ def _unread(declaration: Declaration, found: Sequence[Item]) -> list[dict[str, A
 
 def _undeclared(
     declaration: Declaration, found: Sequence[Item]
-) -> list[dict[str, Any]]:
+) -> list[UndeclaredRecord]:
     """The `undeclared` report: every carried entry its key does not declare.
 
     Only a key with `values` is asked about, and a list is asked entry by
@@ -653,19 +803,19 @@ def _undeclared(
             SLUG: one.slug,
             KEY: name,
             VALUE: entry,
-            PATH: str(one.path.relative_to(declaration.root)),
+            PATH: _path(one, declaration),
         }
         for one in found
         for name, values in closed.items()
         if name in one.head
-        for entry in _entries(one.head[name])
+        for entry in depends.entries(one.head[name])
         if str(entry) not in values
     ]
 
 
 def _paths(
     declaration: Declaration, found: Sequence[Item]
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[MissingRecord], list[OrphanedRecord]]:
     """The `missing` and `orphaned` reports, over one walk of each key's
     directory.
 
@@ -676,10 +826,10 @@ def _paths(
     tree. The directory holds `archive`'s documents: every `*.md` directly
     inside it, no recursion, other extensions left alone, and a name
     `[fileplan].ignore` lists skipped. The load check
-    guarantees each directory exists. See docs/reference.md#directory
+    guarantees each directory exists. See examples/docs/reference.md#directory
     """
-    missing: list[dict[str, Any]] = []
-    orphaned: list[dict[str, Any]] = []
+    missing: list[MissingRecord] = []
+    orphaned: list[OrphanedRecord] = []
     for name, key in declaration.keys.items():
         if key.directory is None:
             continue
@@ -693,7 +843,7 @@ def _paths(
         for one in found:
             if name not in one.head:
                 continue
-            for entry in _entries(one.head[name]):
+            for entry in depends.entries(one.head[name]):
                 path = PurePosixPath(str(entry))
                 if path in held:
                     named.add(path)
@@ -703,7 +853,7 @@ def _paths(
                         SLUG: one.slug,
                         KEY: name,
                         VALUE: entry,
-                        PATH: str(one.path.relative_to(declaration.root)),
+                        PATH: _path(one, declaration),
                         DIRECTORY: directory.as_posix(),
                     }
                 )
@@ -718,40 +868,32 @@ def _paths(
     return missing, orphaned
 
 
-def _unfound(declaration: Declaration, found: Sequence[Item]) -> list[dict[str, Any]]:
+def _unfound(declaration: Declaration, found: Sequence[Item]) -> list[UnfoundRecord]:
     """The `unfound` report: every name a filed item carries that its carrier's
     bullets do not.
 
     Read through each verb's `files` table, so the two keys are the ones that
     verb wrote. A carrier that is gone, or that sits where no bullets are
-    counted, contributes nothing. See docs/reference.md#carried
+    counted, contributes nothing. See examples/docs/reference.md#carried
     """
     by_slug = {one.slug: one for one in found}
-    said: list[dict[str, Any]] = []
+    said: list[UnfoundRecord] = []
     pairs = dict.fromkeys((files["item"], files["name"]) for files in declaration.files)
     for one in found:
         for source, name in pairs:
             carrier = by_slug.get(str(one.get(source, "")))
             if carrier is None or not carrier.state.sub_phases or name not in one.head:
                 continue
-            names = {
-                bullet.name
-                for bullet in subphase.bullets(
-                    carrier.body,
-                    carrier.state.sub_phases,
-                    pending=carrier.state.pending,
-                    marks=carrier.state.marks,
-                )
-            }
+            names = {bullet.name for bullet in bullets_of(carrier.body, carrier.state)}
             said += [
                 {
                     SLUG: one.slug,
-                    PATH: str(one.path.relative_to(declaration.root)),
+                    PATH: _path(one, declaration),
                     KEY: name,
                     VALUE: entry,
                     CARRIER: carrier.slug,
                 }
-                for entry in _entries(one.head[name])
+                for entry in depends.entries(one.head[name])
                 if str(entry) not in names
             ]
     return said
@@ -760,7 +902,9 @@ def _unfound(declaration: Declaration, found: Sequence[Item]) -> list[dict[str, 
 def _register(
     declaration: Declaration,
     found: Sequence[Item],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[
+    list[numbered.GapRecord], list[numbered.LostRecord], list[numbered.RegisterRecord]
+]:
     """The two register reports and the register itself, over one read of
     each archive.
 
@@ -784,9 +928,9 @@ def _register(
     `fileplan.numbered.next_number` adds one to on a clean register, and a
     test pins that tie rather than a shared call.
     """
-    gaps: list[dict[str, Any]] = []
-    lost: list[dict[str, Any]] = []
-    register: list[dict[str, Any]] = []
+    gaps: list[numbered.GapRecord] = []
+    lost: list[numbered.LostRecord] = []
+    register: list[numbered.RegisterRecord] = []
     for state in declaration.states.values():
         if not state.has(numbered.NAME):
             continue
@@ -825,11 +969,15 @@ def _register(
 
 def _dependencies(
     found: Sequence[Item],
-) -> tuple[dict[str, tuple[str, ...]], list[dict[str, Any]], list[dict[str, Any]]]:
-    """The three facts an edge gives, over one traversal: blocked, unknown,
+) -> tuple[
+    dict[str, tuple[str, ...]],
+    list[depends.UnknownRecord],
+    list[depends.MisorderedRecord],
+]:
+    """The facts an edge gives, over one traversal: blocked, unknown,
     misordered.
 
-    One walk of `found` rather than three, because all three ask about the
+    One walk of `found` rather than one per fact, because each asks about the
     same two mappings: what is filed, and where each filed item sits in its
     order.
 
@@ -840,18 +988,15 @@ def _dependencies(
     filed = {one.slug for one in found}
     places = {one.slug: one.get(queued.KEY) for one in found}
     blocking: dict[str, tuple[str, ...]] = {}
-    unknown: list[dict[str, Any]] = []
-    misordered: list[dict[str, Any]] = []
+    unknown: list[depends.UnknownRecord] = []
+    misordered: list[depends.MisorderedRecord] = []
     for one in found:
         key = one.state.dependencies
         edges = depends.edges(one.head, key)
         if not edges or key is None:
             continue
         blocking[one.slug] = depends.blocking(edges, filed)
-        unknown += [
-            {depends.SLUG: one.slug, depends.KEY: key, depends.NAMES: named}
-            for named in depends.unknown(edges, filed)
-        ]
+        unknown += depends.unknown_records(one.slug, key, edges, filed)
         misordered += depends.misordered(
             one.slug, places.get(one.slug), edges, places, key=key
         )
@@ -860,27 +1005,24 @@ def _dependencies(
 
 def _references(
     found: Sequence[Item],
-) -> tuple[dict[str, dict[str, list[str]]], list[dict[str, Any]]]:
-    """The two facts a reference gives, over one traversal: who names each
+) -> tuple[dict[str, dict[str, list[str]]], list[depends.UnknownRecord]]:
+    """The facts a reference gives, over one traversal: who names each
     item, per inverse, and the edges naming nothing filed.
 
     `_dependencies`' sibling, without the blocking. An edge resolves against
     any filed item in any state, so an item is read back as a referent
-    wherever it sits. See docs/reference.md#references
+    wherever it sits. See examples/docs/reference.md#references
     """
     filed = {one.slug for one in found}
     held: dict[str, dict[str, tuple[str, ...]]] = {}
-    unresolved: list[dict[str, Any]] = []
+    unresolved: list[depends.UnknownRecord] = []
     for one in found:
         for key, inverse in one.state.references.items():
             edges = depends.edges(one.head, key)
             if not edges:
                 continue
             held.setdefault(inverse, {})[one.slug] = edges
-            unresolved += [
-                {depends.SLUG: one.slug, depends.KEY: key, depends.NAMES: named}
-                for named in depends.unknown(edges, filed)
-            ]
+            unresolved += depends.unknown_records(one.slug, key, edges, filed)
     referenced = {
         inverse: depends.inverse(holders) for inverse, holders in held.items()
     }
@@ -989,6 +1131,28 @@ def known(declaration: Declaration, option: str, key: str) -> str:
     )
 
 
+def field(declaration: Declaration, given: str) -> str:
+    """`--fields` names a field of the row, so it takes `slug`, `state` and
+    `path` beside every key `known` takes, and refuses anything else with the
+    whole roster. See examples/docs/reference.md#the-listing
+    """
+    fields = (*RESERVED_KEYS, *declaration.carried)
+    if given in fields:
+        return given
+    raise Refusal(
+        f'--fields names "{given}", which is not a field a row carries '
+        f"(fields: {', '.join(fields)})"
+    )
+
+
+def projected(
+    rows: Sequence[Mapping[str, Any]], keys: Sequence[str]
+) -> list[dict[str, Any]]:
+    """Each row holding only `keys`, in the order named, `None` where the row
+    lacks one. Pure."""
+    return [{key: row.get(key) for key in keys} for row in rows]
+
+
 def presence(key: str, *, carried: bool) -> Test:
     """`--has KEY` and `--lacks KEY` as a `Test`.
 
@@ -1006,15 +1170,50 @@ def matching(
     return [dict(row) for row in rows if all(_satisfies(row, test) for test in tests)]
 
 
+def holds(one: Item, word: str) -> bool:
+    """Whether the item's title or body holds `word`, ignoring case. Pure.
+
+    The rule `~` uses: a casefolded substring and not a pattern, so an empty
+    word holds everywhere. See examples/docs/reference.md#the-listing
+    """
+    wanted = word.casefold()
+    return wanted in _title(one.head).casefold() or wanted in one.body.casefold()
+
+
+def titled_first(
+    rows: Sequence[Mapping[str, Any]], word: str, states: Sequence[str]
+) -> list[dict[str, Any]]:
+    """The rows with a title holding `word` before the rest, within each
+    state. Pure.
+
+    The sort is stable, so each state's usual order stands inside each of
+    the two groups, and the states keep their declared order.
+    See examples/docs/reference.md#the-listing
+    """
+    wanted = word.casefold()
+    return sorted(
+        (dict(row) for row in rows),
+        key=lambda row: (
+            states.index(row[STATE]),
+            0 if wanted in _title(row).casefold() else 1,
+        ),
+    )
+
+
+def _title(carrier: Mapping[str, Any]) -> str:
+    """A head's or a row's title as text, `""` where it carries none."""
+    return str(carrier.get(TITLE) or "")
+
+
 def unlisting(
     declaration: Declaration, rows: Sequence[Mapping[str, Any]]
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[UnlistedRecord]]:
     """The rows in a listed state, and one record per unlisted state that
     lost a row, in declared order. Pure.
 
     The count is of the rows given, so taken after the filters it is what the
     hiding took from this read. A state that lost nothing gets no record.
-    See docs/reference.md#listed
+    See examples/docs/reference.md#listed
     """
     hidden = set(declaration.unlisted)
     counts = {name: 0 for name in declaration.unlisted}
@@ -1044,7 +1243,7 @@ def _satisfies(row: Mapping[str, Any], test: Test) -> bool:
         return _drawn_from(value, test.value)
     if test.operator == CONTAINS:
         wanted = test.value.casefold()
-        return any(wanted in str(entry).casefold() for entry in _entries(value))
+        return any(wanted in str(entry).casefold() for entry in depends.entries(value))
     return _compares(value, test)
 
 
@@ -1063,22 +1262,9 @@ def carries(value: Any, wanted: str) -> bool:
     Public, and read by `fileplan.transition` too: `refuses` asks exactly this
     of a head, and a second copy of the rule is how the filter and the
     precondition come to disagree about what a value is. See
-    docs/reference.md#the-listing
+    examples/docs/reference.md#the-listing
     """
-    return any(str(entry) == wanted for entry in _entries(value))
-
-
-def _entries(value: Any) -> list[Any]:
-    """The several values a head value holds, whether it holds one or many.
-
-    Below `carries` rather than beside it: this is the shape question, and
-    `carries` is the one home of the text-match rule. Every reader
-    of a value at this layer asks it, so none of them can come to a different
-    answer about what a list is.
-    """
-    if value is None:
-        return []
-    return list(value) if isinstance(value, list) else [value]
+    return any(str(entry) == wanted for entry in depends.entries(value))
 
 
 def _drawn(given: str) -> list[str]:
@@ -1098,16 +1284,18 @@ def _drawn_from(value: Any, wanted: str) -> bool:
     A key the item does not carry is **false**, unlike `!=`: `--has` is the
     presence word, and a guard has to be conservative about an item that says
     nothing. Over a single-valued key this degenerates to "is one of", which
-    is the same rule rather than a second one. See docs/reference.md#the-listing
+    is the same rule rather than a second one. See examples/docs/reference.md#the-listing
     """
     if empty(value):
         return False
     named = _drawn(wanted)
-    return all(any(carries(entry, one) for one in named) for entry in _entries(value))
+    return all(
+        any(carries(entry, one) for one in named) for entry in depends.entries(value)
+    )
 
 
 def _compares(value: Any, test: Test) -> bool:
-    entries = _entries(value)
+    entries = depends.entries(value)
     return any(
         (pair := _pair(entry, test)) is not None and _ORDERED[test.operator](*pair)
         for entry in entries
@@ -1118,7 +1306,7 @@ def _compares(value: Any, test: Test) -> bool:
 def _pair(entry: Any, test: Test) -> tuple[Any, Any] | None:
     """`(this entry, what it is tested against)`, comparable, or `None`.
 
-    Three rules, first match wins: a closed key orders by its declared
+    First match wins: a closed key orders by its declared
     `values`; numbers compare as numbers when both sides are ones, so
     `position >= 100` does not exclude `50` by the accident of how text sorts;
     anything else compares as text.
@@ -1177,7 +1365,7 @@ def sorting(declaration: Declaration, given: str) -> Sort:
 
 
 def _rank(entry: Any, order: tuple[str, ...] | None) -> tuple[int, Any]:
-    """`_pair`'s three rules in `_pair`'s order, made total.
+    """`_pair`'s rules in `_pair`'s order, made total.
 
     A comparison may answer nothing for a mixed pair, and a sort has to answer
     every pair. So a declared value comes first by its place, a number next by
@@ -1194,7 +1382,7 @@ def ordered(
     rows: Sequence[Mapping[str, Any]],
     sorts: Mapping[str, Sequence[Sort]],
     states: Sequence[str],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[UnsortedRecord]]:
     """The rows sorted within each state, and one record per missing key. Pure.
 
     `sorts` maps a state to its sorts, and a state it does not name sorts by
@@ -1202,10 +1390,10 @@ def ordered(
     tie-break, so the passes run from the slug up. A row missing a key follows
     the others in either direction, since the point of putting it there is
     that it is seen. The states keep their declared order.
-    See docs/reference.md#the-listing
+    See examples/docs/reference.md#the-listing
     """
     result: list[dict[str, Any]] = []
-    unsorted: list[dict[str, Any]] = []
+    unsorted: list[UnsortedRecord] = []
     for state in states:
         here = sorted(
             (dict(row) for row in rows if row[STATE] == state),
@@ -1217,7 +1405,7 @@ def ordered(
             missing = [row for row in here if empty(row.get(one.key))]
             carrying.sort(
                 key=lambda row: tuple(
-                    _rank(entry, one.order) for entry in _entries(row[one.key])
+                    _rank(entry, one.order) for entry in depends.entries(row[one.key])
                 ),
                 reverse=one.descending,
             )
@@ -1244,22 +1432,24 @@ def resolve(declaration: Declaration, handle: str) -> Item:
     at an item in the wrong state would otherwise say "no such item". The
     caller compares states itself and says where the item actually is.
 
-    Three rules: a full slug always names itself, ahead of a longer slug it
+    The rules: a full slug always names itself, ahead of a longer slug it
     prefixes; an ambiguous prefix names its candidates; one matching nothing
     names its near misses. The arithmetic is `chosen`, so `show` applies them
-    to the rows it already has. See docs/reference.md#the-handle
+    to the rows it already has. See examples/docs/reference.md#the-handle
     """
     found = items(declaration)
     slug = chosen(
         [(one.slug, named(one.path, declaration.root)) for one in found],
         handle,
-        {
-            str(one.head[numbered.KEY]): one.slug
-            for one in found
-            if numbered.KEY in one.head
-        },
+        by_number((one.slug, one.head.get(numbered.KEY)) for one in found),
     )
     return next(one for one in found if one.slug == slug)
+
+
+def by_number(numbers: Iterable[tuple[str, Any]]) -> dict[str, str]:
+    """`(slug, number)` pairs as number, in text, to slug: what `chosen` and
+    `numbered_handle` take. A slug carrying no number is left out."""
+    return {str(number): slug for slug, number in numbers if number is not None}
 
 
 def chosen(
@@ -1271,7 +1461,7 @@ def chosen(
 
     `named` is `(slug, where)`, `where` being whatever text names the file:
     the only refusal that needs it is the duplicated slug, and what a reader
-    wants there is somewhere to look. One home for the three rules, because
+    wants there is somewhere to look. One home for the rules, because
     two callers have them — the handle a verb resolves and the handle `show`
     names. `carrying` maps a live number, as text, to the slug carrying it,
     so a number-shaped handle that is no slug can say which item it meant.
@@ -1284,8 +1474,7 @@ def chosen(
     if exact:
         raise Refusal(
             f'the slug "{handle}" is held by {len(exact)} files — '
-            f"{', '.join(exact)}. A slug is unique "
-            "across every state, because it is the one handle an item answers to"
+            f"{', '.join(exact)}. {UNIQUE}"
         )
 
     matches = [slug for slug, _ in named if slug.startswith(handle)]
@@ -1310,9 +1499,9 @@ def chosen(
         )
     elif live is not None:
         said.append(f"{handle} is the number `{live}` carries: `fileplan show {live}`")
-    elif re.match(r"\d+(-|$)", handle):
+    elif NUMBER_LIKE.match(handle):
         said.append(
-            f"no live item carries {handle.split('-')[0]}, so it names an "
+            f"no live item carries {handle.split('-', 1)[0]}, so it names an "
             "archived section, if any: `fileplan show` finds a live section by "
             "its number, and a verb that writes takes a slug"
         )
@@ -1329,7 +1518,7 @@ def numbered_handle(
 
     `named` and `carrying` are `chosen`'s. A slug outranks a number, so this
     finds something only where no slug starts with `handle`, and the slug
-    rules would have found nothing. See docs/reference.md#the-handle
+    rules would have found nothing. See examples/docs/reference.md#the-handle
     """
     numeric = NUMBERED.match(handle)
     if numeric is None or any(slug.startswith(handle) for slug, _ in named):
@@ -1348,8 +1537,8 @@ def edge_errors(
 
     A run's check on a value it was handed, so nothing is resolved or
     rewritten: an exact slug is required. An edge that dangles later, after a
-    rename or an abandon, is still only reported. See docs/reference.md#dependencies
-    and docs/reference.md#references
+    rename or an abandon, is still only reported. See examples/docs/reference.md#dependencies
+    and examples/docs/reference.md#references
     """
     keys = [key for key in (state.dependencies, *state.references) if key is not None]
     handed = {key: depends.edges(given, key) for key in keys}

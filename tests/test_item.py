@@ -1,12 +1,12 @@
 """Item files: the fence walk, the serializer, and location-is-state.
 
 The grammar half is pure over text — no ``tmp_path``, no cwd — for the reason
-`fileplan.declaration`'s refusals are: the old tool's suite ran ~40 of
-them instantly because the validator did not touch a disk. Only the
-location-is-state and round-trip-on-disk sections take a ``tmp_path``.
+`fileplan.declaration`'s refusals are: a test that touches no disk runs
+instantly. Only the location-is-state and round-trip-on-disk sections take a
+``tmp_path``.
 
 Everything grades against ``tests/fixtures/plan.toml``, never the repo's own
-declaration. That is 1-1's rule and ``conftest.py`` aims the suite at it.
+declaration (1-1); ``conftest.py`` aims the suite at it.
 """
 
 from __future__ import annotations
@@ -15,12 +15,10 @@ import datetime as dt
 from pathlib import Path
 
 import pytest
-from conftest import FIXTURE_FILES
+from conftest import FIXTURES, copy_fixture
 
 from fileplan.declaration import Declaration, Refusal, load
 from fileplan.item import Item, head_errors, parse, read, render, slug, table, write
-
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 CANONICAL = """\
 +++
@@ -45,8 +43,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Declaration:
     """A ``plan.toml`` and its method doc copied into ``tmp_path``, with the
     declared directories made. The declaration's root is what a state's `path`
     resolves against, so the fixture cannot be loaded from where it lives."""
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    copy_fixture(tmp_path)
     declaration = load(tmp_path / "plan.toml")
     for state in declaration.states.values():
         (tmp_path / state.path).mkdir(parents=True)
@@ -94,7 +91,7 @@ def test_the_head_holds_whatever_toml_says_it_holds() -> None:
     assert head["ratio"] == 1.5
     assert head["ready"] is True
     assert head["day"] == dt.date(2026, 9, 1)
-    assert head["moment"] == dt.datetime(2026, 9, 1, 12, 30)  # noqa: DTZ001 — TOML's local date-time parses naive
+    assert head["moment"] == dt.datetime(2026, 9, 1, 12, 30)  # noqa: DTZ001  TOML's local date-time parses naive
     assert head["clock"] == dt.time(12, 30)
     assert head["list"] == ["a", "b"]
 
@@ -153,7 +150,7 @@ def test_crlf_parses_and_the_body_keeps_its_line_endings() -> None:
 
 
 # --------------------------------------------------------------------------
-# Round-trip: the done line
+# Round-trip
 # --------------------------------------------------------------------------
 
 
@@ -234,8 +231,8 @@ def test_a_date_stays_a_date_and_a_quoted_date_stays_a_string() -> None:
     ],
 )
 def test_a_string_needing_escapes_round_trips(value: str) -> None:
-    """The old tool escaped `\\` and `"` only, so a title carrying a newline
-    wrote a head its own reader then refused. Nothing here can."""
+    """A string carrying a newline, a tab, or a null writes a head its own
+    reader accepts, not only one carrying `\\` or `"`."""
     text = render(table({"tag": value}), "prose\n")
     assert parse(text)[0]["tag"] == value
 
@@ -298,7 +295,7 @@ def test_the_state_is_the_declarations_answer_not_the_directorys_name(
 ) -> None:
     """`cold-frame`'s path is `beds/hardening-off`, which shares neither its
     name nor its last segment — so a caller reading the directory for itself
-    cannot get this right, and this is the done line's other half."""
+    cannot get this right."""
     path = item_at(tree, "cold-frame", "a.md", '+++\ncultivar = "heirloom"\n+++\n')
     assert path.parent.name == "hardening-off"
     assert read(path, tree).state.name == "cold-frame"
@@ -339,7 +336,7 @@ def test_a_file_with_no_head_refuses_by_name_naming_the_path(
 def test_an_item_round_trips_through_read_and_write_unchanged(
     tree: Declaration,
 ) -> None:
-    """The done line. Read it, write it back untouched, and the bytes match."""
+    """Read it, write it back untouched, and the bytes match."""
     path = item_at(tree, "greenhouse", "a.md", CANONICAL)
     write(read(path, tree))
     assert path.read_text() == CANONICAL

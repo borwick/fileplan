@@ -1,10 +1,10 @@
 """The generic executor: preconditions, creating, moving, and the handle.
 
 Everything grades against ``tests/fixtures/plan.toml``, never the repo's own
-declaration — 1-1's rule, and the reason `sprout` and `transplant` are what
-these tests drive. The fixture holds both shapes: `sprout` creates into
-`greenhouse` with no ``from``; `transplant` moves greenhouse → orchard with
-``requires``, ``refuses``, ``sets`` and ``drops``. One executor runs both, and
+declaration (1-1), so `sprout` and `transplant` are what these tests drive.
+The fixture holds both shapes: `sprout` creates into `greenhouse` with no
+``from``; `transplant` moves greenhouse → orchard with ``requires``,
+``refuses``, ``sets``, and ``drops``. One executor runs both, and
 no code anywhere knows either name. `harvest` moves back out of `orchard`,
 which is the fixture's ``queued`` state, so the capability has a declared path
 in and a declared path out.
@@ -25,12 +25,12 @@ from types import MappingProxyType
 from typing import Any
 
 import pytest
-from conftest import FIXTURE_FILES
+from conftest import RECORD_TEXT, UNPRUNED, UNSTRUCK, copy_fixture
 
 # Sibling test modules, not a package: `tests/` is on `sys.path` at
-# collection. Imported for the two things a second session needs — a stamp,
-# and a pid that is honestly dead — so each has one home rather than a copy.
-from test_claim import TAKEN, exited
+# collection. Imported for what a second session needs, a stamp and a pid
+# that is honestly dead, so each has one home rather than a copy.
+from test_claim import exited, written
 
 from fileplan import claim, lock, numbered, subphase, transition
 from fileplan.claim import Identity
@@ -54,14 +54,11 @@ from fileplan.transition import (
     value_errors,
 )
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
-
 
 @pytest.fixture
 def tree(tmp_path: Path) -> Declaration:
     """The fixture declaration copied into ``tmp_path``, its directories made."""
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    copy_fixture(tmp_path)
     declaration = load(tmp_path / "plan.toml")
     for state in declaration.states.values():
         (tmp_path / state.path).mkdir(parents=True)
@@ -194,6 +191,49 @@ def test_each_shape_given_as_declared_passes(
     assert value_errors(given, transplant, tree.keys) == []
 
 
+def test_an_entry_holding_a_comma_refuses_naming_the_entry_and_the_option(
+    tree: Declaration,
+) -> None:
+    """`--has 'KEY:a,b'` reads a comma as a separator, so an entry holding
+    one could never be matched. One error per entry, never a split."""
+    sprout = tree.transitions["sprout"]
+    given = {"replaces": ["a,b", "c", "d,e"]}
+    assert value_errors(given, sprout, tree.keys) == [
+        (
+            f'sprout sets "replaces", and the entry "{entry}" holds a comma. '
+            "--has reads a comma as a separator between values, so no filter "
+            "could match this entry. Repeat --replaces once per entry instead"
+        )
+        for entry in ("a,b", "d,e")
+    ]
+
+
+def test_a_comma_in_a_single_valued_key_passes(
+    tree: Declaration, transplant: Transition
+) -> None:
+    assert value_errors({"rootstock": "M9,M26"}, transplant, tree.keys) == []
+
+
+def test_an_entry_holding_a_comma_refuses_before_the_first_write(
+    tree: Declaration,
+) -> None:
+    """The executor is what a consumer's tooling calls, and the path the
+    CLI's `click.Choice` would otherwise stop first for a closed key."""
+    source = seedling(tree, "a-seedling", READY)
+    before = source.read_bytes()
+    with pytest.raises(Refusal) as refusal:
+        execute(
+            tree,
+            tree.transitions["transplant"],
+            name="a-seedling",
+            values={"pest": ["aphid,scab"]},
+        )
+    assert 'the entry "aphid,scab" holds a comma' in str(refusal.value)
+    assert "Repeat --pest once per entry" in str(refusal.value)
+    assert source.read_bytes() == before
+    assert list((tree.root / "orchard").iterdir()) == []
+
+
 def test_a_refused_entry_of_a_list_head_refuses_naming_that_entry(
     harvest: Transition,
 ) -> None:
@@ -212,15 +252,15 @@ def test_a_list_head_carrying_none_of_the_refused_values_passes(
 
 
 def test_a_scalar_refusal_reads_exactly_as_it_did(transplant: Transition) -> None:
-    """One rule for both shapes means the scalar message goes through the new
-    arm too, so this pins that it comes out byte for byte unchanged."""
+    """One rule grades both shapes, so the scalar message goes through the
+    arm a list takes too. This pins its exact words."""
     assert offer_errors({"cultivar": "hybrid"}, transplant) == [
         'transplant refuses cultivar = "hybrid"'
     ]
 
 
 def test_an_empty_list_still_reads_as_missing(harvest: Transition) -> None:
-    """`_missing`'s rule, untouched: a key present but empty carries nothing,
+    """`_missing`'s rule: a key present but empty carries nothing,
     so a head with `pest = []` is refused by nothing and satisfies nothing."""
     assert offer_errors({"pest": []}, harvest) == []
     requiring = Transition(
@@ -269,7 +309,7 @@ def test_a_set_key_lands_in_the_head(tree: Declaration) -> None:
 
 def test_a_set_key_left_out_is_simply_absent(tree: Declaration) -> None:
     """Every `--option` is optional: a key that must be *present* is enforced
-    by the next transition's `requires`, which already does that job."""
+    by the following transition's `requires`."""
     path = execute(
         tree,
         tree.transitions["sprout"],
@@ -424,10 +464,10 @@ def test_a_slug_held_in_two_states_refuses_naming_both_files(
     tree: Declaration,
 ) -> None:
     """A slug is unique tree-wide, so this tree is already broken before the
-    verb runs — and 1-4's resolver is what notices. It refuses naming both
-    files rather than picking one, which is the same rule as the ambiguous
-    prefix: never guess. (`_move`'s destination check is still there as the
-    backstop for a duplicate appearing between the read and the write.)"""
+    verb runs, and the resolver notices. It refuses naming both files rather
+    than picking one, the same rule as the ambiguous prefix: never guess.
+    `_move`'s destination check is the backstop for a duplicate appearing
+    between the read and the write."""
     source = seedling(tree, "a-seedling", READY)
     blocker = tree.root / "orchard" / "a-seedling.md"
     blocker.write_text(READY)
@@ -538,10 +578,8 @@ def test_a_required_option_not_given_refuses_before_writing(
 # The handle: a unique slug prefix, tree-wide
 # --------------------------------------------------------------------------
 #
-# The rules themselves are 1-4's and are tested against `read.resolve` in
-# `test_read.py`. What is re-pinned here is that the *executor* reaches them —
-# 1-3 had its own resolver over one directory, and this is what would fail if
-# a second one came back.
+# The rules' home is `test_read.py`, against `read.resolve`. What is pinned
+# here is that the *executor* reaches them: a second resolver fails here.
 
 
 def test_a_unique_prefix_resolves(tree: Declaration) -> None:
@@ -596,16 +634,14 @@ def test_a_prefix_matching_nothing_at_all_refuses_without_guessing(
 def test_an_item_in_another_state_refuses_by_naming_the_state_it_is_in(
     tree: Declaration,
 ) -> None:
-    """1-3 resolved within the `from` state alone, so this said "no item in
-    greenhouse" — true of that one directory, and useless to somebody who has
-    just watched the item go past. The resolver is tree-wide now, so the
-    refusal can say where the item actually is."""
+    """The resolver is tree-wide, so the refusal says where the item actually
+    is, not only that the `from` state lacks it."""
     stranded = tree.root / "orchard" / "a-seedling.md"
     stranded.write_text(READY)
     with pytest.raises(Refusal) as refusal:
         execute(tree, tree.transitions["transplant"], name="a-seedling")
     assert f"{stranded.relative_to(tree.root)} is in orchard" in str(refusal.value)
-    assert "transplant moves an item out of greenhouse" in str(refusal.value)
+    assert "transplant takes an item in greenhouse" in str(refusal.value)
     assert stranded.read_text() == READY
 
 
@@ -887,7 +923,7 @@ def floored(tree: Declaration, first: int) -> Declaration:
 def test_a_declared_floor_mints_itself_over_an_empty_corpus(
     tree: Declaration,
 ) -> None:
-    """**The whole point of 11-2**, end to end: a consumer whose sections run
+    """**11-2**, end to end: a consumer whose sections run
     to 191 in an archive it will not rewrite declares where the new register
     begins, and the first mint is that number rather than 1. Without the
     field the same tree mints 1 (above); with it, 192 — and the declaration is
@@ -923,8 +959,8 @@ def test_an_archive_heading_the_parse_cannot_read_refuses_by_name(
     tree: Declaration,
 ) -> None:
     """The check the gap check structurally cannot make. The heading is there
-    and unreadable, so the number leaves the register with nothing else
-    covering it — which is how the old tool minted 168 twice."""
+    and unreadable, so nothing else covers its number and a mint could hand
+    it out twice."""
     archive(tree, "## Section 1: A felled tree\n")
     seedling(tree, "a-seedling", READY)
     with pytest.raises(Refusal) as refusal:
@@ -948,9 +984,8 @@ def test_an_in_place_verb_leaves_the_number_alone(tree: Declaration) -> None:
 def test_leaving_a_numbered_state_sheds_the_number(tree: Declaration) -> None:
     """`_move` sheds every capability key, and no declaration says so —
     `harvest` declares no `drops` and may not. An item that leaves keeps its
-    number nowhere: 5-1 settled that by giving the number a home that outlives
-    the file rather than an exemption on the way out — see the `archives`
-    table below."""
+    number nowhere: the number's home that outlives the file is the archive
+    entry. See the `archives` tests below."""
     seedling(tree, "a-seedling", READY)
     execute(tree, tree.transitions["transplant"], name="a-seedling")
     path = execute(tree, tree.transitions["harvest"], name="a-seedling")
@@ -988,14 +1023,53 @@ def test_the_two_head_key_capabilities_compose_on_one_move(
     assert (one["position"], one["number"]) == (100, 2)
 
 
+def test_a_number_held_as_true_is_no_number_so_one_is_minted(
+    tree: Declaration,
+) -> None:
+    """A bool is an `int` in Python, so a stored `number = true` would be kept
+    as number 1. It is no number, as `declaration.whole()` says everywhere."""
+    state = tree.states["orchard"]
+    assert transition._mint(tree, state, {}, current=True) == 2
+
+
+def test_an_item_whose_place_and_number_are_true_enters_as_one_with_neither(
+    tree: Declaration, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The seam itself, called on an item already in the state: a stored
+    `true` is no place and no number to keep, so both are given afresh.
+    Handed in rather than filed, because reading a file refuses such a head
+    first; this pins the seam, not a path a run can reach."""
+    orchard = tree.states["orchard"]
+    held = Item(
+        path=tree.root / orchard.path / "a-seedling.md",
+        state=orchard,
+        head={"title": "A seedling", "position": True, "number": True},
+        body="",
+    )
+    monkeypatch.setattr(transition.read, "items", lambda _: [held])
+    running = transition._Running(
+        declaration=tree,
+        transition=tree.transitions["transplant"],
+        name="a-seedling",
+        body=None,
+        given={},
+        asked={},
+        say=lambda _: None,
+    )
+    assert transition._entering(running, moving="a-seedling") == {
+        "position": 100,
+        "number": 2,
+    }
+
+
 # --------------------------------------------------------------------------
 # The `archives` half: the entry that outlives the file
 # --------------------------------------------------------------------------
 #
 # `grub-out` is the fixture's archiving verb: `orchard` — the numbered state —
-# to `firewood`, which declares nothing. It is deliberately **not** out of the
-# state this repo's own `decline` leaves, so a tool that had learned which
-# state archives would pass its own suite and fail here.
+# to `firewood`, which declares nothing. It is **not** out of the state this
+# repo's own `decline` leaves, so a tool that had learned which state
+# archives would pass its own suite and fail here.
 #
 # It **moves** the tree. Recording an item and deleting it are two opt-ins,
 # and this is the recording one on its own.
@@ -1015,8 +1089,8 @@ def test_a_verb_that_archives_moves_the_item_like_any_other(
     tree: Declaration,
 ) -> None:
     """No new shape: the file lands in the destination state and sheds every
-    capability key on the way, exactly as `harvest` does. What is added is the
-    entry, not a second kind of move."""
+    capability key on the way, exactly as `harvest` does. The entry is all it
+    adds; it is not a second kind of move."""
     path = grubbed(tree, "a-seedling")
     one = read(path, tree)
     assert one.state.name == "firewood"
@@ -1029,7 +1103,7 @@ def test_the_entry_is_filed_under_the_number_the_item_carried(
 ) -> None:
     """**The whole point.** The number is dropped by the move, and what speaks
     for it afterwards is the heading — so the register still counts it with
-    the item's own file no longer carrying it."""
+    the item's own file not carrying it."""
     grubbed(tree, "a-seedling")
     assert "## 2. A seedling" in filed(tree)
     assert numbered.numbers(filed(tree)) == [1, 2]
@@ -1038,10 +1112,10 @@ def test_the_entry_is_filed_under_the_number_the_item_carried(
 def test_the_entry_lands_at_its_place_in_the_register_not_at_the_end(
     tree: Declaration,
 ) -> None:
-    """Inserted, never appended — this repo's section 4 closed before its
-    section 3, and an appending verb would have left the document out of
-    order. The archive is rewritten after the mint so that the number being
-    filed really does belong in the middle."""
+    """Inserted, never appended: sections close out of order, and an
+    appending verb would leave the document out of order. The archive is
+    rewritten after the mint so the number being filed belongs in the
+    middle."""
     orchard(tree, "a-seedling")
     archive(tree, "## 1. A felled tree\n\n## 5. A late one\n")
     execute(tree, tree.transitions["grub-out"], name="a-seedling")
@@ -1052,7 +1126,7 @@ def test_the_entry_lands_at_its_place_in_the_register_not_at_the_end(
 def test_the_register_stays_contiguous_so_the_next_mint_does_not_refuse(
     tree: Declaration,
 ) -> None:
-    """The failure this sub-phase exists to prevent, from the other side:
+    """The failure the entry exists to prevent, from the other side:
     `harvest` sheds a number and leaves a gap that refuses the next mint
     (above), and `grub-out` sheds the same number and does not."""
     grubbed(tree, "a-seedling")
@@ -1167,7 +1241,7 @@ def test_a_declined_item_is_still_filed_so_an_edge_to_it_resolves(
 # --------------------------------------------------------------------------
 #
 # `potting-bench` is the fixture's claimed state. `pot-up` creates into it,
-# `bench` moves in, `tend` moves within it and `bed-out` leaves for `orchard`
+# `bench` moves in, `tend` moves within it, and `bed-out` leaves for `orchard`
 # — which is the `queued` state, so that one verb also proves the two
 # capabilities compose rather than colliding.
 #
@@ -1184,7 +1258,7 @@ def test_a_declined_item_is_still_filed_so_an_edge_to_it_resolves(
 # would be testing the wrong thing.
 
 #: This session's pid, as the fixture's `[identity]` reads it. Arbitrary: it
-#: is compared, never signalled — a claim of this session's own is owned
+#: is compared, never signaled — a claim of this session's own is owned
 #: before the probe is reached.
 MINE = 4213
 
@@ -1217,7 +1291,7 @@ def tended(tree: Declaration, name: str = "a-seedling") -> Path:
     )
 
 
-def record(tree: Declaration, slug: str = "a-seedling") -> dict:
+def record(tree: Declaration, slug: str = "a-seedling") -> claim.Claim:
     return claim.read(claim.path(tree.root, slug), tree.root)
 
 
@@ -1229,22 +1303,16 @@ def someone_else(
     host: str | None = None,
 ) -> Path:
     """A record a sibling session left behind, written by hand."""
-    path = claim.path(tree.root, slug)
-    written = {"host": host or socket.gethostname(), "taken": TAKEN}
-    if pid is not None:
-        written["pid"] = pid
-    claim.write(path, written)
-    return path
+    return written(tree.root, slug, host=host or socket.gethostname(), pid=pid)
 
 
 def test_moving_into_a_claimed_state_takes_nothing_by_itself(
     tree: Declaration, session: Identity
 ) -> None:
-    """An earlier version of this test asserted the opposite. Arriving is
-    not picking work up: `bench`
-    declares no `claims`, so a seedling can stand on the bench with nobody on
-    it. Coupling the two would mean an item had to *move* to be claimed, and
-    where work stands is the declaration's business (John)."""
+    """Arriving is not picking work up: `bench` declares no `claims`, so a
+    seedling can stand on the bench with nobody on it. Coupling the two would
+    mean an item had to *move* to be claimed, and where work stands is the
+    declaration's business (John)."""
     seedling(tree, "a-seedling", READY)
     path = execute(tree, tree.transitions["bench"], name="a-seedling")
     assert path == tree.root / "potting-bench" / "a-seedling.md"
@@ -1260,15 +1328,14 @@ def test_a_transition_that_declares_claims_takes_the_claim(
     path = benched(tree)
     assert path == tree.root / "potting-bench" / "a-seedling.md"
     held = record(tree)
-    assert held["host"] == session.host and held["pid"] == MINE
+    assert held.host == session.host and held.pid == MINE
 
 
 def test_the_claim_is_a_file_beside_the_tree_not_a_key_in_the_head(
     tree: Declaration, session: Identity
 ) -> None:
     """`queued` writes a key into the head; this capability's state lives
-    outside the item file entirely, which is the whole reason the two arms
-    stayed two."""
+    outside the item file entirely, so the two arms are two."""
     path = benched(tree)
     assert read(path, tree).head == {
         "title": "A seedling",
@@ -1284,7 +1351,7 @@ def test_the_claim_is_stamped_with_an_aware_moment(
     """This tree is shared, and a naive stamp means a different moment on each
     machine that reads it."""
     benched(tree)
-    taken = record(tree)["taken"]
+    taken = record(tree).taken
     assert taken.tzinfo is not None and taken.utcoffset() is not None
 
 
@@ -1294,7 +1361,7 @@ def test_creating_straight_into_a_claimed_state_takes_a_claim(
     """The same seam on the other shape: `pot-up` has no `from`, so only the
     destination arm can do anything, and it does the same thing."""
     execute(tree, tree.transitions["pot-up"], name="A seedling", body="Prose.")
-    assert record(tree)["pid"] == MINE
+    assert record(tree).pid == MINE
 
 
 def test_a_claiming_verb_re_run_keeps_the_claim_rather_than_restamping(
@@ -1375,8 +1442,8 @@ def test_a_re_run_on_a_held_item_is_kept_while_others_are_held_too(
     tree: Declaration, session: Identity
 ) -> None:
     """Re-running on the item already held returns before the refusal is
-    asked, so holding others on purpose does not break saying where a
-    session has got to."""
+    asked, so a session that keeps others held can still say where it has
+    got to."""
     benched(tree)
     kept(tree, "b-seedling")
     before = claim.path(tree.root, "a-seedling").read_bytes()
@@ -1387,15 +1454,15 @@ def test_a_re_run_on_a_held_item_is_kept_while_others_are_held_too(
 def test_a_stranded_record_of_this_sessions_does_not_refuse_a_claim(
     tree: Declaration, session: Identity
 ) -> None:
-    """Both flavours of stranded: a slug naming no item, and an item since
+    """Both flavors of stranded: a slug naming no item, and an item since
     moved to a state that claims nothing. The listing already names each with
     its `rm`, and `release` may not resolve the first, so counting them would
-    be a refusal whose own fix fails. See docs/reference.md#the-listing"""
+    be a refusal whose own fix fails. See examples/docs/reference.md#the-listing"""
     someone_else(tree, "gone", pid=MINE)
     seedling(tree, "moved-on", READY)
     someone_else(tree, "moved-on", pid=MINE)
     benched(tree)
-    assert record(tree)["pid"] == MINE
+    assert record(tree).pid == MINE
 
 
 def test_another_sessions_claim_on_another_item_does_not_refuse(
@@ -1406,7 +1473,7 @@ def test_another_sessions_claim_on_another_item_does_not_refuse(
     execute(tree, tree.transitions["bench"], name="b-seedling")
     someone_else(tree, "b-seedling", pid=1)
     benched(tree)
-    assert record(tree)["pid"] == MINE
+    assert record(tree).pid == MINE
 
 
 def test_leaving_a_claimed_state_drops_the_claim(
@@ -1437,7 +1504,7 @@ def test_the_two_capabilities_compose_on_one_move(
 def test_a_missing_record_means_unclaimed_and_the_transition_proceeds(
     tree: Declaration, session: Identity
 ) -> None:
-    """Deliberately. `local/` is gitignored, so a consumer's fresh clone has
+    """`local/` is gitignored, so a consumer's fresh clone has
     items in claimed states and no records at all; refusing there would
     deadlock a tree with no way out, since `release` would have nothing to
     free either."""
@@ -1463,7 +1530,7 @@ def test_a_claim_this_session_holds_lets_it_move_the_item(
 def test_another_sessions_claim_refuses_naming_the_holder(
     tree: Declaration, session: Identity
 ) -> None:
-    """Concurrency, at the point it becomes behaviour: a second session
+    """Concurrency, at the point it becomes behavior: a second session
     cannot pick up an item somebody is working on."""
     seedling(tree, "a-seedling", READY)
     someone_else(tree, pid=os.getpid())
@@ -1518,6 +1585,50 @@ def test_a_dead_holder_is_named_as_dead_rather_than_stolen(
     assert claim.path(tree.root, "a-seedling").exists()
 
 
+def malformed(tree: Declaration, slug: str = "a-seedling") -> Path:
+    """This session's own record on `slug`, hand-edited to carry a field no
+    claim record holds."""
+    path = claim.path(tree.root, slug)
+    with path.open("a", encoding="utf-8") as record:
+        record.write('session = "abc"\n')
+    return path
+
+
+def test_a_transition_on_an_item_with_a_malformed_record_refuses_by_name(
+    tree: Declaration, session: Identity
+) -> None:
+    """A record that does not grade says something the tool does not
+    understand about who holds the item, so it is never read as this
+    session's, and nothing is written."""
+    benched(tree)
+    path = malformed(tree)
+    item = tree.root / "potting-bench" / "a-seedling.md"
+    before = (item.read_bytes(), path.read_bytes())
+    with pytest.raises(Refusal) as refusal:
+        execute(tree, tree.transitions["bed-out"], name="a-seedling")
+    said = str(refusal.value)
+    assert "local/claims/a-seedling.toml is not a usable claim record" in said
+    assert '"session" is not a claim record field' in said
+    assert (item.read_bytes(), path.read_bytes()) == before
+    assert list((tree.root / "orchard").iterdir()) == []
+
+
+def test_release_of_a_malformed_record_refuses_by_name_and_leaves_it(
+    tree: Declaration, session: Identity
+) -> None:
+    """`release` reads the record the way every other reader does, so a
+    hand-edited one is named rather than freed on a guess about its holder."""
+    benched(tree)
+    path = malformed(tree)
+    before = path.read_bytes()
+    with pytest.raises(Refusal) as refusal:
+        transition.release(tree, "a-seedling")
+    said = str(refusal.value)
+    assert "local/claims/a-seedling.toml is not a usable claim record" in said
+    assert '"session" is not a claim record field' in said
+    assert path.read_bytes() == before
+
+
 def test_a_claim_from_another_host_refuses_and_is_never_probed(
     tree: Declaration, session: Identity
 ) -> None:
@@ -1534,8 +1645,8 @@ def test_a_claim_from_another_host_refuses_and_is_never_probed(
 def test_a_pidless_record_on_this_host_is_this_hosts_to_move(
     tree: Declaration, session: Identity
 ) -> None:
-    """2-1's ownership rule, untouched: a claim taken at a shell stays
-    completable. What 2-2 adds is a refusal at the *taking* end, not here."""
+    """2-1's ownership rule: a claim taken at a shell stays completable. The
+    refusal is at the *taking* end (2-2), not here."""
     seedling(tree, "a-seedling", READY)
     stranded = tree.root / "potting-bench" / "a-seedling.md"
     stranded.write_text(TENDED)
@@ -1609,8 +1720,8 @@ def test_a_non_claiming_verb_still_refuses_another_sessions_claim(
 ) -> None:
     """The ownership refusal is not the taking. `bench` takes nothing, and it
     still may not walk an item out from under the session holding it —
-    otherwise "arriving claims nothing" would have quietly opened a hole where
-    a second session could move somebody's work around."""
+    otherwise "arriving claims nothing" would open a hole where a second
+    session could move somebody's work around."""
     seedling(tree, "a-seedling", READY)
     someone_else(tree, pid=os.getpid())
     with pytest.raises(Refusal) as refusal:
@@ -1622,10 +1733,10 @@ def test_a_non_claiming_verb_still_refuses_another_sessions_claim(
 def test_leaving_frees_a_claim_no_verb_on_the_way_out_declares(
     tree: Declaration, session: Identity
 ) -> None:
-    """The drop stayed the state's rather than the verb's. `bed-out` declares
-    no `claims` and never did: taking is opt-in, freeing on the way out is
-    not, because a claim outliving the state it was taken in is the deadlock
-    `release` exists to dig out of."""
+    """The drop is the state's, not the verb's. `bed-out` declares no
+    `claims`: taking is opt-in, freeing on the way out is not, because a
+    claim outliving the state it was taken in is the deadlock `release`
+    exists to dig out of."""
     benched(tree)
     tended(tree)
     assert not tree.transitions["bed-out"].claims
@@ -1644,7 +1755,7 @@ def test_a_transition_between_unclaimed_states_writes_no_record(
 
 
 # --------------------------------------------------------------------------
-# The third arm: `mints`, and the body it writes
+# The `mints` arm, and the body it writes
 # --------------------------------------------------------------------------
 #
 # The arithmetic itself is `tests/test_subphase.py`, pure and with no
@@ -1652,13 +1763,10 @@ def test_a_transition_between_unclaimed_states_writes_no_record(
 # it, that one that does not never does, and that a refusal from it leaves the
 # source byte-identical.
 
-#: The fixture's pending bullet, as `orchard` declares it.
-UNPRUNED = "**unpruned — Say what the rest of the training is.**"
-
 
 def trained(tree: Declaration, *asked: object, name: str = "a-seedling") -> Path:
     """One tree in the orchard, run through `espalier` once."""
-    title, last = (asked + (None, False))[:2]
+    title, last = (*asked, None, False)[:2]
     return execute(
         tree,
         tree.transitions["espalier"],
@@ -1754,10 +1862,9 @@ def test_a_title_that_would_break_the_strict_form_refuses_and_writes_nothing(
 def test_the_cursor_is_graded_against_the_body_this_run_would_write(
     tree: Declaration,
 ) -> None:
-    """The reordering 4-5a paid for. `_cursor_errors` read `original.body`
-    while nothing wrote one, which was right by accident; a verb that mints a
-    bullet and points the cursor at it in the same run would otherwise refuse
-    the name it had just created."""
+    """4-5a: `_cursor_errors` reads the body the run writes, so a verb that
+    mints a bullet and points the cursor at it in the same run does not refuse
+    the name it just created."""
     orchard(tree, "a-seedling")
     espalier = tree.transitions["espalier"]
     pointing = Transition(
@@ -1792,9 +1899,6 @@ def test_the_cursor_is_graded_against_the_body_this_run_would_write(
 # happen before the first write, and that `--check` gets the run's own words
 # because it is the run's own code raising them.
 
-#: The fixture's pending bullet, as `propagator` declares it.
-UNSTRUCK = "**unstruck — Say what the rest of the batch is.**"
-
 
 def batch(
     tree: Declaration, *titles: str, close: bool = True, owner: str | None = None
@@ -1807,7 +1911,7 @@ def batch(
 
     ``owner`` seals it to a tree, through the two keys `strike` sets and
     `propagator` names. Absent, the batch was struck for nothing in
-    particular, which is the shape every test written before the seal used.
+    particular.
     """
     path = execute(
         tree,
@@ -1844,7 +1948,9 @@ def test_marking_rewrites_one_line_and_leaves_every_other_byte_alone(
     execute(tree, tree.transitions["pot-on"], name="a-batch", asked={"name": "c2"})
     after = path.read_text().splitlines()
     assert len(before) == len(after)
-    differing = [n for n, (one, two) in enumerate(zip(before, after)) if one != two]
+    differing = [
+        n for n, (one, two) in enumerate(zip(before, after, strict=True)) if one != two
+    ]
     assert [before[n] for n in differing] == ["- **c2 — The second**"]
 
 
@@ -1873,11 +1979,9 @@ def test_a_name_the_body_does_not_carry_refuses_naming_the_ones_it_does(
 
 
 def test_the_refusal_is_the_one_home_of_that_sentence(tree: Declaration) -> None:
-    """11-4 lifted it into `subphase.unknown`, because `show ITEM NAME`
-    needs it **byte for byte** and two spellings of one refusal is the drift
-    this repo refuses everywhere else. The disposition's words are unchanged,
-    which is what this asserts — against the function, not against a copy of
-    the string."""
+    """11-4: the message's home is `subphase.unknown`, which `show ITEM NAME`
+    shares **byte for byte**. This asserts against the function, not against
+    a copy of the string."""
     path = batch(tree, "The first", "The second")
     carried = subphase.bullets(read(path, tree).body, "Cuttings", pending=None)
     with pytest.raises(Refusal) as refusal:
@@ -1996,13 +2100,11 @@ def test_a_check_says_which_bullet_and_which_word(tree: Declaration) -> None:
 
 # --- marking: a bullet in a state that carries a cursor ---------------------
 #
-# 12-1's premise, and the fixture is what makes it a test rather than an
-# assertion about this repo. `pot-on` above marks `propagator`, which has no
-# register and no cursor; `graft-on` moves a cursor over bullets nothing
-# marks. `ripen` and `thin` mark into `orchard` — queued, numbered, claimed
-# and cursored — so a mark and a cursor meet over one body for the first time.
-# Nothing here is a new arm: what is pinned is that the existing one reaches a
-# state it was never run against, which is what "no `src/` change" means.
+# 12-1: a mark and a cursor meet over one body. `pot-on` above marks
+# `propagator`, which has no register and no cursor; `graft-on` moves a cursor
+# over bullets nothing marks. `ripen` and `thin` mark into `orchard`, which is
+# queued, numbered, claimed, and cursored. Nothing here is a new arm: what is
+# pinned is that the marking arm reaches a cursored state.
 
 
 def pruned(tree: Declaration, *, close: bool = True) -> Path:
@@ -2020,7 +2122,7 @@ def pruned(tree: Declaration, *, close: bool = True) -> Path:
 def test_a_marking_verb_writes_onto_a_bullet_in_a_state_that_has_a_cursor(
     tree: Declaration,
 ) -> None:
-    """The whole of 12-1's premise in one run. The word is `orchard`'s own —
+    """12-1 in one run. The word is `orchard`'s own —
     the state carries a register, a claim and a cursor. The body changes on
     the one bullet, and the head gains the cursor on that bullet."""
     path = pruned(tree)
@@ -2030,7 +2132,9 @@ def test_a_marking_verb_writes_onto_a_bullet_in_a_state_that_has_a_cursor(
     marked = read(path, tree)
     after = marked.body.splitlines()
     assert len(before) == len(after)
-    differing = [n for n, (one, two) in enumerate(zip(before, after)) if one != two]
+    differing = [
+        n for n, (one, two) in enumerate(zip(before, after, strict=True)) if one != two
+    ]
     assert [after[n] for n in differing] == ["- **2-1 — The first** **ripened**"]
     assert marked["graft"] == "2-1"
 
@@ -2105,9 +2209,8 @@ def test_a_sub_phase_marked_twice_refuses_naming_the_mark_it_carries(
 # --- marking: the key a disposition takes off the head ----------------------
 #
 # A mark ends a step, and a status key says how far the current one has got —
-# so a step that is over leaves none. The mechanism is `drops`, which the
-# executor has honoured since it existed; what is new is a marking verb
-# declaring one. `ripen` does and `thin` does not, so absence is graded beside
+# so a step that is over leaves none. The mechanism is `drops`, declared on a
+# marking verb. `ripen` does and `thin` does not, so absence is graded beside
 # presence and nothing can pass by assuming the half implies the field.
 
 
@@ -2156,7 +2259,7 @@ def test_a_marking_verb_that_drops_nothing_leaves_the_head_alone(
 #
 # The word says *what* was decided; a note says why. It is optional, it rides
 # on `marks` — every disposition, filing ones included — and nothing derived
-# reads it back. `docs/reference.md#marking`.
+# reads it back. `examples/docs/reference.md#marking`.
 
 
 def test_a_note_is_written_beside_the_word_and_nothing_else_moves(
@@ -2174,15 +2277,17 @@ def test_a_note_is_written_beside_the_word_and_nothing_else_moves(
     )
     after = path.read_text().splitlines()
     assert len(before) == len(after)
-    differing = [n for n, (one, two) in enumerate(zip(before, after)) if one != two]
+    differing = [
+        n for n, (one, two) in enumerate(zip(before, after, strict=True)) if one != two
+    ]
     assert [after[n] for n in differing] == [
         "- **c2 — The second** **rooted** Roots to the wall."
     ]
 
 
 def test_a_run_with_no_note_writes_what_it_always_wrote(tree: Declaration) -> None:
-    """The ordinary case, and every run this repo has made: a disposition with
-    no reason is not a lesser one, so the option is not required."""
+    """The ordinary case: a disposition with no reason is not a lesser one,
+    so the option is not required."""
     path = batch(tree, "The first")
     execute(tree, tree.transitions["pot-on"], name="a-batch", asked={"name": "c1"})
     assert "- **c1 — The first** **rooted**\n" in path.read_text()
@@ -2194,7 +2299,7 @@ def test_a_run_with_no_note_writes_what_it_always_wrote(tree: Declaration) -> No
 def test_a_note_that_may_not_ride_refuses_before_the_first_write(
     tree: Declaration, note: str
 ) -> None:
-    """`subphase.note_errors`' three cases, reached through a run: the file is
+    """`subphase.note_errors`' cases, reached through a run: the file is
     byte-identical afterwards, and a check refuses in the same words because
     it is the same code raising them."""
     path = batch(tree, "The first")
@@ -2508,8 +2613,7 @@ def test_a_check_names_the_file_it_would_write_and_reserves_nothing(
 
     The `greenhouse` directory is taken away first, because the fixture makes
     every declared state's directory up front: asserting against a directory
-    something else created would grade nothing, which is how this test read
-    before 7-4 noticed."""
+    something else created would grade nothing."""
     batch(tree, "The first")
     (tree.root / "greenhouse").rmdir()
     carrier = tree.root / "propagator" / "a-batch.md"
@@ -2533,7 +2637,7 @@ def test_a_check_names_the_file_it_would_write_and_reserves_nothing(
 def test_a_filing_check_refuses_in_the_words_a_real_run_refuses_in(
     tree: Declaration, asked: dict
 ) -> None:
-    """Byte for byte, over each of the three refusals a filing adds: they all
+    """Byte for byte, over each refusal a filing adds: they all
     happen before the first write, so it is the run's own code raising them."""
     batch(tree, "The first")
     execute(tree, tree.transitions["sprout"], name="The first", body="Prose.")
@@ -2580,16 +2684,16 @@ def test_the_notice_names_both_files(tree: Declaration) -> None:
 # `fell` is the fixture's verb that declares **both** halves: out of `orchard`
 # — the numbered state, and the only one declaring `dependencies` — with no
 # `to` at all. `compost` beside it dissolves out of `greenhouse`, which is
-# unnumbered and so cannot archive: 5-3's `merge` shape, and the proof that
+# unnumbered and so cannot archive: `merge`'s shape, and the proof that
 # `dissolves` is not a rider on `archives`.
 #
 # `grub-out` stays the control throughout: same source state, same `archives`,
 # and it moves the tree.
 
-RECORD = "What it was, and why it came down."
 
-
-def felled(tree: Declaration, name: str = "a-seedling", record: str = RECORD) -> Path:
+def felled(
+    tree: Declaration, name: str = "a-seedling", record: str = RECORD_TEXT
+) -> Path:
     """One tree, put in the orchard and then taken down."""
     orchard(tree, name)
     return execute(tree, tree.transitions["fell"], name=name, asked={"record": record})
@@ -2609,7 +2713,7 @@ def waits(tree: Declaration, name: str, on: object) -> Path:
 
 
 def test_a_verb_that_dissolves_takes_the_file_away(tree: Declaration) -> None:
-    """The half 5-1 left: no destination, no file, nothing left in any state."""
+    """No destination, no file, nothing left in any state."""
     source = tree.root / "orchard" / "a-seedling.md"
     felled(tree)
     assert not source.exists()
@@ -2619,7 +2723,7 @@ def test_a_verb_that_dissolves_takes_the_file_away(tree: Declaration) -> None:
 def test_the_entry_is_in_the_archive_and_the_register_stays_contiguous(
     tree: Declaration,
 ) -> None:
-    """The first done line, whole: the item is gone and the number is not."""
+    """The item is gone and the number is not."""
     felled(tree)
     assert "## 2. A seedling" in filed(tree)
     assert numbered.numbers(filed(tree)) == [1, 2]
@@ -2631,7 +2735,7 @@ def test_the_record_lands_under_the_heading(tree: Declaration) -> None:
     """The decided route for the prose: it comes in with the run, because the
     body it is written from is deleted by that same run."""
     felled(tree)
-    assert f"## 2. A seedling\n\n{RECORD}\n" in filed(tree)
+    assert f"## 2. A seedling\n\n{RECORD_TEXT}\n" in filed(tree)
 
 
 def test_the_run_says_the_entry_is_written_rather_than_waiting(
@@ -2647,7 +2751,7 @@ def test_the_run_says_the_entry_is_written_rather_than_waiting(
         tree,
         tree.transitions["fell"],
         name="a-seedling",
-        asked={"record": RECORD},
+        asked={"record": RECORD_TEXT},
         announce=said.append,
     )
     assert "with the record under it" in said[0]
@@ -2670,7 +2774,7 @@ def test_a_dissolving_verb_that_archives_nothing_just_removes_the_file(
     tree: Declaration,
 ) -> None:
     """`compost`, out of the unnumbered state. `dissolves` stands alone, so
-    5-3's `merge` — which cannot archive — has a shape to be."""
+    `merge`, which cannot archive, has a shape to be."""
     document = filed(tree)
     source = seedling(tree, "a-seedling", READY)
     returned = execute(tree, tree.transitions["compost"], name="a-seedling")
@@ -2694,7 +2798,9 @@ def test_the_item_the_verb_dissolves_is_never_its_own_referent(
     keeps the walk from writing the file it just unlinked."""
     orchard(tree, "a-seedling")
     waits(tree, "a-seedling", ["a-seedling"])
-    execute(tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD})
+    execute(
+        tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD_TEXT}
+    )
     assert [one.slug for one in read_items(tree)] == []
 
 
@@ -2710,7 +2816,9 @@ def test_a_referents_list_edge_loses_one_slug_and_keeps_the_rest(
     orchard(tree, "b-seedling")
     orchard(tree, "c-seedling")
     waits(tree, "b-seedling", ["a-seedling", "c-seedling"])
-    execute(tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD})
+    execute(
+        tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD_TEXT}
+    )
     assert read(tree.root / "orchard" / "b-seedling.md", tree)["after"] == [
         "c-seedling"
     ]
@@ -2724,7 +2832,9 @@ def test_a_referent_whose_only_edge_was_the_dissolved_one_loses_the_key(
     orchard(tree, "a-seedling")
     orchard(tree, "b-seedling")
     waits(tree, "b-seedling", ["a-seedling"])
-    execute(tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD})
+    execute(
+        tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD_TEXT}
+    )
     assert "after" not in read(tree.root / "orchard" / "b-seedling.md", tree)
 
 
@@ -2733,7 +2843,9 @@ def test_a_bare_string_edge_is_cleared_the_same_way(tree: Declaration) -> None:
     orchard(tree, "a-seedling")
     orchard(tree, "b-seedling")
     waits(tree, "b-seedling", "a-seedling")
-    execute(tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD})
+    execute(
+        tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD_TEXT}
+    )
     assert "after" not in read(tree.root / "orchard" / "b-seedling.md", tree)
 
 
@@ -2748,7 +2860,9 @@ def test_an_item_in_a_state_that_declares_no_dependencies_is_untouched(
         tree, "b-seedling", READY.replace('tag = "spring"', 'after = "a-seedling"')
     )
     before = stray.read_bytes()
-    execute(tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD})
+    execute(
+        tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD_TEXT}
+    )
     assert stray.read_bytes() == before
 
 
@@ -2761,7 +2875,9 @@ def test_an_item_naming_something_else_is_not_rewritten_at_all(
     orchard(tree, "b-seedling")
     waits(tree, "b-seedling", ["c-seedling"])
     before = (tree.root / "orchard" / "b-seedling.md").read_bytes()
-    execute(tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD})
+    execute(
+        tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD_TEXT}
+    )
     assert (tree.root / "orchard" / "b-seedling.md").read_bytes() == before
 
 
@@ -2780,7 +2896,7 @@ def test_every_edited_item_is_named_on_the_announce_callback(
         tree,
         tree.transitions["fell"],
         name="a-seedling",
-        asked={"record": RECORD},
+        asked={"record": RECORD_TEXT},
         announce=said.append,
     )
     edited = [one for one in said if "out of after" in one]
@@ -2792,7 +2908,7 @@ def test_every_edited_item_is_named_on_the_announce_callback(
 def test_a_verb_that_does_not_dissolve_clears_no_edge(tree: Declaration) -> None:
     """The control. `grub-out` archives out of the same state and leaves every
     inbound edge alone, because a moved item is still filed — which is the
-    reason declining is a move (`docs/reference.md#dependencies`)."""
+    reason declining is a move (`examples/docs/reference.md#dependencies`)."""
     orchard(tree, "a-seedling")
     orchard(tree, "b-seedling")
     waits(tree, "b-seedling", ["a-seedling"])
@@ -2805,8 +2921,8 @@ def test_a_verb_that_does_not_dissolve_clears_no_edge(tree: Declaration) -> None
 def test_a_referent_another_session_holds_is_edited_anyway(
     tree: Declaration, session: Identity
 ) -> None:
-    """**The decision, pinned** (John: it is a mechanical edit,
-    which is the reason for the answer). Refusing would let an unrelated claim
+    """**John's decision, pinned:** clearing an edge is a mechanical edit.
+    Refusing would let an unrelated claim
     on an unrelated item block a close-out; skipping would leave the dangling
     edge the invariant forbids. The claim is about who is doing that item's
     work, and clearing an edge is not doing it."""
@@ -2815,7 +2931,9 @@ def test_a_referent_another_session_holds_is_edited_anyway(
     waits(tree, "b-seedling", ["a-seedling"])
     someone_else(tree, "b-seedling", pid=os.getpid())
 
-    execute(tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD})
+    execute(
+        tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD_TEXT}
+    )
     assert "after" not in read(tree.root / "orchard" / "b-seedling.md", tree)
     assert claim.path(tree.root, "b-seedling").exists()
 
@@ -2828,9 +2946,9 @@ def test_a_head_the_read_cannot_parse_refuses_the_run_and_writes_nothing(
     and `_place`'s destination check has no destination to run against — but
     the walk that finds referents is `read.items`, which refuses on any head in
     the tree it cannot read. So a stranger's typo does block a close-out, the
-    same way it already blocks every mint into a numbered state. That is
-    pre-existing and loud: the run refuses by name, having written nothing, and
-    the fix is one edit to the named file."""
+    same way it blocks every mint into a numbered state. That is loud: the
+    run refuses by name, having written nothing, and the fix is one edit to
+    the named file."""
     source = orchard(tree, "a-seedling")
     orchard(tree, "b-seedling")
     path = tree.root / "orchard" / "b-seedling.md"
@@ -2842,7 +2960,10 @@ def test_a_head_the_read_cannot_parse_refuses_the_run_and_writes_nothing(
 
     with pytest.raises(Refusal) as refusal:
         execute(
-            tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD}
+            tree,
+            tree.transitions["fell"],
+            name="a-seedling",
+            asked={"record": RECORD_TEXT},
         )
     assert "b-seedling.md" in str(refusal.value)
     assert '"nonsense" is not a declared key' in str(refusal.value)
@@ -2855,7 +2976,7 @@ def test_a_head_the_read_cannot_parse_refuses_the_run_and_writes_nothing(
 def test_a_refused_run_leaves_the_item_the_archive_and_every_referent(
     tree: Declaration,
 ) -> None:
-    """Every refusal is computed before **any** of the four writes, so nothing
+    """Every refusal is computed before **any** write, so nothing
     is half done: an unreadable `##` stops the run with the tree untouched."""
     source = orchard(tree, "a-seedling")
     orchard(tree, "b-seedling")
@@ -2869,7 +2990,10 @@ def test_a_refused_run_leaves_the_item_the_archive_and_every_referent(
 
     with pytest.raises(Refusal, match="Section 1: A felled tree"):
         execute(
-            tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD}
+            tree,
+            tree.transitions["fell"],
+            name="a-seedling",
+            asked={"record": RECORD_TEXT},
         )
     assert source.read_bytes() == before
     assert referent.read_bytes() == held
@@ -2885,7 +3009,10 @@ def test_an_item_with_no_number_refuses_and_the_file_survives(
     stray.write_text(READY, encoding="utf-8")
     with pytest.raises(Refusal, match="carries no number"):
         execute(
-            tree, tree.transitions["fell"], name="a-stray", asked={"record": RECORD}
+            tree,
+            tree.transitions["fell"],
+            name="a-stray",
+            asked={"record": RECORD_TEXT},
         )
     assert stray.exists()
 
@@ -2898,7 +3025,10 @@ def test_a_verb_aimed_at_an_item_in_another_state_says_where_it_is(
     seedling(tree, "a-seedling", READY)
     with pytest.raises(Refusal) as refusal:
         execute(
-            tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD}
+            tree,
+            tree.transitions["fell"],
+            name="a-seedling",
+            asked={"record": RECORD_TEXT},
         )
     assert "is in greenhouse" in str(refusal.value)
 
@@ -2923,7 +3053,7 @@ def test_a_dissolving_verbs_own_requires_is_graded_before_anything_goes(
             amended,
             amended.transitions["fell"],
             name="a-seedling",
-            asked={"record": RECORD},
+            asked={"record": RECORD_TEXT},
         )
     assert source.exists()
 
@@ -2934,9 +3064,10 @@ def test_a_dissolving_verbs_own_requires_is_graded_before_anything_goes(
 #
 # `fell` is the fixture's verb that declares **both** halves, and `propagator`
 # is the state whose items name an owner: a batch names the tree it was struck
-# for in `for-tree`, which is the fixture's word and not this repo's. `grub-out` is the control
-# on one side — it archives and **moves**, so it refuses nothing — and
-# `compost` on the other, which dissolves and archives nothing.
+# for in `for-tree`, which is the fixture's word and not this repo's.
+# `grub-out` is the control on one side (it archives and **moves**, so it
+# refuses nothing), and `compost` on the other, which dissolves and archives
+# nothing.
 #
 # `dangle_errors` is pure, so the table below builds `Item`s and passes them
 # in: no `tmp_path` until the last test, which is the seam.
@@ -3048,7 +3179,7 @@ def test_a_carrier_struck_for_something_else_is_not_read(
 
 
 def test_the_pending_bullet_is_not_an_open_finding(tree: Declaration) -> None:
-    """`bullets` drops the marker and so does this: `docs/reference.md#carrier`
+    """`bullets` drops the marker and so does this: `examples/docs/reference.md#carrier`
     calls a forgotten one loud and harmless, and a gate over it would reverse
     a reading already written down."""
     held = carrying(tree, "rooted", "rooted", pending=True)
@@ -3081,7 +3212,7 @@ def test_an_open_carrier_refuses_the_run_and_writes_nothing(
     tree: Declaration,
 ) -> None:
     """The seam: one refusal before the first write, so the item, the archive
-    and the batch are all byte-identical — and the close-out goes through once
+    and the batch are all byte-identical, and the close-out goes through once
     every finding has been disposed of."""
     orchard(tree, "a-seedling")
     batch(tree, "The first", "The second", owner="a-seedling")
@@ -3092,7 +3223,7 @@ def test_an_open_carrier_refuses_the_run_and_writes_nothing(
             tree,
             tree.transitions["fell"],
             name="a-seedling",
-            asked={"record": RECORD},
+            asked={"record": RECORD_TEXT},
         )
     assert "a-batch.md" in str(raised.value)
     assert f"2 of its 2 {subphase.NAME}" in str(raised.value)
@@ -3100,7 +3231,9 @@ def test_an_open_carrier_refuses_the_run_and_writes_nothing(
 
     for name in ("c1", "c2"):
         execute(tree, tree.transitions["pot-on"], name="a-batch", asked={"name": name})
-    execute(tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD})
+    execute(
+        tree, tree.transitions["fell"], name="a-seedling", asked={"record": RECORD_TEXT}
+    )
     assert not (tree.root / "orchard" / "a-seedling.md").exists()
     assert "## 2. A seedling" in filed(tree)
 
@@ -3114,10 +3247,6 @@ def test_an_open_carrier_refuses_the_run_and_writes_nothing(
 # dissolves and archives nothing. The fixture's `orchard` is the bulleted,
 # cursored state and `ripened`/`thinned` are its marks — neither is this
 # repo's word, so nothing here can pass by agreeing with `plan.toml`.
-
-#: `orchard`'s pending bullet, which is the fixture's sentence and not
-#: `propagator`'s. The two states declare different ones on purpose.
-UNPRUNED = "**unpruned — Say what the rest of the training is.**"
 
 
 def growing(tree: Declaration, *marks: str | None, pending: bool = False) -> Item:
@@ -3153,9 +3282,9 @@ def test_the_count_left_matches_what_the_close_out_refuses_with(
     tree: Declaration,
 ) -> None:
     """The row and the refusal over **one body**, which is what the shared
-    `fileplan.subphase.unmarked` buys. The listing was already showing
-    the number this refusal opens with, so a session meeting the refusal is
-    not learning a new fact — it is being stopped by the one on the row."""
+    `fileplan.subphase.unmarked` buys. The listing shows the number this
+    refusal opens with, so a session meeting the refusal learns no new fact:
+    it is stopped by the one on the row."""
     one = growing(tree, "ripened", None, None)
     (message,) = unmarked_errors(one, tree.transitions["fell"])
     (row,) = read_rows(tree, [one])
@@ -3166,9 +3295,8 @@ def test_the_count_left_matches_what_the_close_out_refuses_with(
 def test_a_section_whose_every_bullet_is_marked_archives_clean(
     tree: Declaration,
 ) -> None:
-    """The other polarity, and the one that shuts the window 12-2 opened: with
-    `done` gone from the status key, a mark on every bullet is the only thing
-    that says a section is finished."""
+    """The other polarity: the status key carries no `done`, so a mark on
+    every bullet is the only thing that says a section is finished."""
     assert (
         unmarked_errors(growing(tree, "ripened", "ripened"), tree.transitions["fell"])
         == []
@@ -3440,7 +3568,7 @@ def test_a_survivor_that_is_the_item_itself_refuses_and_writes_nothing(
 ) -> None:
     """Merging an item into itself would delete it and leave every edge
     pointing at something gone. Computed before any write, so the item, the
-    survivor and every referent are byte-identical."""
+    survivor, and every referent are byte-identical."""
     source = seedling(tree, "a-seedling", READY)
     orchard(tree, "c-seedling")
     referent = waits(tree, "c-seedling", ["a-seedling"])
@@ -3471,7 +3599,7 @@ def test_a_survivor_handle_naming_nothing_refuses_before_any_write(
 def test_a_dissolving_verb_that_does_not_absorb_still_removes_the_edge(
     tree: Declaration,
 ) -> None:
-    """**The 5-2 regression.** `compost` dissolves out of the same state and
+    """**The control.** `compost` dissolves out of the same state and
     takes the edges naming the seedling *out*, because that is what the
     declaration says it does — one branch, not a new default."""
     said: list[str] = []
@@ -3492,7 +3620,7 @@ def test_a_dissolving_verb_that_does_not_absorb_still_removes_the_edge(
 # Only an absorbing verb takes several handles, and they are all or nothing:
 # every item is checked before anything is written. A tuple in hands back a
 # tuple out. The mention notice is every dissolving run's, and a real run's
-# only. See docs/reference.md#merge and docs/reference.md#dissolving
+# only. See examples/docs/reference.md#merge and examples/docs/reference.md#dissolving
 
 
 def merged(
@@ -3788,7 +3916,7 @@ def test_every_dissolving_verb_gives_the_mention_notice(
         tree,
         tree.transitions[verb],
         name="a-seedling",
-        asked={"record": RECORD},
+        asked={"record": RECORD_TEXT},
         announce=said.append,
     )
     assert f'its prose still names "a-seedling", which {verb} took away' in "\n".join(
@@ -3823,7 +3951,7 @@ def test_a_check_gives_no_mention_notice(tree: Declaration) -> None:
 # survivor under its title, in the run that deletes the absorbed file. Without
 # the flag the survivor is byte-identical, which
 # `test_the_survivors_file_is_byte_identical_after_a_merge` pins.
-# See docs/reference.md#merge
+# See examples/docs/reference.md#merge
 
 
 def carried(
@@ -3929,7 +4057,7 @@ def test_a_survivor_another_session_holds_refuses_a_merge(
     before = snapshot(tree)
 
     with pytest.raises(
-        Refusal, match="c-seedling is claimed by .*that session's to run"
+        Refusal, match=r"c-seedling is claimed by .*that session's to run"
     ):
         carried(tree, "a-seedling", "b-seedling")
     assert snapshot(tree) == before
@@ -3954,11 +4082,11 @@ def test_a_check_names_the_carry_and_writes_nothing(tree: Declaration) -> None:
 #
 # The property is **non-divergence**, so every test here is a pair: what the
 # run does, and what the check says about it, from the same tree. The one
-# thing a check may leave behind is nothing at all — which is why each of the
-# three arms is graded on a snapshot of the whole tree rather than on the item
+# thing a check may leave behind is nothing at all, so each arm is graded on
+# a snapshot of the whole tree rather than on the item
 # it was aimed at. `_create` is the trap: its reservation is a write partway
 # through the arm, so a check that stopped where the other two stop would pass
-# every assertion but the snapshot. See docs/reference.md#the-check.
+# every assertion but the snapshot. See examples/docs/reference.md#the-check.
 
 
 #: The run lock and the directory it sits in, which **every** mutating path
@@ -4051,8 +4179,7 @@ def test_a_check_makes_no_directory_for_a_state_that_has_none(
     """The earliest write either shape performs is the destination directory,
     and `exist_ok=True` hides it in every tree whose states are already
     there. This one's are not."""
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    copy_fixture(tmp_path)
     declaration = load(tmp_path / "plan.toml")
     (tmp_path / declaration.states["greenhouse"].path).mkdir(parents=True)
     seedling(declaration, "a-seedling", READY)
@@ -4086,8 +4213,8 @@ def test_a_check_reaches_the_head_grading_a_run_would_refuse_on(
 def test_a_check_on_a_dissolving_verb_leaves_the_item_and_its_edges(
     tree: Declaration,
 ) -> None:
-    """The third arm, and the one with the most to undo if it wrote anything:
-    the item, the archive entry and every referent's edge to it."""
+    """The dissolving arm, the one with the most to undo if it wrote anything:
+    the item, the archive entry, and every referent's edge to it."""
     seedling(tree, "a-seedling", READY)
     orchard(tree, "c-seedling")
     waits(tree, "c-seedling", ["a-seedling"])
@@ -4147,7 +4274,7 @@ def test_a_check_says_nothing_about_a_claim_a_verb_would_not_take(
 # Retitling: a new title, a new slug, and every reference to the old one
 # follows. `relabel` renames an orchard tree, which `after` and `for-tree`
 # name; `relabel-batch` renames a propagator batch, which `batch` names; and
-# `relabel-pot` renames on the claimed bench. See docs/reference.md#retitle
+# `relabel-pot` renames on the claimed bench. See examples/docs/reference.md#retitle
 # --------------------------------------------------------------------------
 
 
@@ -4239,7 +4366,7 @@ def test_a_body_naming_the_old_slug_gets_the_notice(tree: Declaration) -> None:
 
 def test_a_refused_retitle_leaves_the_tree_byte_identical(tree: Declaration) -> None:
     """A slug another file holds refuses in the creating verb's words, and
-    before any of the three writes: the move, the referent, the claim."""
+    before any write: the move, the referent, or the claim."""
     orchard(tree, "a-seedling")
     orchard(tree, "b-seedling")
     orchard(tree, "c-seedling")
@@ -4284,7 +4411,7 @@ def test_a_retitle_check_writes_nothing_and_gives_no_notice(tree: Declaration) -
 
 
 def test_a_title_that_keeps_the_slug_rewrites_in_place(tree: Declaration) -> None:
-    """A change of case or punctuation: nothing moves, nothing is repointed
+    """A change of case or punctuation: nothing moves, nothing is repointed,
     and nothing is said."""
     said: list[str] = []
     path = prose(orchard(tree, "a-seedling"), tree, "Was a-seedling once.\n")

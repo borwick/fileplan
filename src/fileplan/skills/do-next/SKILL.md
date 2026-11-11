@@ -12,8 +12,7 @@ are in is a fact about the working tree, not something to ask about.
 What is here is the **composition**: which arm, what to ask, when to stop.
 Every transition an arm reaches runs through
 [`/fileplan`](../fileplan/SKILL.md), which asks the tool what the run takes
-and what to read. Nothing below spells an invocation or an option. A second
-copy of either would rot the first time the declaration changed.
+and what to read. Nothing below spells an invocation or an option.
 
 Every command below is spelled `fileplan`, as installed. fileplan's own
 source tree runs it as `uv run fileplan`.
@@ -22,7 +21,7 @@ source tree runs it as `uv run fileplan`.
 
 Invoked as `/do-next [WHICH]`. The argument is optional, and it says which
 item in `plan` the session is for. Read the tool's answer as `--json`, never
-as the text a person reads, because the text is free to change:
+as the text a person reads:
 
 | What you were given | How to find the item |
 |---|---|
@@ -31,11 +30,10 @@ as the text a person reads, because the text is free to change:
 
 `show` finds a live section by its number, and a sub-phase name by its
 section and its bullet. Either way the row names the `slug`, and every verb
-after it takes the slug, because a verb that writes never takes a number.
+after it takes the slug.
 
 If nothing matches, or the item found is not in `plan`, **stop and say so**.
-Never fall back to the head item: a session on the wrong section is worse than
-a session that asks.
+Never fall back to the head item.
 
 ## Which arm
 
@@ -80,19 +78,15 @@ If two transitions match the same row, read their `help` fields and choose
 between them. That judgment is this skill's; what the
 run then requires is the contract's.
 
-`release` is the exception, and it is not an exception to the rule: it is the
-tool's own reserved word, present in any declaration that claims, rather than
-a transition this workflow declared. It ends the session's hold.
+`release` is not in the table: it is the tool's own reserved word, present
+in any declaration that claims. It ends the session's hold.
 
 ## Before any arm: the reading
 
 In arms A and B, call `EnterPlanMode` **before** the reading. Both arms end by
-presenting with `ExitPlanMode`, and a session that reads and drafts outside
-plan mode leaves the user to type the switch themselves. Arm C does not enter
-it, because arm C implements.
+presenting with `ExitPlanMode`. Arm C does not enter it.
 
 The repository's own agent instructions name the documents and the order.
-Read them.
 Read them even when the item looks self-explanatory. Then, for this item:
 
 - The item itself — `cat` it whole.
@@ -137,9 +131,7 @@ left. That is arm A again.
    start implementing. If they say to continue instead, go straight to arm C
    in this session.
 
-The `claims` transition's contract points at a procedure. The procedure says
-what a saved plan has to stand on its own without. A session that has cleared
-brings no memory to the plan.
+Write the plan so a session with no memory of this one can run it.
 
 ## Arm C — implement the pending plan
 
@@ -162,39 +154,18 @@ mark, the close-out's own bullet included. Where the cursor sits gates
 nothing. So the last bullet marked is the close-out's, and then the `close`
 that `archives` takes the item away.
 
-Compose the archive entry **in full before that run**. The item's body is what
-the entry is written from, and the body goes with the item. The contract's
+Compose the archive entry **in full before that run**. The contract's
 `Declares` block says as much by naming `close` and `archives`. The procedure the
 contract points at says what the close rests on and what the run costs.
-
-Both are single transitions, so both go through
-[`/fileplan`](../fileplan/SKILL.md).
 
 ## What not to do
 
 - **Do not batch the planning of several sub-phases.** It reads efficient and
   is not: the shape of a section changes on contact with the previous
-  sub-phase's code. One sub-phase here was absorbed into its neighbour, and
-  another corrected, each while the one before it was being written.
+  sub-phase's code.
 - **Do not build a capability this repo has no earned case for.** A
   capability wanted at n=1 is a guess. The trap is a generic engine with a
   planning-shaped default.
-- **Do not run tree-wide destructive git**, since a sibling session may be
-  holding edits in the same tree that nothing has committed yet.
-
-## Why this skill is gated and `/fileplan` is not
-
-`disable-model-invocation` rides here and nowhere else. `/do-next` is the
-**session boundary**, and starting a session is the user's act. `/fileplan` is
-what every arm delegates each transition to. Gated as well, `/fileplan` would
-leave the composition unable to execute its own instructions. Each arm would
-stop at the cursor move and ask the user to type the delegate. The boundary
-would then sit in the middle of a session rather than at its edge. Do not add
-the key to `/fileplan` for symmetry. The tool already guards every write below
-this point, computing each refusal before the first write.
-
-`do-next` is a **session**, not a transition, and the declaration can hold no
-transition for a session. A section of the workflow's procedures is reached
-by a link from a transition's section, so a session nothing can link from
-would orphan a section. What a single run needs lives in the procedures, and
-what composes several runs lives here.
+- **Do not run tree-wide destructive git.**
+- **Do not add `disable-model-invocation` to `/fileplan`** for symmetry: it
+  rides here alone, because starting a session is the user's act.

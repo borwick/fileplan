@@ -15,14 +15,12 @@ The example resolves through `importlib.resources` rather than by walking up
 from this file. After an install there is no repository to walk up from.
 
 Every refusal is computed before the first write, so a refused `init` leaves
-nothing behind. `init` refuses over an existing install, and over one in any
-parent directory. Discovery walks up, and a nested declaration would shadow
-the tree above it.
+nothing behind.
 
 `skills` is here for the resolution rather than for `init`, which writes no
 skills.
 
-See docs/reference.md#init and docs/reference.md#the-skills
+See examples/docs/reference.md#init and examples/docs/reference.md#the-skills
 """
 
 from __future__ import annotations
@@ -32,25 +30,25 @@ from importlib import resources
 from pathlib import Path
 
 from fileplan.declaration import PLAN_TOML_NAME, Refusal, load
+from fileplan.lock import LOCAL_DIR
 
 #: The package directory the example tree ships in.
 STARTER = "starter"
 
 #: What `init` writes beside the example: the directory the tool keeps
-#: session state in, ignored by git whole. See docs/reference.md#init
-LOCAL_IGNORE = (Path("local") / ".gitignore", "*\n")
+#: session state in, ignored by git whole. See examples/docs/reference.md#init
+LOCAL_IGNORE = (Path(LOCAL_DIR) / ".gitignore", "*\n")
 
 #: And the one the interpreter skills ship in. Named for what ships rather
 #: than after any agent vendor's directory: where a consumer puts it is their
-#: harness's business. See docs/reference.md#the-skills
+#: harness's business. See examples/docs/reference.md#the-skills
 SKILLS = "skills"
 
 
 def skills() -> Path:
     """The directory the shipped interpreter skills are in.
 
-    A fact about the tool rather than about a workflow, which is why it
-    answers before a declaration loads. Asked of the package rather than of
+    Asked of the package rather than of
     Python, because a tool install puts fileplan in an environment of its own.
 
     Raises `Refusal` where the package is not on a real filesystem, since
@@ -89,7 +87,7 @@ def install(target: Path) -> list[Path]:
         ignore, ignored = LOCAL_IGNORE
         directories += sorted(
             {relative.parent for relative in (*relatives, ignore)}
-            - {Path(".")}
+            - {Path()}
             - set(directories)
         )
 
@@ -113,7 +111,7 @@ def install(target: Path) -> list[Path]:
         for directory in directories:
             (target / directory).mkdir(parents=True, exist_ok=True)
             written.append(target / directory)
-        for relative, path in zip(relatives, sources):
+        for relative, path in zip(relatives, sources, strict=True):
             (target / relative).write_bytes(path.read_bytes())
             written.append(target / relative)
         (target / ignore).write_text(ignored)

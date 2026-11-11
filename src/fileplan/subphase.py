@@ -11,7 +11,7 @@ Everything is pure: a string in, a value out, and no filesystem. Nothing here
 raises `Refusal`. A defect comes back as a list of complaints. The executor is
 what refuses with the list.
 
-See docs/reference.md#sub-phases for the counting, and docs/reference.md#bulleted
+See examples/docs/reference.md#sub-phases for the counting, and examples/docs/reference.md#bulleted
 for the writing.
 """
 
@@ -31,7 +31,16 @@ NAME = "sub-phases"
 
 #: A line trying to be a bullet: a marker followed by whitespace. The space is
 #: what separates a bullet from italic prose opening with `*`.
-BULLET = re.compile(r"^(?P<marker>[-*+]|\d+[.)])\s")
+BULLET = re.compile(
+    r"""
+    ^(?P<marker>
+        [-*+]      # an unordered marker
+      | \d+[.)]    # or an ordered one: digits, then a dot or a paren
+    )
+    \s             # the whitespace after it
+    """,
+    re.VERBOSE,
+)
 
 #: The one marker that counts. Every other bullet-shaped line refuses.
 COUNTED = "-"
@@ -50,11 +59,11 @@ NAME_END = re.compile(r"[\s\u2014\u2013]")
 #: The strict marked form: a named bullet whose bold run is followed by a
 #: second one, holding the disposition. Where the state declares its marks,
 #: that run is a mark only if its word is one of them. See
-#: docs/reference.md#marking
+#: examples/docs/reference.md#marking
 MARKED = re.compile(r"^-\s+\*\*[^*]+?\*\*\s+\*\*(?P<mark>[^*]+?)\*\*")
 
 #: The two state fields naming which declared keys hold the cursor and the
-#: status riding with it. See docs/reference.md#the-cursor
+#: status riding with it. See examples/docs/reference.md#the-cursor
 CURSOR, STATUS = "sub-phase-cursor", "sub-phase-status"
 
 #: The row field saying which sub-phase to pick up next. In the default record
@@ -64,10 +73,10 @@ NEXT = "next-sub-phase"
 
 #: The row field counting the named bullets that carry no mark, so a forgotten
 #: sub-phase is a number that will not go down. `fileplan.transition` refuses
-#: with the same `unmarked`. See docs/reference.md#the-listing
+#: with the same `unmarked`. See examples/docs/reference.md#the-listing
 LEFT = "sub-phases-left"
 
-#: The three fields a row carries off the item's own body, in the order a row
+#: The fields a row carries off the item's own body, in the order a row
 #: spells them. A declared key of any of these names refuses in
 #: `fileplan.declaration`.
 DERIVED = (NAME, LEFT, NEXT)
@@ -78,7 +87,7 @@ PENDING = "sub-phase-pending"
 
 #: The state field holding the whole ident form a state's bullets are named
 #: by, separator included, with the ordinal's place marked. It is what lets a
-#: state with no register carry bullets at all. See docs/reference.md#bulleted
+#: state with no register carry bullets at all. See examples/docs/reference.md#bulleted
 FORM = "sub-phase-name"
 
 #: The one field of a `FORM` the tool supplies; every other names a value the
@@ -91,15 +100,27 @@ FIELD = re.compile(r"\{(?P<field>[^{}]*)\}")
 
 #: Any ATX heading, at any depth. A span ends at the next one of any level, so
 #: a deeper heading inside the sub-phases closes it rather than nesting.
-HEADING = re.compile(r"^(?P<depth>#+)\s+(?P<text>.*?)\s*$")
+HEADING = re.compile(
+    r"""
+    ^(?P<depth>\#+)   # the hashes, any number
+    \s+
+    (?P<text>.*?)     # the text, lazily
+    \s*$              # trailing whitespace left off
+    """,
+    re.VERBOSE,
+)
 
 #: A fenced code block's delimiter, either marker, indentation allowed. A
 #: fenced line is not a line here at all — not a bullet, not a heading, not the
-#: pending marker. Public and this module's because
-#: `fileplan.declaration.heading_slugs` reads it too: one fence parser, never
-#: two. A toggle rather than CommonMark's matched delimiters, and an unclosed
-#: fence refuses in `errors`.
-FENCE = re.compile(r"^\s*(?:```|~~~)")
+#: pending marker. `unfenced` is the one fence parser. A toggle rather than
+#: CommonMark's matched delimiters, and an unclosed fence refuses in `errors`.
+FENCE = re.compile(
+    r"""
+    ^\s*          # indentation allowed
+    (?:```|~~~)   # either marker
+    """,
+    re.VERBOSE,
+)
 
 #: The depth the writer opens a heading at, and only where the body has none:
 #: `_headings` matches a heading's text at any depth, so a consumer writing
@@ -107,7 +128,7 @@ FENCE = re.compile(r"^\s*(?:```|~~~)")
 DEPTH = "###"
 
 #: What separates a minted bullet's name from its title, and one of
-#: `NAME_END`'s three, so what is written stops where the reader says it does.
+#: `NAME_END`'s, so what is written stops where the reader says it does.
 DASH = "—"
 
 #: What every line written under a bullet opens with: as wide as `COUNTED`
@@ -118,7 +139,7 @@ INDENT = " " * (len(COUNTED) + 1)
 #: The line that heads a folded bullet's prose under the bullet it moves to:
 #: the absorbed bullet's name and title, as `DASH` joins them on its own
 #: line. Italic and unbulleted, so it is the tool's prose and counts as
-#: nothing. See docs/reference.md#marking
+#: nothing. See examples/docs/reference.md#marking
 FROM = "*From {}:*"
 
 #: The ordinal a body with no bullets under the heading mints first.
@@ -135,7 +156,7 @@ class Bullet:
 
     `mark` is `None` where the bullet carries none, which is what an offer
     narrows on. An unnamed bullet is not one of these: it counts like any
-    other, and nothing can point at it. See docs/reference.md#marking
+    other, and nothing can point at it. See examples/docs/reference.md#marking
     """
 
     name: str
@@ -161,7 +182,7 @@ class Bullet:
         read immediately after that run, so a word written past the prose
         would land where nothing finds it. The one home of the question, read
         by the refusal that stops the run, by the offer that passes the bullet
-        over, and by the listing's report. See docs/reference.md#marking
+        over, and by the listing's report. See examples/docs/reference.md#marking
         """
         return self.mark is None and self.rest is not None
 
@@ -172,7 +193,7 @@ class Unread:
 
     `name` is what the name would be, or `None` where even that is empty.
     `line` counts within the body, as `Bullet.line` does.
-    See docs/reference.md#sub-phases
+    See examples/docs/reference.md#sub-phases
     """
 
     line: int
@@ -237,10 +258,7 @@ def bullets(
 def text(body: str, heading: str, *, name: str) -> str | None:
     """The lines the bullet called `name` owns, verbatim, or `None`. Pure.
 
-    Its own line plus its continuation: the walk runs forward from where
-    `_counted` found it and stops at the first line that is unfenced, non-blank
-    and at column zero. Trailing blank lines are trimmed and inner ones kept.
-    A column-zero bullet or heading inside a fence neither ends nor truncates
+    Its own line plus its continuation (`_owned`). A column-zero bullet or heading inside a fence neither ends nor truncates
     the continuation, so a quoted transcript comes back whole.
 
     The first matching bullet only, and total: it reads `_counted` rather than
@@ -254,16 +272,14 @@ def text(body: str, heading: str, *, name: str) -> str | None:
 
     lines = body.splitlines()
     start = at[0] - 1
-    return "\n".join(lines[start : _owned(lines, _unfenced(lines), start)])
+    return "\n".join(lines[start : _owned(lines, unfenced(lines), start)])
 
 
 def unmarked(body: str, heading: str, marks: frozenset[str] | None = None) -> list[str]:
     """The names of the bullets under `heading` carrying no mark. Pure.
 
-    The one home of which sub-phases are still open, asked by four callers
-    that would each otherwise walk the body themselves: `LEFT`, `upcoming`,
-    `fileplan.transition.unmarked_errors` and `cursor_errors`. The last two
-    are why one reader matters rather than two spellings: a cursor may be
+    The one home of which sub-phases are still open, asked by every caller
+    that would otherwise walk the body. `cursor_errors` is why one reader matters rather than two spellings: a cursor may be
     written onto a marked bullet exactly when the section could close, so the
     two cannot drift into disagreeing. `pending=None` is here rather than in
     each of them, so the state's marker is in this list whenever the body
@@ -288,7 +304,7 @@ def upcoming(
     Two arms over `unmarked`: a cursor naming a bullet that carries no mark is
     itself what comes next, and otherwise it is the first unmarked bullet. So
     a body marked out of order answers with the open one in between. See
-    docs/reference.md#the-cursor
+    examples/docs/reference.md#the-cursor
 
     `None` means no next sub-phase and never "this state counts none", which
     is `count` returning `None` beside it in the row. A cursor the body does
@@ -377,7 +393,7 @@ def unread(body: str, heading: str, *, prefix: str | None) -> list[Unread]:
     ]
     if prefix is None:
         return said
-    ok = _unfenced(lines)
+    ok = unfenced(lines)
     end = bounds[1]
     return said + [
         Unread(
@@ -473,7 +489,7 @@ def unknown(where: str, wanted: str, carried: Sequence[Bullet], heading: str) ->
     byte for byte: a disposition resolving the bullet it acts on, and
     `show ITEM NAME` resolving the bullet it reads. Both gate on `bullets`, so
     an unnamed bullet and the pending marker refuse through here as "no such
-    name". See docs/reference.md#marking
+    name". See examples/docs/reference.md#marking
 
     `carried` is what `bullets` returned, empty or not, and an empty list is
     said differently. Pure: the caller is what raises.
@@ -504,8 +520,8 @@ def fields(form: str) -> list[str]:
 def form_errors(form: str, where: str) -> list[str]:
     """Every way `form` is not an ident form, naming `where`. Pure.
 
-    Graded at load, by the code that will have to read it. Five refusals, each
-    by name: an empty form, one carrying no `SLOT`, a `SLOT` that is not last,
+    Graded at load, by the code that will have to read it. Each refused by
+    name: an empty form, one carrying no `SLOT`, a `SLOT` that is not last,
     a repeated `SLOT`, and an unbalanced brace. One complaint per defect.
     """
     if not form:
@@ -606,7 +622,7 @@ def mint(
 ) -> str:
     """`body` with the next sub-phase written in, and the pending bullet set.
 
-    Three steps in this order: drop the pending bullet if the body carries it;
+    In this order: drop the pending bullet if the body carries it;
     append a new sub-phase named `<prefix><ordinal>` if `title` was given;
     append the pending bullet unless `last` was given. Nothing asks whether
     the decomposition was already finished, so minting into a finished section
@@ -637,7 +653,7 @@ def mint(
     # and keeping the two index spaces apart is what puts a transcript back
     # byte for byte.
     marker = _pending_name(pending)
-    ok = _unfenced(lines)
+    ok = unfenced(lines)
     paired = [
         (line, ok[number])
         for number, line in enumerate(lines[start + 1 : end], start=start + 1)
@@ -698,12 +714,9 @@ def mark(
 ) -> str:
     """`body` with one bullet's mark written, and every other byte identical.
 
-    The mark is a second bold run, appended at the end of the line. `MARKED`
-    reads the run immediately after the name's, so a word written past any
-    other text would land where nothing reads it — the caller gates on
-    `Bullet.rest`, and this stays total and raises nothing, like everything
-    else here. Nothing else moves: not the
-    heading, not the bullets either side, not the prose around the span. The
+    The mark is a second bold run, appended at the end of the line. The
+    caller gates on `Bullet.unmarkable`, and this stays total and raises
+    nothing. Nothing else moves: not the heading, not the bullets either side, not the prose around the span. The
     first matching bullet only.
 
     Assumes `name` is one `bullets` handed back and `word` graded by
@@ -713,18 +726,12 @@ def mark(
     derived. It is graded by `note_errors` at the run, and by the caller.
     """
     lines = body.splitlines()
-    bounds = _bounds(lines, heading)
-    if bounds is None:
+    number = _located(lines, unfenced(lines), heading, name)
+    if number is None:
         return body
-    start, end = bounds
-    ok = _unfenced(lines)
-    for number in range(start + 1, end):
-        line = lines[number]
-        if ok[number] and _counts(line) and _name(line) == name:
-            written = f"{line.rstrip()} **{word}**"
-            lines[number] = f"{written} {note}" if note else written
-            break
-    return "\n".join(lines) + "\n" if lines else ""
+    written = f"{lines[number].rstrip()} **{word}**"
+    lines[number] = f"{written} {note}" if note else written
+    return "\n".join(lines) + "\n"
 
 
 def write(
@@ -745,21 +752,16 @@ def write(
     reads the same bullets is `write_errors`' question, asked by the caller.
     """
     lines = body.splitlines()
-    bounds = _bounds(lines, heading)
-    if bounds is None:
+    ok = unfenced(lines)
+    number = _located(lines, ok, heading, name)
+    if number is None:
         return body
-    start, end = bounds
-    ok = _unfenced(lines)
-    for number in range(start + 1, end):
-        line = lines[number]
-        if ok[number] and _counts(line) and _name(line) == name:
-            cut = _owned(lines, ok, number)
-            lines[number + 1 if replace else cut : cut] = [
-                f"{INDENT}{one}" if one.strip() else ""
-                for one in text.rstrip("\n").splitlines()
-            ]
-            break
-    return "\n".join(lines) + "\n" if lines else ""
+    cut = _owned(lines, ok, number)
+    lines[number + 1 if replace else cut : cut] = [
+        f"{INDENT}{one}" if one.strip() else ""
+        for one in text.rstrip("\n").splitlines()
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def carry(
@@ -796,22 +798,33 @@ def absorb(body: str, *, heading: str, name: str, into: str) -> str:
     `write_errors`' question, asked by the caller.
     """
     lines = body.splitlines()
+    ok = unfenced(lines)
+    number = _located(lines, ok, heading, name)
+    if number is None:
+        return body
+    cut = _owned(lines, ok, number)
+    moved = lines[number + 1 : cut]
+    del lines[number + 1 : cut]
+    title = _title(lines[number])
+    headed = FROM.format(f"{name} {DASH} {title}" if title else name)
+    text = "\n".join([headed, *(one.removeprefix(INDENT) for one in moved)])
+    return write("\n".join(lines) + "\n", heading=heading, name=into, text=text)
+
+
+def _located(lines: list[str], ok: list[bool], heading: str, name: str) -> int | None:
+    """The index of the first counted bullet called `name` under `heading`."""
     bounds = _bounds(lines, heading)
     if bounds is None:
-        return body
+        return None
     start, end = bounds
-    ok = _unfenced(lines)
-    for number in range(start + 1, end):
-        line = lines[number]
-        if ok[number] and _counts(line) and _name(line) == name:
-            cut = _owned(lines, ok, number)
-            moved = lines[number + 1 : cut]
-            del lines[number + 1 : cut]
-            title = _title(line)
-            headed = FROM.format(f"{name} {DASH} {title}" if title else name)
-            text = "\n".join([headed] + [one.removeprefix(INDENT) for one in moved])
-            return write("\n".join(lines) + "\n", heading=heading, name=into, text=text)
-    return body
+    return next(
+        (
+            number
+            for number in range(start + 1, end)
+            if ok[number] and _counts(lines[number]) and _name(lines[number]) == name
+        ),
+        None,
+    )
 
 
 def write_errors(body: str, written: str, heading: str) -> list[str]:
@@ -870,7 +883,7 @@ def opens(body: str, *, heading: str, pending: str) -> bool:
     """Whether a mint into `body` would re-open a finished decomposition.
 
     Asked so the executor can say so, and a question about the body rather
-    than a fourth step in `mint`, because the answer is wanted whether or not
+    than a step in `mint`, because the answer is wanted whether or not
     the mint goes on to write anything. A body with no `heading` was never
     decomposed, so there is nothing to re-open.
     """
@@ -879,7 +892,7 @@ def opens(body: str, *, heading: str, pending: str) -> bool:
     if bounds is None:
         return False
     marker = _pending_name(pending)
-    ok = _unfenced(lines)
+    ok = unfenced(lines)
     start, end = bounds
     return not any(
         _is_pending(lines[number], ok[number], marker)
@@ -1014,7 +1027,7 @@ def _found(lines: list[str], heading: str) -> list[int]:
     A heading inside a fence is not a heading, the rule
     `fileplan.declaration.heading_slugs` already keeps.
     """
-    ok = _unfenced(lines)
+    ok = unfenced(lines)
     return [
         number
         for number, line in enumerate(lines)
@@ -1032,7 +1045,7 @@ def _bounds(lines: list[str], heading: str) -> tuple[int, int] | None:
     found = _found(lines, heading)
     if not found:
         return None
-    ok = _unfenced(lines)
+    ok = unfenced(lines)
     start = found[0]
     for number in range(start + 1, len(lines)):
         if ok[number] and HEADING.match(lines[number]):
@@ -1044,15 +1057,14 @@ def _numbered_span(body: str, heading: str) -> list[tuple[int, str]]:
     """The column-zero lines under `heading`, as (1-based line number, line).
 
     Indented lines are dropped here rather than in each caller, and fenced
-    lines with them — the mask walked from line zero, since a fence opening
-    above the heading takes the heading with it.
+    lines with them.
     """
     found = _headings(body, heading)
     if not found:
         return []
 
     lines = body.splitlines()
-    ok = _unfenced(lines)
+    ok = unfenced(lines)
     span: list[tuple[int, str]] = []
     for number in range(found[0] + 1, len(lines)):
         line = lines[number]
@@ -1065,14 +1077,10 @@ def _numbered_span(body: str, heading: str) -> list[tuple[int, str]]:
     return span
 
 
-def _span(body: str, heading: str) -> list[str]:
-    return [line for _, line in _numbered_span(body, heading)]
-
-
 def _counted(body: str, heading: str) -> list[tuple[int, str, str | None]]:
     """Every sub-phase under `heading`, as (body line number, line, name).
 
-    The one place a sub-phase is recognised, so "how many", "which are named"
+    The one place a sub-phase is recognized, so "how many", "which are named"
     and "is this cursor one of them" cannot drift into three rules. `name` is
     `None` where the bullet carries no bold run.
     """
@@ -1083,7 +1091,7 @@ def _counted(body: str, heading: str) -> list[tuple[int, str, str | None]]:
     ]
 
 
-def _unfenced(lines: list[str]) -> list[bool]:
+def unfenced(lines: list[str]) -> list[bool]:
     """A mask parallel to `lines`: true where the line is not fenced.
 
     Parallel and never a filtered list: `mint` rebuilds the body out of slices
@@ -1107,7 +1115,7 @@ def _owned(lines: list[str], ok: list[bool], start: int) -> int:
     The one home of the continuation rule, read by `text` to return a bullet
     and by `mint` to write past one: the walk stops at the first line that is
     unfenced, non-blank and at column zero, and trailing blank lines go back
-    to the gap. `ok` is `_unfenced`'s mask, parallel to `lines`.
+    to the gap. `ok` is `unfenced`'s mask, parallel to `lines`.
     """
     end = len(lines)
     for number in range(start + 1, len(lines)):
@@ -1202,7 +1210,7 @@ def _pending_line(pending: str) -> str:
 
     What plan.toml declares is the content after `- ` (`PENDING`), so every
     reader and the writer have to put the marker back the same way. A second
-    marker composer is the drift docs/reference.md#bulleted refuses.
+    marker composer is the drift examples/docs/reference.md#bulleted refuses.
     """
     return f"{COUNTED} {pending}"
 
@@ -1234,7 +1242,7 @@ def _one_line_errors(value: str, empty: str, newline: str, bold: str) -> list[st
 
     `value` has to survive going into a bullet's one line, and there are
     exactly three ways it does not: empty, a newline, or a `**`.
-    `title_errors`, `note_errors` and `mark_errors` all ask those three, in
+    `title_errors`, `note_errors`, and `mark_errors` all ask those three, in
     that order, always all three.
 
     Only the scaffolding is shared. The three texts come from the caller

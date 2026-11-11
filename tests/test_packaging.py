@@ -1,34 +1,31 @@
 """What a stranger installs: the wheel, the version, and no tracebacks.
 
-Everything here grades an **artifact** rather than behaviour — the built
-distribution, `pyproject.toml`, and the two entry points a stranger reaches
+Everything here grades an **artifact** rather than behavior — the built
+distribution, `pyproject.toml`, and the entry points a stranger reaches
 after `pip install fileplan`. That is the same exception `test_docs.py` claims:
 there is only one of these, and grading a copy would prove nothing.
 
-Four subjects.
-
-* **The wheel.** Building and installing are cheap — `uv build` is well under a
-  second and `uvx --from <wheel>` about one — so what 8-1 proved by hand is a
-  control here rather than pasted output that rots. It builds from the sdist,
-  so a file missing from either is missing from both.
-* **The version, declared once.** The old backlog carried "click's version
-  declared once" as a behaviour to re-pin. It has two teeth, because there are
-  two things that can be declared twice: the *number* (`pyproject.toml`, read
-  back through installed metadata — no literal and no `__version__` under
-  `src/`) and the *option* (one `click.version_option` call, shared by the
-  group and the answer that precedes a declaration). Both extractors have a
-  mutation check: a guard that could never go red proves nothing.
-* **The metadata a project page is built from.** The licence expression, the
-  file behind it, the repository links and the classifiers, read off the built
-  wheel. A stranger meets this package as a PyPI page before they meet the
-  tool, and a page with an unknown licence and no way back to the source is a
+* **The wheel.** Building and installing are cheap: `uv build` is well under a
+  second and `uvx --from <wheel>` about one. So the install is a control here
+  rather than pasted output that rots.
+* **The version, declared once.** Two things can be declared twice: the
+  *number* (`pyproject.toml`, read back through installed metadata, with no
+  literal and no `__version__` under `src/`) and the *option* (one
+  `click.version_option` call, shared by the group and the answer that
+  precedes a declaration). Every extractor has a mutation check: a guard that
+  could never go red proves nothing.
+* **The metadata a project page is built from.** The license expression, the
+  file behind it, the repository links, and the classifiers, read off the
+  built wheel. A stranger meets this package as a PyPI page before they meet the
+  tool, and a page with an unknown license and no way back to the source is a
   packaging defect nothing else here would catch.
-* **No traceback outside a git repo.** The other inherited behaviour. The git
-  reader answers `None` where git does not answer, and `test_stale.py` pins
-  that at the unit. What is left is the operator's contract, and a traceback is a thing a *process* prints — so this drives the
-  console script in a tree that is not a repo and has none above it.
+* **No traceback outside a git repo.** The git reader answers `None` where
+  git does not answer, and `test_stale.py` pins that at the unit. What is left
+  is the operator's contract, and a traceback is a thing a *process* prints,
+  so this drives the console script in a tree that is not a repo and has none
+  above it.
 
-`docs/reference.md#the-version` is where the one-declaration rule these controls
+`examples/docs/reference.md#the-version` is where the one-declaration rule these controls
 exist to keep honest is written down.
 """
 
@@ -44,12 +41,10 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from conftest import EXAMPLE, FIXTURE_FILES
+from conftest import EXAMPLE, REPO, copy_fixture
 
 from fileplan.declaration import PLAN_TOML_ENV, PLAN_TOML_NAME, load
 
-REPO = Path(__file__).resolve().parent.parent
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
 SRC = REPO / "src"
 
 #: What the starter declaration calls the verb that files, so the stranger's
@@ -57,7 +52,7 @@ SRC = REPO / "src"
 CAPTURE = "capture"
 
 #: The fixture's own walk into the one state that asks git something: the
-#: `dated` state, reached in three moves. Spelled out because these are the
+#: `dated` state. Spelled out because these are the
 #: **fixture's** verbs, which the suite names freely — the rule against naming
 #: a verb is over `src/` and the shipped skills, where a verb's name would be
 #: per-verb code.
@@ -97,7 +92,6 @@ def wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def test_uv_build_yields_one_wheel(wheel: Path) -> None:
-    """The packaging done line section 1 left open."""
     assert wheel.suffix == ".whl"
     assert wheel.stat().st_size > 0
 
@@ -119,7 +113,7 @@ def test_the_wheel_carries_what_the_tool_reads_at_runtime(wheel: Path) -> None:
 
 
 def test_the_wheel_carries_the_interpreter_skills(wheel: Path) -> None:
-    """The skills are the **interpreter** (`docs/reference.md#the-skills`), and a
+    """The skills are the **interpreter** (`examples/docs/reference.md#the-skills`), and a
     consumer's harness reads them out of a directory this tool knows nothing
     about — so the package is the only thing that can carry them to a stranger.
     The real files are here. `.claude/skills/` holds the roots fileplan
@@ -137,6 +131,18 @@ def test_the_wheel_carries_the_interpreter_skills(wheel: Path) -> None:
     assert shipped <= carried
 
 
+#: A relative Markdown link's target, its anchor dropped.
+SKILL_LINK = re.compile(
+    r"""
+    \]\(
+    ([^)\#:]+)          # the target, not a URL
+    (?:\#[^)]*)?        # its anchor, if any
+    \)
+    """,
+    re.VERBOSE,
+)
+
+
 def test_every_link_in_a_shipped_skill_resolves_inside_the_wheel(wheel: Path) -> None:
     """A skill copied out of an install has the wheel and nothing else, so a
     relative link has to land on a wheel member, and a `docs/` document is
@@ -150,9 +156,9 @@ def test_every_link_in_a_shipped_skill_resolves_inside_the_wheel(wheel: Path) ->
     for name in skills:
         text = archive.read(name).decode()
         assert not re.search(r"docs/[A-Za-z0-9_./-]+\.md", text), name
-        for target in re.findall(r"\]\(([^)#:]+)(?:#[^)]*)?\)", text):
+        for target in SKILL_LINK.findall(text):
             linked += 1
-            resolved = os.path.normpath(f"{os.path.dirname(name)}/{target}")
+            resolved = os.path.normpath(f"{Path(name).parent}/{target}")
             assert resolved in carried, (name, target)
     assert linked, "no skill links anywhere, so the resolution half proves nothing"
 
@@ -278,7 +284,7 @@ def metadata(wheel: Path) -> str:
     return carried.read(name).decode("utf-8")
 
 
-def test_the_wheel_declares_the_licence(wheel: Path, metadata: str) -> None:
+def test_the_wheel_declares_the_license(wheel: Path, metadata: str) -> None:
     """The expression, the file it names, and the text itself.
 
     All three, because an expression with no file behind it is a claim with no
@@ -339,13 +345,19 @@ def test_no_license_classifier_rides_beside_the_expression(metadata: str) -> Non
 
 
 #: A version declared in `pyproject.toml`, at the top level of a table. The
-#: extractor is deliberately dumber than a TOML parser: a second declaration
+#: extractor is dumber than a TOML parser: a second declaration
 #: is a thing somebody *writes*, and a parser would silently keep the last one.
 VERSION_LINE = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
 
 #: A version spelled in the source: a `__version__`, or a literal handed to
 #: click. Either would be a second answer to "what version is this".
-VERSION_IN_SOURCE = re.compile(r'__version__|version\s*=\s*"\d')
+VERSION_IN_SOURCE = re.compile(
+    r"""
+      __version__        # a module attribute
+    | version\s*=\s*"\d  # or a literal handed to click
+    """,
+    re.VERBOSE,
+)
 
 #: The option, wherever it is constructed.
 VERSION_OPTION = re.compile(r"click\.version_option\(")
@@ -369,7 +381,7 @@ def test_the_version_is_declared_in_exactly_one_place() -> None:
 
 
 def test_the_version_control_catches_a_second_declaration() -> None:
-    """The mutation check on all three extractors. Each is fed the shape it
+    """The mutation check on every extractor. Each is fed the shape it
     exists to refuse, and must report it — a guard that matched nothing would
     pass the control above forever."""
     twice = 'version = "0.1.0"\n[tool.other]\nversion = "9.9.9"\n'
@@ -382,8 +394,8 @@ def test_the_version_control_catches_a_second_declaration() -> None:
 
 
 def test_both_entry_points_report_the_number_pyproject_declares() -> None:
-    """Moved here from `test_cli.py`, which asserted only that the word
-    `fileplan` appeared. The number is the half that can drift."""
+    """The number, not only the word `fileplan`: the number is the half that
+    can drift."""
     for argv in (["fileplan"], [sys.executable, "-m", "fileplan"]):
         out = subprocess.run(
             [*argv, "--version"], capture_output=True, text=True, check=True
@@ -396,7 +408,7 @@ def test_the_version_answers_outside_a_plan_tree(tmp_path: Path) -> None:
     """A stranger's first command after installing. The number is a fact about
     the tool; which states exist is a fact about the workflow, and refusing the
     first because the second has no answer yet would read as a broken install.
-    See docs/reference.md#the-version."""
+    See examples/docs/reference.md#the-version."""
     result = subprocess.run(
         ["fileplan", "--version"],
         cwd=tmp_path,
@@ -440,8 +452,7 @@ def unversioned(tmp_path: Path) -> Path:
     """A fixture tree that is not a git repo, with items in the state that
     asks git something. `tmp_path` is under the system temp directory, which
     has no `.git` above it, so the reader is asked and cannot answer."""
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    copy_fixture(tmp_path)
     declaration = load(tmp_path / PLAN_TOML_NAME)
     for state in declaration.states.values():
         (tmp_path / state.path).mkdir(parents=True, exist_ok=True)
@@ -475,9 +486,10 @@ def unversioned(tmp_path: Path) -> Path:
 def test_no_invocation_outside_a_git_repo_raises_a_traceback(
     unversioned: Path,
 ) -> None:
-    """The inherited behaviour, at the operator's contract rather than the
-    unit. Every listing puts the one git reader on the path, so a `NotGitRepository` escaping it would surface here as a
-    traceback rather than as a null column."""
+    """No traceback, at the operator's contract rather than the unit. Every
+    listing puts the one git reader on the path, so a `NotGitRepository`
+    escaping it would surface here as a traceback rather than as a null
+    column."""
     environment = {
         **without_the_override(),
         PLAN_TOML_ENV: str(unversioned / PLAN_TOML_NAME),

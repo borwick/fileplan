@@ -10,7 +10,7 @@ tries without blocking, writes one line to stderr naming the holder, then
 acquires and waits. The holder line carries the host as well as the pid. A pid
 means nothing on another machine.
 
-See docs/reference.md#the-lock
+See examples/docs/reference.md#the-lock
 """
 
 from __future__ import annotations
@@ -67,7 +67,12 @@ def describe_session() -> str:
     the process holding the flock, alive for the run, where
     `fileplan.claim.identity` names the session.
     """
-    return f"{socket.gethostname()} pid {os.getpid()}"
+    return holder(socket.gethostname(), os.getpid())
+
+
+def holder(host: str, pid: object) -> str:
+    """A holder as every message names one: `a-host.local pid 4213`."""
+    return f"{host} pid {pid}"
 
 
 def _holder(path: Path) -> str:

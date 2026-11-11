@@ -1,12 +1,11 @@
 """The refusal table for ``plan.toml``.
 
 Most of these are pure over dicts: no ``tmp_path``, no cwd, no filesystem.
-That is the whole reason `shape_errors` is split from `load` —
-the old tool's ~40 refusal tests ran instantly for the same reason.
+That is why `shape_errors` is split from `load`.
 
 The operator contract — rc 2, one ``ERROR:`` line on stderr, no traceback —
-is pinned below. "A refusal emits no JSON" was deferred here until ``--json``
-existed; it now lives in ``tests/test_cli.py``, beside the flag it is about.
+is pinned below. "A refusal emits no JSON" lives in ``tests/test_cli.py``,
+beside the flag it is about.
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 import pytest
-from conftest import DERIVABLE_KEYS, EXAMPLE, FIXTURE_FILES
+from conftest import EXAMPLE, FIXTURES, REPO, UNPRUNED, copy_fixture
 
 from fileplan import depends, subphase
 from fileplan.cli import main
@@ -31,28 +30,30 @@ from fileplan.declaration import (
     CAPABILITY_KEYS,
     CLAIM_KEYS,
     COMMAND_KEYS,
+    DERIVABLE,
     DERIVED_KEYS,
     DISSOLVING,
     EDIT_WRITES,
     FIRST_NUMBER,
     IDENTITY,
+    INTRINSIC_KEYS,
     KIND_HELP,
     KINDS,
     OPENED_FOR,
     PLAN_TOML_ENV,
+    RESERVED_KEYS,
     STALE_KEYS,
     STAYING,
     Declaration,
     Refusal,
     State,
+    _key_errors,
+    _key_reference_error,
     load,
     named,
     pointer_errors,
     shape_errors,
 )
-
-REPO = Path(__file__).resolve().parent.parent
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 #: Names that exist only in the suite's vocabulary. See the control tests.
 CONTROLS = ("greenhouse", "sprout", "cultivar")
@@ -135,23 +136,20 @@ def test_unknown_field_refuses_by_name(table: str, name: str, noun: str) -> None
 
 
 def test_a_state_declaring_an_exit_check_refuses_by_name() -> None:
-    """13-1 withdrew the field, so the same arm that catches a typo catches a
-    declaration written against the old vocabulary. It went because a state
-    with a *second* way out meaning the opposite of the first — this repo's
-    `archive-plan` against its `decline` — could never carry one rule, so the
-    completion conditions live on the completing verb's own `requires` and
-    `refuses` and grade one way out at a time."""
+    """13-1: a state carries no exit check; the arm that catches a typo
+    catches it. A state with a second way out meaning the opposite of the
+    first — this repo's `archive-plan` against its `decline` — could never
+    carry one rule, so completion conditions live on the completing verb's
+    own `requires` and `refuses` and grade one way out at a time."""
     document = well_formed()
     document["states"]["greenhouse"]["exit"] = {"requires": ["rootstock"]}
     assert "states.greenhouse.exit is not a state field" in shape_errors(document)
 
 
 def test_a_key_declaring_a_companion_refuses_by_name() -> None:
-    """Its neighbour, withdrawn in the same sub-phase and for its own reason:
-    the whole of `companion` was one load-time refusal of a `drops` naming the
-    key, for the one key that declared it, and this repo wrote that rule a
-    second time as a test over its own `plan.toml`
-    (`test_no_transition_this_repo_declares_drops_the_draft`)."""
+    """13-1: a key carries no `companion`. The rule it carried is a test over
+    this repo's own `plan.toml`: `test_docs.py`'s
+    `test_no_transition_this_repo_declares_drops_the_draft`."""
     document = well_formed()
     document["keys"]["rootstock"]["companion"] = True
     assert "keys.rootstock.companion is not a key field" in shape_errors(document)
@@ -229,9 +227,9 @@ def test_transition_missing_a_required_field_refuses(field: str) -> None:
 
 
 def test_a_key_and_a_transition_with_no_doc_load(tmp_path: Path) -> None:
-    """32-1: `doc` is optional everywhere, as it already was on a state. A
-    declaration naming no document at all loads with no document beside
-    it, and the loaded entries carry `None`."""
+    """32-1: `doc` is optional everywhere. A declaration naming no document
+    at all loads with no document beside it, and the loaded entries carry
+    `None`."""
     document = well_formed()
     for table in ("states", "keys", "transitions"):
         for entry in document[table].values():
@@ -268,7 +266,7 @@ def test_from_naming_an_undeclared_state_refuses() -> None:
 
 
 # --------------------------------------------------------------------------
-# Kinds: what a transition is, said once. See docs/reference.md#kinds
+# Kinds: what a transition is, said once. See examples/docs/reference.md#kinds
 # --------------------------------------------------------------------------
 
 
@@ -279,7 +277,7 @@ def test_a_transition_with_no_from_is_a_create() -> None:
     transplant = document["transitions"]["transplant"]
     transplant["kind"] = "create"
     del transplant["from"]
-    # The three fields that read the item it no longer has go with it.
+    # The fields that read an item go with it.
     for field in ("requires", "refuses", "drops"):
         transplant.pop(field, None)
     assert shape_errors(document) == []
@@ -325,9 +323,9 @@ def test_a_create_cannot_grade_or_edit_an_item(field: str, value: object) -> Non
 def test_a_transition_with_no_kind_refuses_naming_the_kind_its_fields_spell(
     fields: dict, kind: str
 ) -> None:
-    """30-1: `kind` is required, and a plan.toml written before it refuses
-    with the line to write. The kind is read off the fields that spelled it,
-    so the refusal is the migration."""
+    """30-1: `kind` is required, and a transition without one refuses with
+    the line to write. The kind is read off the fields that spell it, so the
+    refusal is the migration."""
     document = well_formed()
     document["transitions"]["graft-on"] = {
         "doc": "method.md#graft",
@@ -353,8 +351,8 @@ def test_a_transition_with_no_kind_refuses_naming_the_kind_its_fields_spell(
 def test_a_field_that_spelled_a_kind_refuses_naming_the_kind(
     field: str, kind: str
 ) -> None:
-    """The four fields whose only job was to say which kind a verb is are
-    gone. Each refuses by name, and says the line that replaces it."""
+    """A field whose only job is to say which kind a verb is refuses by
+    name, and says the line that replaces it."""
     document = well_formed()
     graft = {"doc": "method.md#graft", "help": "Graft.", "from": "orchard"}
     graft[field] = True
@@ -372,10 +370,10 @@ def test_a_field_that_spelled_a_kind_refuses_naming_the_kind(
     "field", ["mints", "dissolves", "absorbs", "retitles", "writes"]
 )
 def test_a_transition_carries_no_field_a_kind_replaced(field: str) -> None:
-    """30-2's done line: what the four fields said is the kind now, and the
-    placement gate reads the kind too. With no attribute left to read, a
-    branch in `cli.py` or `transition.py` that still asked would fail the
-    first time it ran, rather than answering from a second writer."""
+    """30-2: the kind says what these fields would, and the placement gate
+    reads the kind too. With no attribute to read, a branch in `cli.py` or
+    `transition.py` that asked would fail the first time it ran, rather than
+    answering from a second writer."""
     assert not hasattr(load(FIXTURES / "plan.toml").transitions["espalier"], field)
 
 
@@ -515,8 +513,8 @@ def test_without_every_kind_the_rules_across_tables_stay_quiet() -> None:
 def test_every_shipped_declaration_gives_every_transition_a_kind(
     source: Path,
 ) -> None:
-    """30-1's done line: the three declarations this repo keeps all load, and
-    every transition in each says its kind."""
+    """30-1: every declaration this repo keeps loads, and every transition in
+    each says its kind."""
     document = tomllib.loads(source.read_text())
     assert all(entry["kind"] in KINDS for entry in document["transitions"].values())
     assert shape_errors(document) == []
@@ -525,9 +523,8 @@ def test_every_shipped_declaration_gives_every_transition_a_kind(
 @pytest.mark.parametrize("field", ["requires", "sets", "drops"])
 def test_a_key_reference_to_an_intrinsic_key_refuses_by_name(field: str) -> None:
     """`sets = ["title"]` is not a typo — it is a retitle, which is a real
-    transition whose rule for inbound `after` edges is section 3's. Reading as
-    "undeclared key" would send someone to write `[keys.title]`, which refuses
-    too, one message later."""
+    transition. Reading as "undeclared key" would send someone to write
+    `[keys.title]`, which refuses too, one message later."""
     document = well_formed()
     document["transitions"]["transplant"][field] = ["title"]
     assert (
@@ -556,8 +553,7 @@ def test_declaring_a_key_a_listing_reads_off_the_tree_refuses_by_name(
     key in a head would be a second answer to a question the tree already
     answers, with the head's copy the one that lies. `slug` and `path` go with
     it because a row is a mapping and a silent overwrite is worse than a
-    refusal. (1-4's rule, in 1-1's validator: this is where a redeclaration
-    has to be refused.)"""
+    refusal."""
     document = well_formed()
     document["keys"][name] = {"doc": "method.md#cultivar"}
     assert [error for error in shape_errors(document) if f"keys.{name} " in error] == [
@@ -570,10 +566,261 @@ def test_declaring_a_key_a_listing_reads_off_the_tree_refuses_by_name(
     ]
 
 
+#: Every name a key or a transition may not take, with the full text of the
+#: refusal each ladder gives it: a redeclared key, and a `sets` naming it.
+#: Written out, so a change to either ladder's shape cannot move the wording.
+RESERVED_REFUSALS = [
+    (
+        "title",
+        (
+            'keys.title redeclares "title", which every item carries '
+            "intrinsically. An item is a head, a body, a location and a "
+            "name, and the tool already knows all four. Drop keys.title"
+        ),
+        (
+            'transitions.t.sets names "title", which is intrinsic to '
+            "every item rather than a declared key"
+        ),
+    ),
+    (
+        "position",
+        (
+            'keys.position redeclares "position", which the queued '
+            "capability gives an item in a state that opts into it. The "
+            "queued capability writes the key on the way in and drops it "
+            "on the way out. Drop keys.position"
+        ),
+        (
+            'transitions.t.sets names "position", which the queued '
+            "capability writes on entry and drops on exit by itself. "
+            "Naming the key here would be a second spelling that can "
+            'disagree with the capability. Drop "position" from '
+            "transitions.t.sets"
+        ),
+    ),
+    (
+        "number",
+        (
+            'keys.number redeclares "number", which the numbered '
+            "capability gives an item in a state that opts into it. The "
+            "numbered capability writes the key on the way in and drops "
+            "it on the way out. Drop keys.number"
+        ),
+        (
+            'transitions.t.sets names "number", which the numbered '
+            "capability writes on entry and drops on exit by itself. "
+            "Naming the key here would be a second spelling that can "
+            'disagree with the capability. Drop "number" from '
+            "transitions.t.sets"
+        ),
+    ),
+    (
+        "claimed-by",
+        (
+            'keys.claimed-by redeclares "claimed-by", which the claimed '
+            "capability reads off the tree (read: claimed-by, "
+            "claim-status, claim-holder). Who holds an item lives in "
+            "local/claims/ rather than in a head. Drop keys.claimed-by"
+        ),
+        (
+            'transitions.t.sets names "claimed-by", which the claimed '
+            "capability reads off local/claims/ rather than out of a "
+            "head. A claim's fields are read rather than written, so "
+            'there is nothing here to set. Drop "claimed-by" from '
+            "transitions.t.sets"
+        ),
+    ),
+    (
+        "claim-status",
+        (
+            'keys.claim-status redeclares "claim-status", which the '
+            "claimed capability reads off the tree (read: claimed-by, "
+            "claim-status, claim-holder). Who holds an item lives in "
+            "local/claims/ rather than in a head. Drop keys.claim-status"
+        ),
+        (
+            'transitions.t.sets names "claim-status", which the claimed '
+            "capability reads off local/claims/ rather than out of a "
+            "head. A claim's fields are read rather than written, so "
+            'there is nothing here to set. Drop "claim-status" from '
+            "transitions.t.sets"
+        ),
+    ),
+    (
+        "claim-holder",
+        (
+            'keys.claim-holder redeclares "claim-holder", which the '
+            "claimed capability reads off the tree (read: claimed-by, "
+            "claim-status, claim-holder). Who holds an item lives in "
+            "local/claims/ rather than in a head. Drop keys.claim-holder"
+        ),
+        (
+            'transitions.t.sets names "claim-holder", which the claimed '
+            "capability reads off local/claims/ rather than out of a "
+            "head. A claim's fields are read rather than written, so "
+            'there is nothing here to set. Drop "claim-holder" from '
+            "transitions.t.sets"
+        ),
+    ),
+    (
+        "sub-phases",
+        (
+            'keys.sub-phases redeclares "sub-phases", which every listing'
+            " counts off the item's own body. How many sub-phases a "
+            "section carries is counted from the bullets, and a key "
+            "beside them can only drift. Drop keys.sub-phases"
+        ),
+        (
+            'transitions.t.sets names "sub-phases", which every listing '
+            "derives from the item's own body. A derived key is read "
+            "rather than written, so there is nothing here to set. Drop "
+            '"sub-phases" from transitions.t.sets'
+        ),
+    ),
+    (
+        "sub-phases-left",
+        (
+            'keys.sub-phases-left redeclares "sub-phases-left", which '
+            "every listing counts off the bullets carrying no mark. A key"
+            " beside the bullets is a counter somebody has to remember to"
+            " decrement. Drop keys.sub-phases-left"
+        ),
+        (
+            'transitions.t.sets names "sub-phases-left", which every '
+            "listing derives from the item's own body. A derived key is "
+            "read rather than written, so there is nothing here to set. "
+            'Drop "sub-phases-left" from transitions.t.sets'
+        ),
+    ),
+    (
+        "next-sub-phase",
+        (
+            'keys.next-sub-phase redeclares "next-sub-phase", which every'
+            " listing reads off the item's own body. Which sub-phase "
+            "comes next is the cursor read against the bullets, and a key"
+            " beside them can only drift. Drop keys.next-sub-phase"
+        ),
+        (
+            'transitions.t.sets names "next-sub-phase", which every '
+            "listing derives from the item's own body. A derived key is "
+            "read rather than written, so there is nothing here to set. "
+            'Drop "next-sub-phase" from transitions.t.sets'
+        ),
+    ),
+    (
+        "blocked-by",
+        (
+            'keys.blocked-by redeclares "blocked-by", which every listing'
+            " derives from the tree around the item. What an item waits "
+            "on, and what waits on it, is read off the key its state "
+            "names, against what is still filed. Drop keys.blocked-by"
+        ),
+        (
+            'transitions.t.sets names "blocked-by", which every listing '
+            "derives from the tree around the item. A derived key is read"
+            " rather than written, so there is nothing here to set. Drop "
+            '"blocked-by" from transitions.t.sets'
+        ),
+    ),
+    (
+        "blocks",
+        (
+            'keys.blocks redeclares "blocks", which every listing derives'
+            " from the tree around the item. What an item waits on, and "
+            "what waits on it, is read off the key its state names, "
+            "against what is still filed. Drop keys.blocks"
+        ),
+        (
+            'transitions.t.sets names "blocks", which every listing '
+            "derives from the tree around the item. A derived key is read"
+            " rather than written, so there is nothing here to set. Drop "
+            '"blocks" from transitions.t.sets'
+        ),
+    ),
+    (
+        "stale-days",
+        (
+            'keys.stale-days redeclares "stale-days", which every listing'
+            " derives from git's record of when the file last changed. "
+            "Nothing is stored to make it, so a key beside git's record "
+            "can only go stale. Drop keys.stale-days"
+        ),
+        (
+            'transitions.t.sets names "stale-days", which every listing '
+            "derives from git's record of when the file last changed. A "
+            "derived key is read rather than written, so there is nothing"
+            ' here to set. Drop "stale-days" from transitions.t.sets'
+        ),
+    ),
+    (
+        "commands",
+        (
+            'keys.commands redeclares "commands", which every listing '
+            "derives from the transitions that could take the item. A key"
+            " beside them can only disagree with what a run does. Drop "
+            "keys.commands"
+        ),
+        (
+            'transitions.t.sets names "commands", which every listing '
+            "derives from the transitions that could take the item. A "
+            "derived key is read rather than written, so there is nothing"
+            ' here to set. Drop "commands" from transitions.t.sets'
+        ),
+    ),
+    (
+        "slug",
+        (
+            'keys.slug redeclares "slug", which every listing reads off '
+            "the tree (reserved: slug, state, path). An item's state is "
+            "the directory it sits in, and a key beside the tree can only"
+            " disagree with it. Drop keys.slug"
+        ),
+        ('transitions.t.sets names undeclared key "slug"'),
+    ),
+    (
+        "state",
+        (
+            'keys.state redeclares "state", which every listing reads off'
+            " the tree (reserved: slug, state, path). An item's state is "
+            "the directory it sits in, and a key beside the tree can only"
+            " disagree with it. Drop keys.state"
+        ),
+        ('transitions.t.sets names undeclared key "state"'),
+    ),
+    (
+        "path",
+        (
+            'keys.path redeclares "path", which every listing reads off '
+            "the tree (reserved: slug, state, path). An item's state is "
+            "the directory it sits in, and a key beside the tree can only"
+            " disagree with it. Drop keys.path"
+        ),
+        ('transitions.t.sets names undeclared key "path"'),
+    ),
+]
+
+
+def test_the_reserved_refusal_table_covers_every_reserved_name() -> None:
+    assert [name for name, _, _ in RESERVED_REFUSALS] == list(
+        dict.fromkeys(
+            [*INTRINSIC_KEYS, *CAPABILITY_KEYS.values(), *DERIVABLE, *RESERVED_KEYS]
+        )
+    )
+
+
+@pytest.mark.parametrize(("name", "redeclared", "referenced"), RESERVED_REFUSALS)
+def test_each_reserved_name_refuses_in_both_ladders_in_its_own_words(
+    name: str, redeclared: str, referenced: str
+) -> None:
+    """A `reserved` name has no arm in the reference ladder, so a `sets`
+    naming one reads as an undeclared key."""
+    assert _key_errors({name: {}}) == ([redeclared], {})
+    assert _key_reference_error("transitions.t", "sets", name, set()) == referenced
+
+
 def test_declaring_the_sub_phase_count_as_a_key_refuses_by_name() -> None:
     """The count is derived from the body, so a key beside it is a second
-    answer that can drift out of step with the bullets — which is the whole
-    reason sub-phases are counted rather than marked."""
+    answer that can drift out of step with the bullets."""
     document = well_formed()
     document["keys"][subphase.NAME] = {"doc": "method.md#cultivar"}
     assert [
@@ -601,7 +848,7 @@ def test_a_transition_naming_the_sub_phase_count_refuses(field: str) -> None:
 
 
 def test_a_declared_key_called_sub_phases_left_refuses_as_a_redeclaration() -> None:
-    """The rule `sub-phases` and `next-sub-phase` already keep, over the field
+    """The rule `sub-phases` and `next-sub-phase` keep, over the field
     that says how much of a section is left. The message names its own source
     — the bullets carrying no mark — because that sentence is what tells an
     operator where to go and look, which is why these are not folded into one.
@@ -624,8 +871,8 @@ def test_a_declared_key_called_sub_phases_left_refuses_as_a_redeclaration() -> N
 @pytest.mark.parametrize("field", ["requires", "sets", "drops", "refuses"])
 def test_a_transition_naming_the_count_left_refuses(field: str) -> None:
     """Read, not written, and it reaches this by being in
-    `subphase.DERIVED` — one arm over all three derived sets rather than a
-    third message spelled out."""
+    `subphase.DERIVED` — one arm over every derived name rather than a
+    message spelled out for each."""
     document = well_formed()
     named = {subphase.LEFT: ["x"]} if field == "refuses" else [subphase.LEFT]
     document["transitions"]["transplant"][field] = named
@@ -721,8 +968,7 @@ def test_a_cursor_naming_a_key_the_tool_owns_refuses() -> None:
 
 def test_a_state_may_declare_sub_phases_with_no_cursor() -> None:
     """Counting and pointing are separate opt-ins. A state that counts but has
-    no verb to advance a cursor yet is not a broken one — which is exactly
-    what this repo's own plan.toml is until 4-6."""
+    no verb to advance a cursor is not a broken one."""
     document = with_cursor(well_formed())
     document["states"]["orchard"].pop(subphase.CURSOR)
     document["states"]["orchard"].pop(subphase.STATUS)
@@ -773,8 +1019,7 @@ def test_refuses_on_presence_loads_beside_a_value_list(tmp_path: Path) -> None:
     """`key = true` refuses any value at all, and sits in the same table as a
     value list. The two are kept apart on the transition, so nothing reading
     `refuses` meets a boolean where it expected values."""
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    copy_fixture(tmp_path)
     plan = (
         (tmp_path / "plan.toml")
         .read_text()
@@ -852,11 +1097,11 @@ def test_refuses_naming_a_capabilitys_key_refuses_by_name() -> None:
 def test_declaring_a_key_the_claim_reads_off_the_tree_refuses_by_name(
     name: str,
 ) -> None:
-    """The names 2-4 reserves. A claim is not a key in a head — it is a record
-    under `local/claims/` — so a declared key of any of those names would be a second
-    answer to a question the record already answers. Reserved **without**
-    `well_formed()` claiming anything, like `position`: a plan.toml that grows
-    a claimed state later must not break a key that was legal before it."""
+    """2-4: a claim is not a key in a head — it is a record under
+    `local/claims/` — so a declared key of any of these names would be a
+    second answer to a question the record answers. Reserved **without**
+    `well_formed()` claiming anything, like `position`: adding a claimed state
+    to a plan.toml must not break a key it already declares."""
     document = well_formed()
     assert not any(
         "claimed" in state.get("capabilities", [])
@@ -917,7 +1162,7 @@ def test_a_capabilitys_key_is_carried_but_not_declared() -> None:
 
 
 def test_the_claimed_capability_is_implemented_and_gives_no_head_key() -> None:
-    """The second capability. Its state is a file under `local/claims/` rather
+    """A claim's state is a file under `local/claims/` rather
     than a line in a head, so it appears in `CAPABILITIES` and nowhere in
     `CAPABILITY_KEYS` — and an item in a claimed state carries no key by being
     there."""
@@ -935,8 +1180,8 @@ def test_the_claims_fields_are_carried_only_where_a_state_claims() -> None:
     the fields are given by the capability, exactly as `position` is.
 
     The negative half is graded on a document rather than on this repo's own
-    `plan.toml`, which claims from 4-4 onwards. That is the 1-1 lesson: the
-    suite must not depend on the host repo's vocabulary in either direction.
+    `plan.toml`, which claims: the suite must not depend on the host repo's
+    vocabulary in either direction.
     """
     declaration = load(FIXTURES / "plan.toml")
     assert declaration.has("claimed")
@@ -959,8 +1204,8 @@ def test_the_claims_fields_are_carried_only_where_a_state_claims() -> None:
 def claiming(document: dict, into: str = "orchard") -> dict:
     """``document`` with ``into`` claimed, and the verb that claims into it.
 
-    Both halves, always: from 4-4 a claimed state that no transition claims
-    into refuses on its own, so a helper that wrote only the capability would
+    Both halves, always: a claimed state that no transition claims into
+    refuses on its own, so a helper that wrote only the capability would
     be building a declaration the tool rightly rejects.
     """
     document["states"][into]["capabilities"] = ["claimed"]
@@ -969,7 +1214,7 @@ def claiming(document: dict, into: str = "orchard") -> dict:
 
 
 def test_a_claimed_state_with_no_identity_refuses_by_name() -> None:
-    """2-1's deferred question, answered. A claim records the session that
+    """2-1: a claim records the session that
     holds it, so a state that could never say whose a claim is cannot take
     one — and the operator hears it when the declaration is read rather than
     the first time a transition into it runs."""
@@ -1006,8 +1251,7 @@ def test_a_malformed_identity_is_one_complaint_not_two() -> None:
 def fixture_needing(tmp_path: Path, minimum: str, extra: str = "") -> Path:
     """The fixture, declaring the oldest tool it reads under, and whatever
     `extra` a newer release might have taught it."""
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    copy_fixture(tmp_path)
     source = tmp_path / "plan.toml"
     source.write_text(
         f'[fileplan]\nminimum = "{minimum}"\n\n{source.read_text()}{extra}'
@@ -1102,9 +1346,9 @@ def test_the_ignore_list_is_carried_on_the_declaration(tmp_path: Path) -> None:
 
 
 def test_a_transition_carries_what_it_claims() -> None:
-    """4-4's field, read off the declaration like every other. The fixture's
-    `tend` claims where it stands and `bench` — which arrives in the same
-    state — does not, which is the whole of the change stated as data."""
+    """4-4: `claims` is read off the declaration like every other field. The
+    fixture's `tend` claims where it stands and `bench` — which arrives in
+    the same state — does not, so the option comes from the verb."""
     declaration = load(FIXTURES / "plan.toml")
     assert declaration.transitions["tend"].claims
     assert declaration.transitions["pot-up"].claims
@@ -1116,7 +1360,7 @@ def test_a_transition_carries_what_it_claims() -> None:
 def test_a_claims_that_is_not_a_boolean_refuses() -> None:
     """A real boolean, not a string that reads like one. `claims = "false"` is
     truthy, so the spelling that looks safest is the one that would silently
-    claim — which is exactly the polarity this repo refuses."""
+    claim."""
     document = claiming(well_formed())
     document["transitions"]["transplant"]["claims"] = "true"
     document["identity"] = {"pid": ["GREENHOUSE_PID"]}
@@ -1127,7 +1371,7 @@ def test_a_claims_that_is_not_a_boolean_refuses() -> None:
 
 def test_claiming_into_a_state_that_does_not_claim_refuses_by_name() -> None:
     """A claim with no state to live in — the shape a cursor on a state that
-    counts no sub-phases already refuses. The verb would take a record on an
+    counts no sub-phases refuses too. The verb would take a record on an
     item nothing reports as held, which is a guarantee nobody can see."""
     document = well_formed()
     document["transitions"]["transplant"]["claims"] = True
@@ -1140,10 +1384,9 @@ def test_claiming_into_a_state_that_does_not_claim_refuses_by_name() -> None:
 
 
 def test_a_claimed_state_no_transition_claims_into_refuses_by_name() -> None:
-    """The other end of the same rule. From 4-4 nothing else can take a claim,
-    so a state that opts in with no verb claiming into it holds one session at
-    a time in name only — the make-problems-visible rule, and cheap
-    to satisfy."""
+    """The other end of the same rule. Nothing else takes a claim, so a state
+    that opts in with no verb claiming into it holds one session at a time in
+    name only."""
     document = well_formed()
     document["states"]["orchard"]["capabilities"] = ["claimed"]
     document["identity"] = {"pid": ["GREENHOUSE_PID"]}
@@ -1156,7 +1399,7 @@ def test_a_claimed_state_no_transition_claims_into_refuses_by_name() -> None:
 
 
 def test_a_verb_claiming_where_it_stands_satisfies_the_state() -> None:
-    """An in-place verb is what this repo's `plan` uses, and it counts: the
+    """An in-place verb is what this repo's `work` is, and it counts: the
     rule is that *some* transition claims into the state, not that one arrives
     from elsewhere. That is what lets work be claimed where it stands rather
     than having to move into a directory to be picked up."""
@@ -1179,9 +1422,8 @@ def test_a_verb_claiming_where_it_stands_satisfies_the_state() -> None:
 #
 # `sub-phase-cursor`'s shape one key over, so the arms are the cursor's arms:
 # the field names a **declared** key, and the row field derived from it is the
-# tool's and may not be redeclared. What is *new* here is nothing at all —
-# which is the point, because `_key_reference_error` already refuses every
-# name a dependency key may not be.
+# tool's and may not be redeclared. `_key_reference_error` refuses every name
+# a dependency key may not be.
 
 
 def with_dependencies(document: dict) -> dict:
@@ -1212,8 +1454,8 @@ def test_a_dependency_key_naming_an_undeclared_key_refuses_by_name() -> None:
 @pytest.mark.parametrize("name", ["position", "title", "blocked-by", "blocks"])
 def test_a_dependency_key_naming_a_key_the_tool_owns_refuses(name: str) -> None:
     """Through `_key_reference_error` and with no message of its own: a
-    capability-given key, an intrinsic one and a derived one are already
-    things a reference may not name, so this arm cost the tool no new words."""
+    capability-given key, an intrinsic one, and a derived one are things a
+    reference may not name."""
     document = with_dependencies(well_formed())
     document["states"]["orchard"][depends.FIELD] = name
     assert any(
@@ -1272,12 +1514,12 @@ def test_a_declaration_with_no_dependencies_carries_neither(
     """`counts_sub_phases`' rule one field over: the field and its filter are
     present on the one question, so where no state names a key there is
     nothing for `--has` to reach."""
-    source = tmp_path / "plan.toml"
-    source.write_text(
-        (FIXTURES / "plan.toml").read_text().replace('dependencies      = "after"', "")
+    source = copy_fixture(
+        tmp_path,
+        plan=(FIXTURES / "plan.toml")
+        .read_text()
+        .replace('dependencies      = "after"', ""),
     )
-    for name in FIXTURE_FILES[1:]:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
     declaration = load(source)
     assert not declaration.has_dependencies
     assert not {depends.BLOCKED, depends.BLOCKS} & set(declaration.carried)
@@ -1453,12 +1695,12 @@ def test_a_transition_naming_an_inverse_refuses_as_undeclared(field: str) -> Non
 
 
 def test_a_declaration_with_no_references_carries_no_inverse(tmp_path: Path) -> None:
-    source = tmp_path / "plan.toml"
-    source.write_text(
-        re.sub(r"(?m)^references\s*=.*\n", "", (FIXTURES / "plan.toml").read_text())
+    source = copy_fixture(
+        tmp_path,
+        plan=re.sub(
+            r"(?m)^references\s*=.*\n", "", (FIXTURES / "plan.toml").read_text()
+        ),
     )
-    for name in FIXTURE_FILES[1:]:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
     declaration = load(source)
     assert not declaration.has_references
     assert declaration.inverses == ()
@@ -1469,9 +1711,9 @@ def test_a_declaration_with_no_references_carries_no_inverse(tmp_path: Path) -> 
 # `opened-for`: which declared key says what an item here was opened for
 # --------------------------------------------------------------------------
 #
-# The dependency key's shape a second time, and since 13-2 literally the same
-# code: both fields go through `_key_field_errors`, so nothing new is graded
-# here and the two cannot drift apart. What the field gates is one refusal,
+# The dependency key's shape, and the same code (13-2): both fields go
+# through `_key_field_errors`, so nothing new is graded here and the two
+# cannot drift apart. What the field gates is one refusal,
 # `fileplan.transition.dangle_errors`, and that is graded there.
 
 
@@ -1509,8 +1751,8 @@ def test_an_owner_naming_an_undeclared_key_refuses_by_name() -> None:
 )
 def test_an_owner_naming_a_key_the_tool_owns_refuses(name: str) -> None:
     """Through `_key_reference_error` and with no message of its own: an
-    intrinsic, a capability-given and a derived name are already things a
-    reference may not be, so this field cost the tool no new words."""
+    intrinsic, a capability-given, and a derived name are things a reference
+    may not be."""
     document = with_an_owner(well_formed())
     document["states"]["greenhouse"][OPENED_FOR] = name
     assert any(
@@ -1526,10 +1768,9 @@ def test_an_owner_field_that_is_not_a_string_refuses() -> None:
 
 
 def test_both_fields_the_shared_grader_serves_refuse_in_the_same_words() -> None:
-    """13-2 collapsed two identical graders into `_key_field_errors`, and this
-    is what pins the collapse: the dependency field and the owner field are
-    the same rule, so a defect in either comes out in the same sentence with
-    only the field name differing."""
+    """13-2: the dependency field and the owner field are one rule in
+    `_key_field_errors`, so a defect in either comes out in the same sentence
+    with only the field name differing."""
     document = with_an_owner(well_formed())
     document["states"]["greenhouse"][OPENED_FOR] = "btach"
     document["states"]["greenhouse"][depends.FIELD] = "btach"
@@ -1539,10 +1780,9 @@ def test_both_fields_the_shared_grader_serves_refuse_in_the_same_words() -> None
 
 
 def test_a_state_pinned_to_the_old_sealing_vocabulary_refuses_by_name() -> None:
-    """`sealed-at` was the second half of the pair 13-2 took out with the
-    `edited` report. A declaration still carrying it must fail **loudly**
-    rather than have a field it declares silently ignored, which is what
-    `_unknown_fields` gives once the word leaves `STATE_FIELDS`."""
+    """13-2: `sealed-at` is not a state field. A declaration carrying it must
+    fail **loudly** rather than have a field it declares silently ignored;
+    `_unknown_fields` refuses it because it is not in `STATE_FIELDS`."""
     document = with_an_owner(well_formed())
     document["states"]["greenhouse"]["sealed-at"] = "cutting"
     assert any(
@@ -1590,8 +1830,8 @@ def test_declaring_the_stale_days_field_as_a_key_refuses_by_name() -> None:
 
 @pytest.mark.parametrize("field", ["requires", "sets", "drops", "refuses"])
 def test_a_transition_naming_the_stale_days_field_refuses(field: str) -> None:
-    """Read, not written — and the third source phrase the one generalised
-    arm carries, beside the body's and the tree's."""
+    """Read, not written — and a source phrase the one generalized arm
+    carries, beside the body's and the tree's."""
     document = well_formed()
     name = STALE_KEYS[0]
     document["transitions"]["transplant"][field] = (
@@ -1623,9 +1863,6 @@ def test_the_stale_field_is_carried_by_every_declaration() -> None:
 # --------------------------------------------------------------------------
 # `bulleted`: the capability that writes a body
 # --------------------------------------------------------------------------
-
-#: The fixture's pending bullet, in the fixture's vocabulary.
-UNPRUNED = "**unpruned — Say what the rest of the training is.**"
 
 
 def bulleted(document: dict) -> dict:
@@ -1697,7 +1934,7 @@ def test_a_name_form_on_a_state_that_mints_nothing_refuses_by_name() -> None:
 
 def test_a_form_naming_a_capability_key_the_state_does_not_give_refuses() -> None:
     """`bulleted`-requires-`numbered`, as a graded rule rather than a hard
-    coupling. The form is what names the key now, so the refusal is conditional
+    coupling. The form is what names the key, so the refusal is conditional
     on the form naming it — and it names the capability, generically, rather
     than spelling one key's name into the message."""
     document = bulleted(well_formed())
@@ -1713,10 +1950,8 @@ def test_a_form_naming_a_capability_key_the_state_does_not_give_refuses() -> Non
 
 
 def test_a_bulleted_state_that_needs_no_register_loads_clean() -> None:
-    """**The whole point of 7-1.** A state with no register, naming its
-    bullets off nothing but the ordinal, is a declaration the tool had no way
-    to express before the form was declared — `bulleted` required `numbered`
-    outright."""
+    """7-1: a state with no register, naming its bullets off nothing but the
+    ordinal, loads. `bulleted` does not require `numbered`."""
     document = bulleted(well_formed())
     document["states"]["orchard"]["capabilities"] = ["queued", "bulleted"]
     del document["states"]["orchard"]["archive"]
@@ -1725,8 +1960,8 @@ def test_a_bulleted_state_that_needs_no_register_loads_clean() -> None:
 
 
 def test_a_form_naming_a_key_nothing_declares_refuses_by_name() -> None:
-    """The defect the old coupling could not see at all: a field no item here
-    can hold would be spelled into every name as nothing at all."""
+    """A field no item here can hold would be spelled into every name as
+    nothing at all."""
     document = bulleted(well_formed())
     document["states"]["orchard"]["sub-phase-name"] = "{vintage}-{ordinal}"
     assert (
@@ -1758,8 +1993,7 @@ def test_a_form_may_name_an_ordinary_declared_key() -> None:
 )
 def test_a_form_that_is_not_one_is_named_at_load(form: str, said: str) -> None:
     """Graded through `subphase.form_errors`, which is the reader that will
-    have to strip a prefix off a name — the rule the pending bullet already
-    follows."""
+    have to strip a prefix off a name — the rule the pending bullet follows."""
     document = bulleted(well_formed())
     document["states"]["orchard"]["sub-phase-name"] = form
     (complaint,) = [
@@ -1977,7 +2211,7 @@ def test_a_mark_that_merges_is_well_formed() -> None:
 def test_merges_on_a_kind_that_is_not_a_mark_bullet_refuses_listing_the_fields() -> (
     None
 ):
-    """The kind table's rule, over the new rider: a fold is a disposition, and
+    """The kind table's rule, over a rider: a fold is a disposition, and
     only a mark-bullet disposes of a bullet."""
     document = bulleted(well_formed())
     document["transitions"]["espalier"]["merges"] = True
@@ -2056,13 +2290,11 @@ def test_a_word_that_could_not_be_written_is_graded_at_load() -> None:
 
 
 def test_a_bulleted_state_nothing_marks_into_loads_clean() -> None:
-    """**No inert-half rule**, and the asymmetry is deliberate. A `bulleted`
-    state nothing *mints* into can never do anything and refuses; one nothing
-    *marks* into is a real shape, graded here over a synthetic document.
-    `plan` was the local instance until section 12 gave it dispositions, and
-    nothing in this repo or the fixture is that shape now — which is why the
-    document under test is the only witness left. `_archiving_errors` records
-    the same asymmetry for `archives`."""
+    """**No inert-half rule.** A `bulleted` state nothing *mints* into can
+    never do anything and refuses; one nothing *marks* into is a real shape.
+    Nothing in this repo or the fixture is that shape, so a synthetic
+    document is the witness. `_archiving_errors` records the same asymmetry
+    for `archives`."""
     assert shape_errors(bulleted(well_formed())) == []
 
 
@@ -2094,8 +2326,8 @@ def test_a_verb_that_files_and_marks_is_well_formed() -> None:
 
 
 def test_a_transition_carries_the_table_it_files_by() -> None:
-    """`marks`' field one half along: a **table**, because the three facts are
-    one capability and each role wants a name. The fixture's `line-out` files
+    """`marks`' field one half along: a **table**, because the facts are one
+    capability and each role wants a name. The fixture's `line-out` files
     and `pot-on` beside it does not, which is what says the options come from
     the verb rather than from the state they share."""
     declaration = load(FIXTURES / "plan.toml")
@@ -2120,7 +2352,7 @@ def test_a_filing_verb_reads_the_keys_it_writes_onto_the_filed_item() -> None:
 
 def test_a_files_that_is_not_a_table_refuses_and_the_rest_stay_quiet() -> None:
     """One complaint per defect: a `files` that is not a table has no roles to
-    grade, so grading them would be four messages about one mistake."""
+    grade, so grading them would be a message per role about one mistake."""
     document = filing(well_formed())
     document["transitions"]["pot-on"]["files"] = "greenhouse"
     assert [
@@ -2147,7 +2379,7 @@ def test_an_unknown_filing_role_refuses_by_name() -> None:
 @pytest.mark.parametrize("role", ["state", "item", "name"])
 def test_a_missing_filing_role_refuses_by_name(role: str) -> None:
     """The other direction, and it is checkable because the roster is
-    **fixed**: a filing names all three or it is not a filing."""
+    **fixed**: a filing names every role or it is not a filing."""
     document = filing(well_formed())
     del document["transitions"]["pot-on"]["files"][role]
     assert (
@@ -2177,8 +2409,8 @@ def test_filing_into_an_undeclared_state_refuses_naming_it() -> None:
 def test_filing_into_a_state_that_writes_on_arrival_refuses_by_name(
     capability: str,
 ) -> None:
-    """**A filed item is filed, not placed.** Each of the two writes a head
-    key on arrival, and honouring one would mean running the entry arms
+    """**A filed item is filed, not placed.** Each capability writes a head
+    key on arrival, and honoring one would mean running the entry arms
     against a second destination — machinery with one caller."""
     document = filing(well_formed())
     document["states"]["greenhouse"]["capabilities"] = [capability]
@@ -2207,11 +2439,11 @@ def test_filing_into_a_claimed_state_refuses_for_the_claims_reason() -> None:
 def test_the_kind_tables_agree() -> None:
     """34-2 f4, f5 and f7: the partition, the edit's fields and the help are
     each derived from `KINDS` or held to it here."""
-    assert STAYING | DISSOLVING == {
+    assert {
         kind
         for kind, fields in KINDS.items()
         if "to" not in fields and "from" in fields
-    }
+    } == STAYING | DISSOLVING
     assert not STAYING & DISSOLVING
     assert set(KIND_HELP) == set(KINDS)
     assert set(ARCHIVING_HELP) <= {k for k, f in KINDS.items() if "archives" in f}
@@ -2221,8 +2453,7 @@ def test_the_kind_tables_agree() -> None:
 @pytest.mark.parametrize("role", ["item", "name"])
 def test_a_filing_role_naming_an_undeclared_key_refuses(role: str) -> None:
     """Through `_key_reference_error`, so the message is the one `requires`
-    and `sets` already give — one rule, and the refusal an operator has
-    already read once."""
+    and `sets` give — one rule, and a refusal an operator has read before."""
     document = filing(well_formed())
     document["transitions"]["pot-on"]["files"][role] = "cuttng"
     assert (
@@ -2244,8 +2475,7 @@ def test_a_filing_role_naming_an_intrinsic_key_refuses_as_intrinsic() -> None:
 
 def test_one_key_holding_both_halves_of_the_provenance_refuses() -> None:
     """Two facts, two keys. A single key holding the carrier and the bullet is
-    a value nothing can join on, which is the whole reason the pair is a
-    pair."""
+    a value nothing can join on."""
     document = filing(well_formed())
     document["transitions"]["pot-on"]["files"]["name"] = "batch"
     assert (
@@ -2257,9 +2487,9 @@ def test_one_key_holding_both_halves_of_the_provenance_refuses() -> None:
 
 
 def test_a_filing_with_no_keys_of_its_own_loads_clean() -> None:
-    """`sets` is the one optional field, not a fourth role: a `files` table
-    naming only the three roles is the shape the worked example,
-    `examples/plan.toml`, has."""
+    """`sets` is the one optional field, not a role: a `files` table naming
+    only its roles is the shape the worked example, `examples/plan.toml`,
+    has."""
     document = filing(well_formed())
     assert "sets" not in document["transitions"]["pot-on"]["files"]
     assert shape_errors(document) == []
@@ -2273,8 +2503,8 @@ def test_a_filing_that_sets_a_declared_key_loads_clean() -> None:
 
 def test_sets_beside_files_refuses_and_names_files_sets() -> None:
     """**Which head does the key land on?** A transition-level `sets` on a
-    verb that files would say nothing about it, and the run used to write the
-    key onto the carrier without a word. The dissolve rule is the precedent:
+    verb that files would say nothing about it. The dissolve rule is the
+    precedent:
     a field the verb's own halves make wrong refuses at load, by name."""
     document = filing(well_formed())
     document["transitions"]["pot-on"]["sets"] = ["cultivar"]
@@ -2346,10 +2576,10 @@ def test_a_files_sets_naming_its_own_transition_refuses() -> None:
 
 
 def test_a_state_nothing_files_into_loads_clean() -> None:
-    """**Filing has no state half at all**, which is `dated`'s shape inverted:
-    nothing about a state says items may be filed into it, so there is no
-    inert half to refuse. `greenhouse` in `well_formed` is filed into by
-    nothing and is a legitimate declaration."""
+    """**Filing has no state half at all**: nothing about a state says items
+    may be filed into it, so there is no inert half to refuse. `greenhouse`
+    in `well_formed` is filed into by nothing and is a legitimate
+    declaration."""
     assert shape_errors(well_formed()) == []
 
 
@@ -2421,7 +2651,7 @@ def test_a_floor_on_a_state_that_mints_no_number_refuses_by_name() -> None:
 
 
 def test_a_numbered_state_with_no_floor_loads_and_begins_at_one() -> None:
-    """The asymmetry with `archive`, deliberately: an archive is a document
+    """The asymmetry with `archive`: an archive is a document
     that must exist to be read, and a floor is a bound with a correct default.
     Absence is the ordinary case and the worked example is it."""
     document = floored(well_formed(), 192)
@@ -2432,24 +2662,20 @@ def test_a_numbered_state_with_no_floor_loads_and_begins_at_one() -> None:
 
 
 def test_pointers_are_chased_only_once_the_shape_holds(tmp_path: Path) -> None:
-    """`load` runs `shape_errors` first and reaches `pointer_errors` only on
-    an empty result, and `_pointers` **relies** on that: it carries no type
-    guards, because by then a table is a table and an entry is a table.
+    """10-6a f24: `load` runs `shape_errors` first and reaches
+    `pointer_errors` only on an empty result, and `_pointers` **relies** on
+    that: it carries no type guards, because by then a table is a table and
+    an entry is a table. Nothing else pins the ordering, so a reorder would
+    crash silently.
 
-    This is the machine-checked reason those guards were safe to delete
-    (10-6a, f24). Nothing else pinned the ordering, so a reorder would have
-    brought the crash back silently — the f5 lesson inverted, where a guard
-    was kept *because* a test pinned it.
-
-    Three shape defects, one per deleted guard. Only the first is **loud** if
-    the ordering is inverted — `"nope".items()` raises — and that is the one
-    that gives this test its teeth; the other two would go quiet instead,
-    reading a `doc` out of a string by substring, which is worse. All three
-    are here so the contract is stated where it is relied on rather than only
-    where it happens to bite.
+    One shape defect per guard `_pointers` goes without. Only the first is
+    **loud** if the ordering is inverted — `"nope".items()` raises — and that
+    is the one that gives this test its teeth; the others would go quiet
+    instead, reading a `doc` out of a string by substring, which is worse.
+    All are here so the contract is stated where it is relied on rather than
+    only where it happens to bite.
     """
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    copy_fixture(tmp_path)
     written = (tmp_path / "plan.toml").read_text()
 
     defects = {
@@ -2473,9 +2699,8 @@ def test_pointers_are_chased_only_once_the_shape_holds(tmp_path: Path) -> None:
 
 def test_a_declared_floor_reaches_the_state(tmp_path: Path) -> None:
     """The field is read off the declaration rather than recomputed, which is
-    what the two call sites hand to `numbered`."""
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    what its call sites hand to `numbered`."""
+    copy_fixture(tmp_path)
     written = (tmp_path / "plan.toml").read_text()
     (tmp_path / "plan.toml").write_text(
         written.replace(
@@ -2542,7 +2767,7 @@ def test_an_archives_that_is_not_a_boolean_refuses() -> None:
 def test_archives_out_of_a_state_that_mints_no_number_refuses_by_name() -> None:
     """An entry's heading is `## <number>. <title>`, and a state that mints no
     number has nothing to name one by. It covers the archive document too: a
-    numbered state with none already refuses, so one rule reaches both."""
+    numbered state with none refuses, so one rule reaches both."""
     document = archiving(well_formed())
     document["states"]["orchard"]["capabilities"] = ["queued"]
     del document["states"]["orchard"]["archive"]
@@ -2589,7 +2814,7 @@ def test_a_move_out_of_a_numbered_state_that_does_not_archive_refuses() -> None:
     drops the number with no entry, and the next mint refuses on the gap, far
     from the cause. If the item held the highest number, nothing refuses at
     all and the number is minted again. `archives = false` is the same verb
-    written out. See docs/reference.md#the-register"""
+    written out. See examples/docs/reference.md#the-register"""
     for archives in (None, False):
         document = archiving(well_formed())
         grub_out = document["transitions"]["grub-out"]
@@ -2621,7 +2846,7 @@ def test_a_close_out_of_a_numbered_state_that_does_not_archive_refuses() -> None
 
 def test_a_merge_out_of_a_numbered_state_refuses_outright() -> None:
     """A merge cannot archive, so there is no line to add to it. The refusal
-    names the two shapes that work instead."""
+    names the shapes that work instead."""
     document = archiving(well_formed())
     document["transitions"]["inarch"] = {
         "kind": "merge",
@@ -2675,7 +2900,7 @@ def test_a_verb_that_archives_and_dissolves_is_well_formed() -> None:
 
 
 def test_a_verb_that_dissolves_alone_is_well_formed() -> None:
-    """**`dissolves` is not a rider on `archives`.** 5-3's `merge` dissolves an
+    """**`dissolves` is not a rider on `archives`.** A `merge` dissolves an
     unnumbered item, which cannot archive at all, so a refusal tying the two
     together would make that declaration impossible to write."""
     document = dissolving(well_formed())
@@ -2685,7 +2910,7 @@ def test_a_verb_that_dissolves_alone_is_well_formed() -> None:
 
 
 def test_a_transition_carries_whether_it_dissolves() -> None:
-    """The fixture's two shapes, read off the declaration: `fell` archives and
+    """The fixture's shapes, read off the declaration: `fell` archives and
     dissolves, `compost` only dissolves, and `grub-out` — which archives out of
     the same state `fell` does — dissolves nothing."""
     declaration = load(FIXTURES / "plan.toml")
@@ -2745,9 +2970,9 @@ def test_a_field_that_writes_the_item_refuses_on_a_close(
 
 @pytest.mark.parametrize("field", ["requires", "refuses", "archives"])
 def test_what_grades_or_records_survives_beside_dissolves(field: str) -> None:
-    """The complement of the arm above, and the reason it is not five fields.
-    `requires` and `refuses` read the head *before* it goes; `archives` exists
-    precisely so something outlives the file."""
+    """The complement of the arm above. `requires` and `refuses` read the
+    head *before* it goes; `archives` exists precisely so something outlives
+    the file."""
     document = dissolving(well_formed())
     document["transitions"]["grub-out"][field] = (
         {"cultivar": ["hybrid"]}
@@ -2785,7 +3010,7 @@ def test_a_verb_that_dissolves_and_absorbs_is_well_formed() -> None:
 
 def test_a_transition_carries_whether_it_absorbs() -> None:
     """The fixture's shapes read off the declaration: `inarch` absorbs, and
-    the three verbs that dissolve or archive without absorbing do not."""
+    the verbs that dissolve or archive without absorbing do not."""
     declaration = load(FIXTURES / "plan.toml")
     assert declaration.transitions["inarch"].kind == "merge"
     assert declaration.transitions["compost"].kind == "close"
@@ -2794,8 +3019,7 @@ def test_a_transition_carries_whether_it_absorbs() -> None:
 
 def test_a_dissolving_verb_that_archives_out_of_an_unnumbered_state_refuses() -> None:
     """The `to`-less shape must not slip past `_archiving_errors`. Skipping it
-    there would let this load and fail at the *run* instead, which is the
-    polarity this repo refuses."""
+    there would let this load and fail at the *run* instead."""
     document = dissolving(well_formed())
     document["transitions"]["grub-out"]["from"] = "greenhouse"
     assert (
@@ -2819,9 +3043,9 @@ def test_a_numbered_state_with_no_archive_refuses_by_name() -> None:
 
 
 def test_an_archive_on_a_state_that_mints_nothing_refuses_by_name() -> None:
-    """The other end of the same rule, and the shape 4-2's cursor and 4-4's
-    `claims` both already refuse: a field nothing reads is a declaration that
-    silently does nothing."""
+    """The other end of the same rule, and the shape a cursor and `claims`
+    refuse too: a field nothing reads is a declaration that silently does
+    nothing."""
     document = well_formed()
     document["states"]["orchard"]["archive"] = "archive.md"
     assert (
@@ -2936,7 +3160,7 @@ def test_the_shipped_declaration_and_the_fixture_both_still_load() -> None:
 @pytest.mark.parametrize("field", ["requires", "sets", "drops"])
 def test_a_transition_naming_the_register_key_refuses_by_name(field: str) -> None:
     """The generic refusal reads `CAPABILITY_KEYS` rather than naming a key,
-    so the second capability cost it no line at all — this is what says so."""
+    so `number` needs no line of its own."""
     document = well_formed()
     document["transitions"]["transplant"][field] = ["number"]
     assert (
@@ -2949,10 +3173,8 @@ def test_a_transition_naming_the_register_key_refuses_by_name(field: str) -> Non
 
 
 def test_unknown_capability_refuses_by_name() -> None:
-    """`sized` is nobody's yet, so it is still refused by name. The example
-    moved off `numbered` when 4-5 implemented it, off `bulleted` when 4-5a
-    did and off `dated` when 3-3 did — which is the discipline working, not a
-    test going stale."""
+    """`sized` is no capability, so it is refused by name. When a name is
+    implemented, the example moves to one that is not."""
     document = well_formed()
     document["states"]["orchard"]["capabilities"] = ["sized"]
     assert (
@@ -3000,7 +3222,7 @@ def test_empty_values_is_a_closed_set_with_nothing_in_it() -> None:
 #
 # The field the fixture's `pest` declares. It answers a different question
 # from `values`, which is the closed set a key may hold: this one says how
-# many of them the head carries. The refusals below are the two that would
+# many of them the head carries. The refusals below are the ones that would
 # otherwise be silent — a `list-valued = "true"` that reads as truthy, and a
 # field where the tool itself puts or reads exactly one value.
 
@@ -3017,8 +3239,7 @@ def test_a_list_valued_key_is_well_formed_and_carries_the_flag(
     """Declaring it is legal, and it reaches the loaded `Key`: the option
     repeats, the executor grades the shape, and both read the flag."""
     assert shape_errors(list_valued(well_formed())) == []
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    copy_fixture(tmp_path)
     declaration = load(tmp_path / "plan.toml")
     assert declaration.keys["pest"].list_valued is True
     assert declaration.keys["cultivar"].list_valued is False
@@ -3035,7 +3256,7 @@ def test_a_list_valued_flag_that_is_not_a_boolean_refuses() -> None:
 
 # --------------------------------------------------------------------------
 # `directory`: a key whose values are files in one directory.
-# See docs/reference.md#directory
+# See examples/docs/reference.md#directory
 # --------------------------------------------------------------------------
 
 
@@ -3055,8 +3276,7 @@ def test_a_key_carries_the_directory_it_declares(tmp_path: Path) -> None:
     (tmp_path / "sketches").mkdir()
     assert shape_errors(document) == []
     assert _directory_errors(document, tmp_path) == []
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    copy_fixture(tmp_path)
     declaration = load(tmp_path / "plan.toml")
     assert declaration.keys["notebook"].directory is None
 
@@ -3108,9 +3328,7 @@ def test_two_keys_naming_one_directory_refuse_naming_both(tmp_path: Path) -> Non
 
 #: Every field where the tool itself puts or reads exactly one value, with
 #: where it is declared in the fixture. Graded over the fixture rather than
-#: over `well_formed()` because all six are declared there already: the two
-#: cursor fields on `orchard`, the owner field on `propagator`, and the
-#: two filing roles on `line-out`.
+#: over `well_formed()` because the fixture declares every one of them.
 SINGLE_VALUE = [
     ("states.orchard", subphase.CURSOR),
     ("states.orchard", subphase.STATUS),
@@ -3128,8 +3346,8 @@ def fixture_document() -> dict:
 def test_a_single_value_field_naming_a_list_valued_key_refuses(
     where: str, field: str
 ) -> None:
-    """One rule over a roster rather than six rules beside six fields. The
-    cursor half already refused at runtime, loudly and unreadably; the filing
+    """One rule over a roster rather than a rule beside each field. Without
+    it the cursor half refuses at runtime, loudly and unreadably; the filing
     roles are the silent half — the run stamps a bare slug into a key declared
     to hold a list and nothing says a word."""
     document = fixture_document()
@@ -3148,7 +3366,7 @@ def test_a_single_value_field_naming_a_list_valued_key_refuses(
 
 
 def test_dependencies_naming_a_list_valued_key_loads_clean() -> None:
-    """The deliberate exception, and the reason is `depends`' own: a bare
+    """The exception, and the reason is `depends`' own: a bare
     string is one edge and a list is many, so a list-valued dependency key is
     the case that already works rather than the one that breaks."""
     document = fixture_document()
@@ -3244,6 +3462,22 @@ def test_a_fixed_value_a_list_valued_key_cannot_hold_refuses(value: object) -> N
     ]
 
 
+def test_a_fixed_entry_holding_a_comma_refuses_where_a_list_valued_key_holds_it() -> (
+    None
+):
+    """`--has 'KEY:a,b'` reads a comma as a separator, so the entry could
+    never be matched. A key holding one value is never split, so it may."""
+    document = stamping(list_valued(well_formed()), rootstock=["m9,m26"])
+    assert shape_errors(document) == [
+        (
+            'transitions.transplant.sets.rootstock holds "m9,m26", and --has '
+            "reads a comma as a separator between values, so no filter could "
+            "match it. Write each value as its own list entry"
+        )
+    ]
+    assert shape_errors(stamping(well_formed(), rootstock="m9,m26")) == []
+
+
 def test_a_fixed_value_outside_the_closed_set_refuses() -> None:
     assert shape_errors(stamping(well_formed(), cultivar="grafted")) == [
         (
@@ -3277,7 +3511,7 @@ def test_sets_that_is_neither_a_list_nor_a_table_refuses() -> None:
 
 
 def test_the_list_form_is_the_table_with_every_key_true(tmp_path: Path) -> None:
-    """Shorthand, so no `plan.toml` written before the table changes."""
+    """Shorthand, so a `plan.toml` that writes the list loads unchanged."""
     loaded = []
     for sets in ('["rootstock"]', "{ rootstock = true }"):
         source = tmp_path / "plan.toml"
@@ -3353,7 +3587,8 @@ def test_a_well_formed_identity_has_no_errors() -> None:
 def test_no_identity_table_is_not_an_error() -> None:
     """There is no default and no requirement: an absent `[identity]` means
     no identity is available. Whether a `claimed` state may be declared
-    without one is 2-2's refusal to write, not this one's."""
+    without one is `test_a_claimed_state_with_no_identity_refuses_by_name`'s
+    rule, not this one's."""
     assert "identity" not in well_formed()
     assert shape_errors(well_formed()) == []
 
@@ -3432,8 +3667,8 @@ def test_a_loaded_declaration_carries_the_declared_names_in_order() -> None:
 
 
 def test_a_templates_table_refuses_naming_what_replaces_it() -> None:
-    """A template copied a document into a new item. `--body - < FILE` does
-    the same with no declaration at all, so the table refuses and says so."""
+    """`--body - < FILE` copies a document into a new item with no
+    declaration at all, so a `templates` table refuses and says so."""
     document = well_formed()
     document["templates"] = {"hardwood": {"doc": "hardwood-cuttings.md"}}
     assert (
@@ -3444,9 +3679,8 @@ def test_a_templates_table_refuses_naming_what_replaces_it() -> None:
 
 @pytest.mark.parametrize("value", [True, False])
 def test_seeds_refuses_naming_what_replaces_it(value: bool) -> None:
-    """Presence is what is graded, as for every field the tool no longer
-    reads: `seeds = false` says something about a transition that cannot be
-    true of it any more."""
+    """Presence is what is graded, as for every retired field: even
+    `seeds = false` names a field the tool does not read."""
     document = well_formed()
     document["transitions"]["sprout"]["seeds"] = value
     assert (
@@ -3510,7 +3744,7 @@ def test_a_valid_pointer_has_no_errors() -> None:
 def test_a_path_outside_the_root_is_named_as_given(tmp_path: Path) -> None:
     """A message names a file the way a row does, from the folder holding
     plan.toml. A path outside it has no such form, so it is named as given.
-    See docs/reference.md#the-listing"""
+    See examples/docs/reference.md#the-listing"""
     root = tmp_path / "tree"
     assert named(root / "greenhouse" / "x.md", root) == "greenhouse/x.md"
     assert named(Path("/elsewhere/x.md"), root) == "/elsewhere/x.md"
@@ -3580,8 +3814,7 @@ def test_plan_toml_is_found_by_walking_up_from_a_subdirectory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv(PLAN_TOML_ENV, raising=False)
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    copy_fixture(tmp_path)
     deep = tmp_path / "one" / "two"
     deep.mkdir(parents=True)
     monkeypatch.chdir(deep)
@@ -3638,7 +3871,7 @@ def test_an_empty_env_override_still_does_not_fall_back(
 
 
 def test_transitions_iterate_in_toml_document_order() -> None:
-    """1-3 registers subcommands from this order, so it is not incidental."""
+    """1-3: subcommands register in this order, so it is not incidental."""
     declaration = load(FIXTURES / "plan.toml")
     assert list(declaration.transitions) == [
         "transplant",
@@ -3797,8 +4030,8 @@ def test_the_repos_own_plan_toml_loads_clean() -> None:
 
 
 def test_this_repos_plan_state_declares_two_marking_verbs() -> None:
-    """Section 12's premise, as a fact about the shipped declaration rather
-    than about the tool: completion is a word on the bullet, so `plan` carries
+    """A fact about the shipped declaration rather than about the tool:
+    completion is a word on the bullet, so `plan` carries
     dispositions the way `carrier` does. Two words rather than one, because a
     sub-phase nobody will do needs an exit that is not a `done` that lies."""
     declaration = load(EXAMPLE)
@@ -3817,7 +4050,7 @@ def test_derived_lists_the_gated_names_in_table_order() -> None:
     """The fixture opts into every gate, so `derived` is the whole roster
     — and in the roster's order, which is the order a row spells them."""
     declaration = load(FIXTURES / "plan.toml")
-    assert declaration.derived == (*DERIVABLE_KEYS, *declaration.inverses)
+    assert declaration.derived == (*DERIVABLE, *declaration.inverses)
     assert declaration.derived == (
         *CLAIM_KEYS,
         *subphase.DERIVED,
@@ -3831,8 +4064,8 @@ def test_derived_lists_the_gated_names_in_table_order() -> None:
 def test_a_declaration_with_no_such_state_derives_only_the_age() -> None:
     """Each gate off, so each name absent — the corpus-independence rule from
     the other side — except `stale-days`, which needs no switch (31-1).
-    Graded on a document rather than on the worked example, which
-    claims and counts from section 4 onwards."""
+    Graded on a document rather than on the worked example, which claims and
+    counts."""
     plain = Declaration(
         source=FIXTURES / "plan.toml",
         root=FIXTURES,
@@ -3841,15 +4074,13 @@ def test_a_declaration_with_no_such_state_derives_only_the_age() -> None:
         transitions={},
     )
     assert plain.derived == STALE_KEYS
-    for name in DERIVABLE_KEYS:
+    for name in DERIVABLE:
         assert (name in plain.carried) == (name in STALE_KEYS)
 
 
 def test_every_derived_name_is_carried() -> None:
     """`carried` is what `--has` and `--lacks` reach, so a derived key it
-    omitted would be a field on every row that no filter could name. That is
-    exactly what `sub-phases` was before 3-4, and the fold is what showed
-    it."""
+    omitted would be a field on every row that no filter could name."""
     declaration = load(FIXTURES / "plan.toml")
     assert set(declaration.derived) <= set(declaration.carried)
     assert subphase.NAME in declaration.carried
@@ -3860,7 +4091,7 @@ def test_no_derived_name_is_also_a_declared_key() -> None:
     redeclaration — which the refusal tests above grade one at a time. Here
     is the same fact said over the whole roster at once."""
     declaration = load(FIXTURES / "plan.toml")
-    for name in DERIVABLE_KEYS:
+    for name in DERIVABLE:
         assert name not in declaration.keys
 
 
@@ -3890,12 +4121,11 @@ def test_the_roster_gates_read_the_declaration_and_nothing_else() -> None:
 # --------------------------------------------------------------------------
 #
 # `_state_errors` walks the states table and skips an entry that is not a
-# table, having said so once. Two arms do not reach a state that way: they
-# are handed a *name* by a transition and look it up. Both then asked the
-# entry what capabilities it declares, and a string does not answer — so a
-# `plan.toml` that should have refused by name raised an AttributeError
-# instead, which is the one outcome `docs/reference.md` says a malformed
-# declaration never produces.
+# table, having said so once. Some arms do not reach a state that way: they
+# are handed a *name* by a transition and look it up, then ask the entry what
+# capabilities it declares, and a string does not answer. Each must refuse by
+# name rather than raise an AttributeError, which is the one outcome
+# `examples/docs/reference.md` says a malformed declaration never produces.
 
 
 def test_a_filing_state_that_is_not_a_table_refuses_rather_than_raising() -> None:
@@ -3919,8 +4149,8 @@ def test_a_filing_state_that_is_not_a_table_refuses_rather_than_raising() -> Non
 
 
 def test_an_archiving_source_that_is_not_a_table_refuses_rather_than_raising() -> None:
-    """`archives` reaches its source state by name, one arm over, and had the
-    same hole — one defect with two sites, so it gets two tests."""
+    """`archives` reaches its source state by name too, one arm over, so it
+    gets its own test."""
     document = well_formed()
     document["states"]["compost"] = "compost"
     document["transitions"]["clear-out"] = {
@@ -3931,11 +4161,6 @@ def test_an_archiving_source_that_is_not_a_table_refuses_rather_than_raising() -
         "dissolves": True,
     }
     assert "states.compost must be a table" in shape_errors(document)
-
-
-# --------------------------------------------------------------------------
-# `retitles`: a rider on a move. See docs/reference.md#retitle
-# --------------------------------------------------------------------------
 
 
 # --------------------------------------------------------------------------
@@ -4011,7 +4236,7 @@ def test_a_sort_naming_a_derived_key_the_state_does_not_give_refuses() -> None:
     assert error.startswith('states.greenhouse.sort names "claim-status"')
 
 
-@pytest.mark.parametrize("name", DERIVABLE_KEYS)
+@pytest.mark.parametrize("name", DERIVABLE)
 def test_every_derived_key_refuses_as_a_key_and_as_a_reference(name: str) -> None:
     """34-2 f2: the whole roster, not a hand-written list of it. A derived key
     is read rather than written, so declaring one or naming one in `requires`
@@ -4103,8 +4328,7 @@ def test_a_listed_that_is_not_a_bool_refuses_by_name(value: object) -> None:
 
 def test_the_declaration_names_its_unlisted_states(tmp_path: Path) -> None:
     assert load(FIXTURES / "plan.toml").unlisted == ("firewood",)
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    copy_fixture(tmp_path)
     plan = tmp_path / "plan.toml"
     plan.write_text(plan.read_text().replace("listed = false\n", ""))
     assert load(plan).unlisted == ()

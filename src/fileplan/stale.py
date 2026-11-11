@@ -10,7 +10,7 @@ answer.
 
 Staleness reports and never gates.
 
-See docs/reference.md#stale-days
+See examples/docs/reference.md#stale-days
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import datetime as dt
 from collections.abc import Sequence
 from pathlib import Path
 
+from dulwich.diff_tree import tree_changes
 from dulwich.errors import NotGitRepository
 from dulwich.object_store import tree_lookup_path
 from dulwich.objects import Commit
@@ -59,20 +60,10 @@ def ages(
     cannot answer about is absent rather than mapped to `None`, so the caller
     spells the absence once rather than this deciding how a row prints.
 
-    Three steps, so the common cases stay cheap: a repo discovery, where a
+    In steps, so the common cases stay cheap: a repo discovery, where a
     tree that is not a repo yields `{}` and nothing raises; a HEAD tree lookup
     per path, so a new item filed today is not a walk of the whole history;
-    and one walker per remaining path, stopping at the first commit that
-    touched it.
-
-    Paths are taken relative to the repo root, which need not be the
-    declaration root. Both sides are resolved, because a directory can be
-    reached by more than one path: a synced or symlinked tree, or a `/tmp`
-    that is itself a symlink.
-
-    The cost, named: one walker per item. A single walk inspecting every
-    path at once is the optimisation if a consumer ever has thousands of
-    items; it is recorded here rather than built, because n is tens.
+    and one shared walk for the remaining paths (`_last_commits`).
     """
     if not filed:
         return {}
@@ -87,8 +78,9 @@ def ages(
             # An unborn HEAD: every file is "never committed", nothing to
             # walk.
             return {}
+        assert isinstance(head, Commit)
         base = Path(repo.path).resolve()
-        found: dict[str, int] = {}
+        wanted: dict[str, bytes] = {}
         for slug, path in filed:
             relative = _within(base, path)
             if relative is None:
@@ -97,8 +89,12 @@ def ages(
                 tree_lookup_path(repo.get_object, head.tree, relative)
             except KeyError:
                 continue
-            last = _committed(repo, relative)
-            age = days(_day(last) if last is not None else None, today)
+            wanted[slug] = relative
+        last = _last_commits(repo, head, set(wanted.values()))
+        found: dict[str, int] = {}
+        for slug, relative in wanted.items():
+            commit = last.get(relative)
+            age = days(_day(commit) if commit is not None else None, today)
             if age is not None:
                 found[slug] = age
     return found
@@ -114,13 +110,51 @@ def _within(base: Path, path: Path) -> bytes | None:
     return relative.as_posix().encode("utf-8")
 
 
-def _committed(repo: Repo, relative: bytes) -> Commit | None:
-    """The last commit touching `relative`, or `None`.
+def _last_commits(repo: Repo, head: Commit, paths: set[bytes]) -> dict[bytes, Commit]:
+    """Each of `paths` → the last commit touching it, for the ones found.
+
+    One walk down the chain from `head`, each commit diffed once, not once
+    per path. At a merge, each unsettled path walks on alone (`_committed`):
+    which parent a path's history follows can differ from path to path.
+    """
+    found: dict[bytes, Commit] = {}
+    pending = set(paths)
+    commit = head
+    while pending:
+        parents = repo.get_parents(commit.id, commit)
+        if len(parents) > 1:
+            for path in pending:
+                last = _committed(repo, path, commit.id)
+                if last is not None:
+                    found[path] = last
+            break
+        parent = repo[parents[0]] if parents else None
+        assert parent is None or isinstance(parent, Commit)
+        changes = tree_changes(
+            repo.object_store, parent.tree if parent else None, commit.tree
+        )
+        touched = {
+            entry.path
+            for change in changes
+            for entry in (change.old, change.new)
+            if entry is not None and entry.path is not None
+        }
+        for path in pending & touched:
+            found[path] = commit
+        pending -= touched
+        if parent is None:
+            break
+        commit = parent
+    return found
+
+
+def _committed(repo: Repo, relative: bytes, start: bytes) -> Commit | None:
+    """The last commit at or before `start` touching `relative`, or `None`.
 
     The commit rather than its date, because which timezone a day is counted
     in is one question and `_day` is where it is answered.
     """
-    for entry in repo.get_walker(paths=[relative], max_entries=1):
+    for entry in repo.get_walker(include=[start], paths=[relative], max_entries=1):
         return entry.commit
     return None
 

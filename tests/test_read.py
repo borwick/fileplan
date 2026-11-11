@@ -1,13 +1,13 @@
 """The one traversal: what it finds, what it refuses, and the handle over it.
 
 Against ``tests/fixtures/plan.toml``, never the repo's own — 1-1's rule. The
-fixture is what makes two of these mean anything: `cold-frame` has ``path =
+fixture is what makes some of these mean anything: `cold-frame` has ``path =
 "beds/hardening-off"``, sharing neither its own name nor its last segment, so
 a row reporting `cold-frame` is only possible by reading the declaration; and
 `cultivar` has declared ``values``, so an ordered filter has something to
 order by.
 
-Only `items` touches a disk. The row layer, the filter table and the
+Only `items` touches a disk. The row layer, the filter table, and the
 comparison parser are pure, and their tests take no ``tmp_path``.
 """
 
@@ -22,19 +22,17 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import DERIVABLE_KEYS, FIXTURE_FILES
+from conftest import FIXTURES, copy_fixture
 from dulwich.repo import Repo
 
 # A sibling test module, not a package. Imported so that a stamp a record is
 # taken at, and a pid that is honestly dead, have one home rather than a copy
 # in every module that needs them.
-from test_claim import DECLARED, TAKEN, exited
+from test_claim import broken, exited, written
 
 from fileplan import claim, depends, numbered, read, stale, subphase
-from fileplan.declaration import Declaration, Refusal, load
+from fileplan.declaration import CLAIM_KEYS, DERIVABLE, Declaration, Refusal, load
 from fileplan.item import Item
-
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 READY = """\
 +++
@@ -52,18 +50,8 @@ def tree(tmp_path: Path) -> Declaration:
     """The fixture declaration copied into ``tmp_path``. **No directories are
     made**: a state whose directory does not exist yet is what several of
     these are about, and a fixture that pre-made them would hide it."""
-    for name in FIXTURE_FILES:
-        (tmp_path / name).write_text((FIXTURES / name).read_text())
+    copy_fixture(tmp_path)
     return load(tmp_path / "plan.toml")
-
-
-@pytest.fixture(autouse=True)
-def _no_declared_pid(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A real ``GREENHOUSE_PID`` in the operator's shell must not decide a
-    result here: `fileplan.claim.holders` asks for this session's
-    identity, and a malformed one would refuse the listing."""
-    for name in DECLARED:
-        monkeypatch.delenv(name, raising=False)
 
 
 def file(declaration: Declaration, state: str, name: str, text: str = READY) -> Path:
@@ -129,7 +117,7 @@ def test_a_file_nested_below_a_state_directory_is_not_an_item(
 def test_a_broken_item_file_refuses_the_listing_naming_it(tree: Declaration) -> None:
     """Every `*.md` in a state directory is *claimed* to be an item, so one
     that is not refuses rather than being skipped. Silence would make a broken
-    file look merely absent — 1-2's reason, and this is where it lands."""
+    file look merely absent (1-2)."""
     file(tree, "greenhouse", "a-seedling.md")
     broken = file(tree, "greenhouse", "b-seedling.md", "no head here at all\n")
     with pytest.raises(Refusal) as refusal:
@@ -224,34 +212,19 @@ def test_a_row_carries_every_declared_key_null_when_absent(
 
 
 def test_a_rows_fields_are_in_a_fixed_order(tree: Declaration) -> None:
-    """`position` comes straight after `state` — it is *where in the state*
-    the item sits, which is location — and the claim's two come straight after
-    it, for the same reason: who holds an item is a fact about its being in a
-    claimed state. `sub-phases` follows them: it is counted off the item's own
-    **body** rather than read out of its head, so it belongs with the other
-    things that sit beside the declared keys rather than among them, and
-    `next-sub-phase` comes straight after it because it is derived from those
-    same bullets. All five are present because the fixture declares such states
-    at all, not because this item is in one.
+    """Location first: `state`, `position`, then the claim's fields, since
+    who holds an item is a fact about its being in a claimed state. Then,
+    before the declared keys, what is derived from outside the head: from the
+    **body** (`sub-phases`, `next-sub-phase`), the **tree** (`blocked-by`,
+    `blocks`), **git** (`stale-days`), the transitions (`commands`), and the
+    references (`replaced-by`).
 
-    `blocked-by` and `blocks` come after those two and before the declared
-    keys, for the
-    third version of the same argument: it is derived from the **tree** rather
-    than read out of a head, so it belongs with the things that sit beside the
-    declared keys rather than among them. Present because the fixture has a
-    state that reads dependencies at all, not because this item is in one.
+    Each is present because the fixture declares it, not because this item
+    uses it: `stale-days` is `None` outside git, `commands` when `rows` is
+    handed no question, and `replaced-by` where nothing names the item.
 
-    `stale-days` comes straight after it, the argument a fourth time over a
-    fact derived from **git**. Present on every row, and `None` here because
-    the tree is not in git. `commands` follows it, derived from the
-    transitions, and `None` here because `rows` is handed no question.
-    `replaced-by` closes the derived run: the inverse a state's `references`
-    declares, read off the tree, and `None` because nothing names the item.
-
-    The head-key capabilities come in `CAPABILITY_KEYS` order — `position`
-    then `number` — because that is the one place the tool says which keys a
-    state's capabilities give, and the row, the filters and the grading all
-    read it rather than each keeping a list."""
+    The head-key capabilities come in `CAPABILITY_KEYS` order, the one place
+    the tool says which keys a state's capabilities give."""
     file(tree, "greenhouse", "a-seedling.md")
     (row,) = read.rows(tree, read.items(tree))
     assert list(row) == [
@@ -295,14 +268,13 @@ title = "A tree"
 - **graft-3 — the third.**{mark3}
 """
 
-#: The fixture's marks. **Neither is `done`**: completion is a mark on the
-#: bullet now, so the vocabulary independence this file used to prove over
-#: `graft-status` moves onto the words `ripen` and `thin` declare.
+#: The fixture's marks. **Neither is `done`**: vocabulary independence is
+#: proved over the words `ripen` and `thin` declare.
 RIPENED, THINNED = "ripened", "thinned"
 
 
 def stepped(tree: Declaration, *marks: str | None, **head: str) -> None:
-    """A tree in the orchard whose three named steps carry `marks`."""
+    """A tree in the orchard whose named steps carry `marks`."""
     written = "\n".join(f'{key} = "{value}"' for key, value in head.items())
     said = {
         f"mark{number}": f" **{mark}**" if mark else ""
@@ -336,9 +308,9 @@ def test_a_cursor_on_an_unmarked_step_is_what_comes_next(
 def test_a_cursor_on_a_marked_step_advances_and_runs_out_at_the_last_one(
     tree: Declaration,
 ) -> None:
-    """The fourth answer: with every step marked there is no next, while the
-    count goes on saying three. The **pair** is what tells a finished section
-    from a state that counts none."""
+    """With every step marked there is no next, while the count still holds
+    every step. The **pair** is what tells a finished section from a state
+    that counts none."""
     stepped(tree, RIPENED, RIPENED, graft="graft-2")
     assert upcoming(tree) == "graft-3"
 
@@ -361,10 +333,9 @@ def test_a_row_names_an_earlier_unmarked_step_over_the_one_the_cursor_is_on(
 def test_a_status_in_the_head_does_not_move_the_row_whatever_it_says(
     tree: Declaration,
 ) -> None:
-    """The mutation check, at the row layer, and it is now about the *shape*
-    rather than about a word: `graft-status` is still declared and still
-    written, and no value it can hold moves what comes next. Completion is
-    stored once, on the bullet."""
+    """The mutation check, at the row layer, over the *shape*: `graft-status`
+    is declared and written, and no value it can hold moves what comes next.
+    Completion is stored once, on the bullet."""
     for status in ("open", "planned", "in progress", "done"):
         stepped(tree, graft="graft-2", **{"graft-status": status})
         assert upcoming(tree) == "graft-2"
@@ -524,7 +495,7 @@ def test_a_bullet_past_the_span_is_found_by_the_form_the_item_fills_in(
 def test_a_state_that_counts_no_sub_phases_carries_none_of_the_three_fields(
     tree: Declaration,
 ) -> None:
-    """`greenhouse` declares no heading. All three fields are `None` there —
+    """`greenhouse` declares no heading. The fields are all `None` there,
     which is a different fact from a counted state with nothing decomposed,
     and they are present at all because the *declaration* has a counted
     state."""
@@ -621,7 +592,7 @@ def test_a_referent_carries_the_inverse_from_another_state(tree: Declaration) ->
 
 
 def test_a_reference_naming_nothing_filed_is_unresolved(tree: Declaration) -> None:
-    """`unknown`'s three fields, in a report of its own."""
+    """`unknown`'s fields, in a report of its own."""
     replacing(tree, "greenhouse", "b-seedling", "gone-tree")
     found = read.listing(tree)
     assert found.unresolved == [
@@ -658,9 +629,8 @@ def test_a_declaration_with_no_references_carries_no_inverse_and_no_report(
 def test_a_row_carries_the_edges_it_waits_on_that_are_still_filed(
     tree: Declaration,
 ) -> None:
-    """`blocked-by` is the old `unmet_after`'s answer, off the key the state
-    names — `after` is the fixture's word, and nothing in the tool spells
-    it."""
+    """`blocked-by` reads the key the state names: `after` is the fixture's
+    word, and nothing in the tool spells it."""
     file(tree, "orchard", "a-tree.md")
     waiting(tree, "b-tree", "a-tree")
     found = read.listing(tree)
@@ -823,6 +793,78 @@ def test_a_head_value_keeps_its_toml_type(tree: Declaration) -> None:
 
 
 # --------------------------------------------------------------------------
+# The record shapes: each spells the keys its builder writes
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("shape", "keys"),
+    [
+        (depends.UnknownRecord, (depends.SLUG, depends.KEY, depends.NAMES)),
+        (
+            depends.MisorderedRecord,
+            (
+                depends.SLUG,
+                depends.KEY,
+                depends.NAMES,
+                depends.PLACE,
+                depends.NAMED_PLACE,
+            ),
+        ),
+        (numbered.GapRecord, (numbered.STATE, numbered.ARCHIVE, numbered.KEY)),
+        (
+            numbered.LostRecord,
+            (numbered.STATE, numbered.ARCHIVE, numbered.LINE, numbered.TEXT),
+        ),
+        (
+            numbered.RegisterRecord,
+            (numbered.STATE, numbered.ARCHIVE, numbered.FLOOR, numbered.HIGHEST),
+        ),
+        (read.StrandedRecord, (read.SLUG, *CLAIM_KEYS, read.PATH)),
+        (
+            read.UnmarkableRecord,
+            (
+                read.BULLET_ITEM,
+                read.BULLET_NAME,
+                read.BULLET_REST,
+                read.BULLET_LINE,
+                read.PATH,
+            ),
+        ),
+        (
+            read.UnreadRecord,
+            (
+                read.BULLET_ITEM,
+                read.BULLET_NAME,
+                read.BULLET_REASON,
+                read.BULLET_LINE,
+                read.PATH,
+            ),
+        ),
+        (read.UndeclaredRecord, (read.SLUG, read.KEY, read.VALUE, read.PATH)),
+        (
+            read.MissingRecord,
+            (read.SLUG, read.KEY, read.VALUE, read.PATH, read.DIRECTORY),
+        ),
+        (read.OrphanedRecord, (read.KEY, read.DIRECTORY, read.PATH)),
+        (
+            read.UnfoundRecord,
+            (read.SLUG, read.PATH, read.KEY, read.VALUE, read.CARRIER),
+        ),
+        (read.UnlistedRecord, (read.STATE, read.COUNT)),
+        (read.UnsortedRecord, (read.SLUG, read.KEY, read.PATH)),
+    ],
+)
+def test_each_record_shape_spells_the_keys_its_builder_writes(
+    shape: type, keys: tuple[str, ...]
+) -> None:
+    """A shape's keys are literals, as the typing spec asks, and its builder
+    writes the module's constants: this holds the two to one meaning, in
+    the order the envelope carries them."""
+    assert tuple(shape.__annotations__) == keys
+
+
+# --------------------------------------------------------------------------
 # A queued state comes back in slug order: its sort is the listing's
 # --------------------------------------------------------------------------
 
@@ -860,7 +902,7 @@ def test_declared_state_order_still_comes_first(tree: Declaration) -> None:
 
 
 # --------------------------------------------------------------------------
-# The claim: the first thing a row carries from outside the item file
+# The claim: carried from outside the item file
 # --------------------------------------------------------------------------
 #
 # The fixture's `potting-bench` claims and its `orchard` is ordered, so one
@@ -868,7 +910,7 @@ def test_declared_state_order_still_comes_first(tree: Declaration) -> None:
 # pure over the mapping it is handed; `listing` is the edge that reads
 # `local/claims/` and decides which records belong to an item at all.
 
-#: What one holder's three fields look like, as `claim.fields` builds them.
+#: What one holder's fields look like, as `claim.fields` builds them.
 HOLDER = "this-host pid 4213"
 HELD = {
     "claimed-by": HOLDER,
@@ -881,24 +923,12 @@ def held(
     declaration: Declaration, slug: str, *, pid: int | None = None, host: str = ""
 ) -> Path:
     """One claim record on disk, the way a session leaves one behind."""
-    path = claim.path(declaration.root, slug)
-    claim.write(
-        path,
-        {
-            "host": host or socket.gethostname(),
-            "pid": os.getpid() if pid is None else pid,
-            "taken": TAKEN,
-        },
+    return written(
+        declaration.root,
+        slug,
+        host=host or socket.gethostname(),
+        pid=os.getpid() if pid is None else pid,
     )
-    return path
-
-
-def broken(declaration: Declaration, slug: str, text: str) -> Path:
-    """A hand-edited record: something a person wrote and the tool cannot read."""
-    path = claim.path(declaration.root, slug)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    return path
 
 
 def unclaimed(declaration: Declaration) -> Declaration:
@@ -965,8 +995,7 @@ CLAIMED_ROWS = [
 
 
 def test_the_unclaimed_work_is_what_lacks_a_holder() -> None:
-    """The pick read, until section 3 spells it as a verb: this is what
-    proves section 2's done line today."""
+    """The pick read."""
     tests = [read.presence("claimed-by", carried=False)]
     assert slugs(read.matching(CLAIMED_ROWS, tests)) == ["c"]
 
@@ -1019,7 +1048,7 @@ def test_the_listing_probes_each_record_once_and_reports_what_it_found(
 
 
 def test_a_record_whose_item_is_gone_is_stranded(tree: Declaration) -> None:
-    """The first flavour: nothing answers to the slug at all. Named rather
+    """The first flavor: nothing answers to the slug at all. Named rather
     than skipped, and `rm` is what takes it away."""
     held(tree, "a-seedling")
     found = read.listing(tree)
@@ -1033,10 +1062,10 @@ def test_a_record_whose_item_is_gone_is_stranded(tree: Declaration) -> None:
 def test_a_record_for_an_item_in_an_unclaimed_state_is_stranded(
     tree: Declaration,
 ) -> None:
-    """The second flavour, and the one a listing computed over missing items
+    """The second flavor, and the one a listing computed over missing items
     alone would miss: the item exists, and its state claims nothing. The
     executor already ignores this record — neither state opts in — so the
-    listing agrees rather than reporting a claim no transition will honour."""
+    listing agrees rather than reporting a claim no transition will honor."""
     file(tree, "greenhouse", "a-seedling.md")
     held(tree, "a-seedling")
     found = read.listing(tree)
@@ -1059,8 +1088,7 @@ def test_a_stranded_claim_is_never_a_row(tree: Declaration) -> None:
 def test_a_declaration_with_no_claimed_state_reads_no_records_at_all(
     tree: Declaration,
 ) -> None:
-    """No capability, nothing to read and nothing to strand — which is why
-    this repo's own listing is unchanged by any of this."""
+    """No capability, nothing to read, and nothing to strand."""
     file(tree, "greenhouse", "a-seedling.md")
     held(tree, "a-seedling")
     found = read.listing(unclaimed(tree))
@@ -1071,7 +1099,7 @@ def test_a_declaration_with_no_claimed_state_reads_no_records_at_all(
 def test_a_malformed_record_refuses_the_listing_naming_it(
     tree: Declaration,
 ) -> None:
-    """The deliberate asymmetry with a *missing* record: a fresh clone has no
+    """The asymmetry with a *missing* record: a fresh clone has no
     records and reads as unclaimed, but a record that exists and cannot be
     read says something the tool does not understand about who holds an item.
     Reading that as free is the one direction a claim must never fail in."""
@@ -1096,7 +1124,7 @@ def test_every_defect_in_the_records_is_reported_at_once(
 
 
 # --------------------------------------------------------------------------
-# stale-days: the second thing a row carries from outside the item file
+# stale-days: carried from outside the item file
 # --------------------------------------------------------------------------
 
 # The fixture's `cold-frame` is the dated state, and its `path` is
@@ -1192,7 +1220,7 @@ def test_what_git_cannot_answer_about_lacks_the_field() -> None:
 
 
 # --------------------------------------------------------------------------
-# The register: the fourth thing read from outside the item files
+# The register: read from outside the item files
 # --------------------------------------------------------------------------
 #
 # `orchard` is the fixture's numbered state and `orchard-archive.md` its
@@ -1219,9 +1247,9 @@ def archived(declaration: Declaration, text: str) -> None:
 def test_a_number_in_neither_the_state_nor_the_archive_is_named(
     tree: Declaration,
 ) -> None:
-    """Done line 2, at the read. The archive holds 1 and the one live tree
-    holds 3, so 2 is a number nothing says what happened to — and until now
-    the tool only said so at the next mint."""
+    """The archive holds 1 and the one live tree holds 3, so 2 is a number
+    nothing says what happened to. The read says so, not only the next
+    mint."""
     numbered_tree(tree, "a-tree", 3)
     (one,) = read.listing(tree).gaps
     assert one == {
@@ -1274,8 +1302,8 @@ def test_a_state_by_its_declared_name_and_only_a_numbered_one(
     tree: Declaration,
 ) -> None:
     """A register is per numbered state, and `orchard` is the fixture's only
-    one — so four other states hold items and contribute nothing, and the
-    record says `orchard` rather than the directory it happens to live in."""
+    one: the other states hold items and contribute nothing, and the record
+    says `orchard` rather than the directory it lives in."""
     numbered_tree(tree, "a-tree", 3)
     file(tree, "greenhouse", "a-seedling.md")
     file(tree, "cold-frame", "a-hardened.md")
@@ -1327,9 +1355,9 @@ def test_a_lost_close_out_at_the_top_of_the_range_is_named_though_it_makes_no_ga
     assert [one[numbered.LINE] for one in found.lost] == [3]
 
 
-# The register itself, beside the two reports. Not an eighth report: it says
-# what the register holds rather than what is wrong with it, so every one of
-# these reads it on a corpus with nothing wrong.
+# The register itself, beside the reports. Not a report: it says what the
+# register holds rather than what is wrong with it, so every one of these
+# reads it on a corpus with nothing wrong.
 
 
 def test_the_register_says_where_it_begins_and_how_high_it_goes(
@@ -1373,8 +1401,7 @@ def test_a_register_holding_nothing_says_so_rather_than_naming_a_number(
 
 
 def test_a_declared_floor_is_what_the_record_says(tree: Declaration) -> None:
-    """The effective floor, so a consumer needs no default of its own —
-    re-deriving that default is the duplication this removes."""
+    """The effective floor, so a consumer needs no default of its own."""
     declaration = floored(tree, 192)
     archived(declaration, "# The archive\n\n## 192. A felled tree\n")
     numbered_tree(declaration, "a-tree", 193)
@@ -1490,7 +1517,7 @@ def test_a_sort_compares_numbers_as_numbers() -> None:
 
 
 def test_a_sort_ranks_declared_values_then_numbers_then_text() -> None:
-    """`_pair`'s three rules in its order, made total: a value the key never
+    """`_pair`'s rules in its order, made total: a value the key never
     declared sorts after the declared ones rather than matching nothing."""
     rows = [sized("a", "zinnia"), sized("b", 3), sized("c", "XL"), sized("d", "S")]
     assert by_size(rows) == ["d", "c", "b", "a"]
@@ -1572,6 +1599,88 @@ def test_the_sort_names_each_row_missing_each_key() -> None:
     ]
 
 
+# --------------------------------------------------------------------------
+# The bare WORD: a search over the title and the body
+# --------------------------------------------------------------------------
+
+
+def titled(tree: Declaration, title: str | None, body: str) -> Item:
+    head = {} if title is None else {"title": title}
+    return Item(Path("greenhouse/a.md"), tree.states["greenhouse"], head, body)
+
+
+@pytest.mark.parametrize(
+    "title, body, word, held",
+    [
+        pytest.param("A pear tree", "Prose.", "pear", True, id="title"),
+        pytest.param("An apple", "Grafted onto a pear.", "pear", True, id="body"),
+        pytest.param("An apple", "Grafted onto a Pear.", "PEAR", True, id="case"),
+        pytest.param(None, "Grafted onto a pear.", "pear", True, id="no-title"),
+        pytest.param("An apple", "Prose.", "pear", False, id="miss"),
+        pytest.param("An apple", "Prose.", "", True, id="empty"),
+    ],
+)
+def test_a_word_is_held_by_the_title_or_the_body_ignoring_case(
+    tree: Declaration, title: str | None, body: str, word: str, held: bool
+) -> None:
+    """The rule `~` uses: a casefolded substring, so an empty word holds
+    everywhere, as `--has 'title~'` does."""
+    assert read.holds(titled(tree, title, body), word) is held
+
+
+def worded(slug: str, title: str, state: str = "greenhouse") -> dict[str, Any]:
+    return {**sized(slug, state=state), "title": title}
+
+
+def test_a_title_hit_comes_first_and_each_group_keeps_its_order() -> None:
+    """The rows come in as the state's usual order left them, and `d`
+    before `b` is not alphabetical, so a second sort would show."""
+    rows = [
+        worded("d", "An apple"),
+        worded("c", "A Pear"),
+        worded("b", "A birch"),
+        worded("a", "Pear and plum"),
+    ]
+    assert slugs(read.titled_first(rows, "pear", STATES)) == ["c", "a", "d", "b"]
+
+
+def test_a_title_hit_never_moves_a_row_across_states() -> None:
+    rows = [worded("a", "An apple"), worded("b", "A pear", "orchard")]
+    assert slugs(read.titled_first(rows, "pear", STATES)) == ["a", "b"]
+
+
+# --------------------------------------------------------------------------
+# `--fields`: the row narrowed to the keys named
+# --------------------------------------------------------------------------
+
+
+def test_the_projection_keeps_only_the_keys_named_in_the_order_named() -> None:
+    rows = [worded("a", "An apple"), sized("b")]
+    assert read.projected(rows, ["title", "slug"]) == [
+        {"title": "An apple", "slug": "a"},
+        {"title": None, "slug": "b"},
+    ]
+    assert [list(row) for row in read.projected(rows, ["title", "slug"])] == [
+        ["title", "slug"],
+        ["title", "slug"],
+    ]
+
+
+def test_a_field_takes_every_key_a_row_carries(tree: Declaration) -> None:
+    """`slug`, `state` and `path` too, which `--has` refuses as row fields."""
+    for key in (read.SLUG, read.STATE, read.PATH, *tree.carried):
+        assert read.field(tree, key) == key
+
+
+def test_a_field_naming_no_key_refuses_with_the_roster(tree: Declaration) -> None:
+    with pytest.raises(Refusal) as refusal:
+        read.field(tree, "cultivarr")
+    said = str(refusal.value)
+    assert "--fields" in said and "cultivarr" in said
+    assert "fields: slug, state, path, " in said
+    assert all(key in said for key in tree.carried)
+
+
 def test_a_sort_naming_no_key_refuses_by_name(tree: Declaration) -> None:
     with pytest.raises(Refusal) as refusal:
         read.sorting(tree, "-cultivarr")
@@ -1602,8 +1711,8 @@ def test_a_bare_value_means_equals() -> None:
 
 
 def test_a_value_outside_a_keys_values_refuses_by_name() -> None:
-    """1-3 got this from `click.Choice`, which cannot see past a `>=`. The
-    check moved here so the refusal survives the operator."""
+    """The check is here, not in `click.Choice`, which cannot see past a
+    `>=`, so the refusal survives the operator."""
     with pytest.raises(Refusal) as refusal:
         read.comparison("cultivar", ">=windfall", CULTIVARS)
     assert '--cultivar names "windfall"' in str(refusal.value)
@@ -1654,7 +1763,7 @@ def test_a_numeric_filter_still_matches_by_value_exactly() -> None:
 
 def test_text_that_is_not_a_number_still_compares_as_text() -> None:
     """The rule is *both* sides. A key holding `M26` against `<M5` is the
-    ordinary text comparison it always was."""
+    ordinary text comparison."""
     rows = [{"slug": "a", "rootstock": "M26"}, {"slug": "b", "rootstock": "M9"}]
     assert slugs(read.matching(rows, [read.comparison("rootstock", "<M5")])) == ["a"]
 
@@ -1684,8 +1793,8 @@ def test_a_filter_matches_any_entry_of_a_list_value() -> None:
 # --------------------------------------------------------------------------
 #
 # The inclusion filter above answers "does this contain"; these answer "is
-# every value one of these". 14-2 added the operator because inclusion is the
-# dangerous direction: a section carrying `["unattended", "operator-led"]`
+# every value one of these". Inclusion is the dangerous direction (14-2):
+# a section carrying `["unattended", "operator-led"]`
 # matches `--has interaction-type=unattended` and reads as safe to run
 # unattended when it is not.
 
@@ -1714,8 +1823,8 @@ def test_drawn_from_asks_the_all_of_question_over_a_list() -> None:
 
 
 def test_drawn_from_degenerates_to_is_one_of_over_a_single_value() -> None:
-    """One rule with two degenerations rather than a list-valued arm: over a
-    key holding one value it asks the question the read had no spelling for."""
+    """One rule, not a list-valued arm: over a key holding one value it asks
+    whether that value is one of these."""
     drawn = read.comparison("cultivar", ":heirloom,hybrid", CULTIVARS)
     assert slugs(read.matching(INFESTED, [drawn])) == ["one", "mixed", "clean"]
 
@@ -1737,8 +1846,8 @@ def test_a_key_present_but_empty_is_not_drawn_from_anything() -> None:
 
 
 def test_the_state_filter_reaches_the_operator_too() -> None:
-    """The reason it is an operator rather than a fourth filter word: `--state`
-    goes through the same parse, so this arrived with no arm of its own."""
+    """An operator, not a filter word: `--state` goes through the same parse,
+    so it needs no arm of its own."""
     drawn = read.comparison("state", ":greenhouse,orchard", ("greenhouse", "orchard"))
     assert slugs(read.matching(ROWS, [drawn])) == ["a", "b", "c"]
     drawn = read.comparison("state", ":orchard", ("greenhouse", "orchard"))
@@ -1772,9 +1881,8 @@ def test_matching_does_not_alias_the_rows_it_was_given() -> None:
 # --------------------------------------------------------------------------
 #
 # Pure over a loaded declaration, so these take the fixture's file rather than
-# a `tmp_path`. 13-3 folded a flag per declared key into this one parse: the
-# 20 options were all doing what `--has` already did — name a key off
-# `carried`, then say something about it.
+# a `tmp_path`. One parse, not a flag per declared key (13-3): name a key
+# off `carried`, then say something about it.
 
 
 @pytest.fixture
@@ -1800,12 +1908,12 @@ def test_each_operator_splits_off_the_key(
     key is whatever stands before the earliest operator character."""
     test = read.filtering(declared, given)
     assert (test.operator, test.value) == (operator, value)
-    assert test.key == given.split(operator)[0]
+    assert test.key == given.split(operator, 1)[0]
 
 
 def test_a_bare_key_asks_about_presence(declared: Declaration) -> None:
-    """Its meaning before the fold, unchanged: a key present but empty carries
-    nothing, so there is nothing else the bare form could mean."""
+    """A key present but empty carries nothing, so there is nothing else the
+    bare form could mean."""
     assert read.filtering(declared, "cultivar") == read.presence(
         "cultivar", carried=True
     )
@@ -1814,8 +1922,8 @@ def test_a_bare_key_asks_about_presence(declared: Declaration) -> None:
 def test_a_key_with_declared_values_still_orders_by_them(
     declared: Declaration,
 ) -> None:
-    """The closed set survives the fold, which is the whole reason `>=` means
-    anything: `heirloom` is before `hybrid` because plan.toml lists it there."""
+    """The closed set is what gives `>=` a meaning: `heirloom` is before
+    `hybrid` because plan.toml lists it there."""
     test = read.filtering(declared, "cultivar>=hybrid")
     assert test.order == ("heirloom", "hybrid")
     assert slugs(read.matching(ROWS, [test])) == ["b"]
@@ -1843,7 +1951,7 @@ def test_a_key_the_tree_answers_is_refused_against_nothing(
 
 def test_a_key_nothing_carries_refuses_by_name(declared: Declaration) -> None:
     """`--has` names a key rather than a value, so it gets the typo detector
-    `head_errors` gives a head — over the whole roster, since the fold."""
+    `head_errors` gives a head, over the whole roster."""
     with pytest.raises(Refusal) as refusal:
         read.filtering(declared, "cultivarr=heirloom")
     assert '--has names "cultivarr"' in str(refusal.value)
@@ -1897,8 +2005,8 @@ def test_drawn_from_parses_as_its_own_operator(declared: Declaration) -> None:
 def test_every_value_a_colon_names_is_refused_on_its_own(
     declared: Declaration,
 ) -> None:
-    """The refusal names the entry rather than the whole token, which is the
-    shape the single-value refusal has used since 1-3."""
+    """The refusal names the entry rather than the whole token, the shape the
+    single-value refusal has (1-3)."""
     with pytest.raises(Refusal) as refusal:
         read.filtering(declared, "pest:aphid,windfall")
     assert '--has names "windfall"' in str(refusal.value)
@@ -1921,7 +2029,7 @@ def test_a_colon_naming_no_value_refuses(declared: Declaration, given: str) -> N
 
 
 def test_a_unique_prefix_resolves_across_states(tree: Declaration) -> None:
-    """1-3's resolver globbed one directory. This one is the listing."""
+    """The resolver walks the listing, not one directory."""
     file(tree, "orchard", "a-seedling.md")
     assert read.resolve(tree, "a-s").path.stem == "a-seedling"
 
@@ -2014,9 +2122,8 @@ def test_an_ambiguous_prefix_names_its_candidates_purely() -> None:
 
 
 def test_an_ambiguous_prefix_names_ten_candidates_and_counts_the_rest() -> None:
-    """`show a-` printed 28 slugs on one line. Ten, one per message so each
-    gets its own line at the CLI, then how many were left out, so nothing is
-    hidden and the refusal is readable."""
+    """Ten, one per message so each gets its own line at the CLI, then how
+    many were left out, so nothing is hidden and the refusal is readable."""
     many = [(f"a-seed-{n:02}", f"greenhouse/a-seed-{n:02}.md") for n in range(30)]
     with pytest.raises(Refusal) as refusal:
         read.chosen(many, "a-")
@@ -2027,8 +2134,8 @@ def test_an_ambiguous_prefix_names_ten_candidates_and_counts_the_rest() -> None:
 
 
 def test_a_near_miss_is_ranked_by_the_start_of_each_slug() -> None:
-    """Over whole slugs, a short typo against a long slug scored low and three
-    short strangers won. Against each slug's start it comes first."""
+    """Scored against each slug's start, a short typo of a long slug comes
+    first. Scored over whole slugs, short strangers would beat it."""
     meant = "a-checker-s-route-to-the-far-end-of-the-garden-and-back"
     named = [
         (slug, "x")
@@ -2104,7 +2211,7 @@ def test_a_live_number_is_found_for_show_and_nothing_else_is(handle, found) -> N
 
 
 def test_a_slug_outranks_a_number() -> None:
-    """A slug starting with the digits wins, as it does in `chosen` today, so
+    """A slug starting with the digits wins, as it does in `chosen`, so
     nothing is guessed: the number is tried only where the slugs found none."""
     named = (*NAMED, ("23-skidoo", "orchard/23-skidoo.md"))
     assert read.numbered_handle(named, "23", {"23": "a-seedling"}) is None
@@ -2147,7 +2254,7 @@ def test_a_row_carries_exactly_the_derived_keys_the_roster_names(
     tree: Declaration,
 ) -> None:
     """**The roster pin.** Which keys a row carries from outside the head is
-    `DERIVED_KEYS`' single answer, and this is what makes "no fourth copy"
+    `DERIVED_KEYS`' single answer, and this is what makes "no other copy"
     checkable rather than asserted: a key the row layer grew without the
     roster, or one the roster gates differently from the row, fails here.
 
@@ -2158,7 +2265,7 @@ def test_a_row_carries_exactly_the_derived_keys_the_roster_names(
     file(tree, "orchard", "a-seedling.md")
     assert tree.derived, "the fixture derives nothing, so this proves nothing"
     [row] = read.rows(tree, read.items(tree))
-    derivable = (*DERIVABLE_KEYS, *tree.inverses)
+    derivable = (*DERIVABLE, *tree.inverses)
     assert [key for key in row if key in derivable] == list(tree.derived)
 
 
@@ -2176,12 +2283,12 @@ def test_a_declaration_that_derives_nothing_else_carries_only_the_age(
     )
     assert plain.derived == (stale.DAYS,)
     [row] = read.rows(plain, read.items(plain))
-    assert [key for key in row if key in DERIVABLE_KEYS] == [stale.DAYS]
+    assert [key for key in row if key in DERIVABLE] == [stale.DAYS]
     assert row[stale.DAYS] is None
 
 
 # --------------------------------------------------------------------------
-# `unfound`: a `cutting` naming a bullet its batch no longer has
+# `unfound`: a `cutting` naming a bullet its batch does not have
 # --------------------------------------------------------------------------
 
 
@@ -2209,7 +2316,7 @@ def test_the_listing_names_a_cutting_whose_bullet_is_missing(
     tree: Declaration,
 ) -> None:
     """**The done line's report.** A split done by hand is loud: the seedling
-    still names `c2`, and no bullet in its batch is called that any more."""
+    still names `c2`, and no bullet in its batch is called that."""
     lined_out(tree, "c2")
     assert read.listing(tree).unfound == [
         {

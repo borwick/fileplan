@@ -1,14 +1,14 @@
 """The dependency arithmetic: what is waited on, what names nothing, what is late.
 
 Pure over the values it is handed — no ``tmp_path``, no declaration, no
-fixture tree — like `test_queued.py`, `test_numbered.py` and `test_subphase.py`
+fixture tree — like `test_queued.py`, `test_numbered.py`, and `test_subphase.py`
 beside it. What an item's edges *mean* is graded here; where they come from
 and how they print is `test_read.py`'s and `test_cli.py`'s.
 
-The one that matters most is the partition. The old tool discarded the
-complement of `fileplan.depends.blocking`, and a typo'd slug fell into
-it silently — so "the two partition the edges with nothing lost" is the
-re-pin, stated as arithmetic.
+The one that matters most is the partition. A typo'd slug that fell out of
+`fileplan.depends.blocking` and out of `unknown` would read as a satisfied
+dependency, silently — so "the two partition the edges with nothing lost" is
+stated as arithmetic.
 """
 
 from __future__ import annotations
@@ -32,13 +32,13 @@ def test_a_bare_string_is_one_edge() -> None:
 
 
 def test_a_list_is_the_several_edges_it_holds() -> None:
-    """The row layer already treats a list value as the values it holds, so
-    this is that same rule at the other end."""
+    """The row layer treats a list value as the values it holds, so this is
+    that same rule at the other end."""
     assert depends.edges({KEY: ["a-tree", "b-tree"]}, KEY) == ("a-tree", "b-tree")
 
 
 def test_an_empty_value_is_no_edges_at_all() -> None:
-    """Empty reads as missing, the rule a `requires` already uses."""
+    """Empty reads as missing, the rule a `requires` uses."""
     assert depends.edges({KEY: ""}, KEY) == ()
     assert depends.edges({KEY: []}, KEY) == ()
     assert depends.edges({KEY: ["", "  "]}, KEY) == ()
@@ -69,15 +69,15 @@ def test_blocking_is_the_edges_still_filed() -> None:
 
 
 def test_unknown_is_the_edges_naming_nothing() -> None:
-    """The complement the old tool threw away — and throwing it away is what
-    made a typo'd slug read as a satisfied dependency."""
+    """The complement of `blocking`. Without it a typo'd slug would read as a
+    satisfied dependency."""
     edges = depends.edges({KEY: ["a-tree", "gone-tree"]}, KEY)
     assert depends.unknown(edges, FILED) == ("gone-tree",)
 
 
 def test_the_two_partition_the_edges_with_nothing_lost() -> None:
-    """Every edge is in exactly one of them. That is the whole of the re-pin:
-    an edge cannot fall out of both and vanish."""
+    """Every edge is in exactly one of them, so an edge cannot fall out of
+    both and vanish."""
     edges = depends.edges({KEY: ["a-tree", "gone-tree", "b-tree", "typo"]}, KEY)
     blocked = depends.blocking(edges, FILED)
     unknown = depends.unknown(edges, FILED)
@@ -136,6 +136,16 @@ def test_an_item_with_no_place_is_ignored_rather_than_guessed_at() -> None:
     The listing is where a missing place shows."""
     assert depends.misordered("d-tree", None, ("a-tree",), PLACES, key=KEY) == []
     assert depends.misordered("a-tree", 100, ("d-tree",), PLACES, key=KEY) == []
+
+
+def test_an_item_whose_place_is_true_is_ignored_at_either_end() -> None:
+    """A bool is not a place, though Python counts it an `int`."""
+    assert (
+        depends.misordered("a-tree", True, ("b-tree",), {"b-tree": 200}, key=KEY) == []
+    )
+    assert (
+        depends.misordered("a-tree", 100, ("b-tree",), {"b-tree": True}, key=KEY) == []
+    )
 
 
 def test_an_edge_naming_nothing_is_not_a_misordering() -> None:
@@ -225,7 +235,7 @@ def test_a_survivor_already_named_collapses_to_one_entry_in_its_place() -> None:
     """An edge is named once. A referent waiting on **both** the absorbed tree
     and the survivor waits on one thing afterwards, and the entry that goes is
     the one naming the absorbed tree — so the survivor keeps the position it
-    was already written in and a hand-ordered list is not reshuffled."""
+    was written in and a hand-ordered list is not reshuffled."""
     assert depends.repoint(
         ["d-tree", "a-tree", "b-tree"], "b-tree", "d-tree", own="e-tree"
     ) == ["d-tree", "a-tree"]
@@ -242,14 +252,14 @@ def test_the_survivors_own_edge_to_the_absorbed_item_is_dropped() -> None:
     """**The self-edge.** `own == into` means this head belongs to the
     survivor, and an item may not wait on itself — so the entry contributes
     nothing rather than being written, and the caller says which item and
-    which key (John)."""
+    which key."""
     assert depends.repoint(["a-tree", "b-tree"], "b-tree", "d-tree", own="d-tree") == [
         "a-tree"
     ]
 
 
 def test_a_value_the_drop_empties_comes_back_none() -> None:
-    """`without`'s rule unchanged: `None` tells the caller to **drop the key**
+    """`without`'s rule: `None` tells the caller to **drop the key**
     rather than write `after = []`. Reachable only through the self-edge, since
     every other entry naming the slug is replaced rather than removed."""
     assert depends.repoint(["b-tree"], "b-tree", "d-tree", own="d-tree") is None

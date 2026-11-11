@@ -8,13 +8,15 @@ The text form is one multi-line record per item. A listing has to be easy for
 a person to read, and an agent reads the JSON instead.
 
 Absent is spelled by omission in a record and by `null` in the document. No
-sentinel is written, so a consumer cannot confuse absence with a legal value.
+sentinel is written there, so a consumer cannot confuse absence with a legal
+value. The columns `--fields` asks for cannot omit a cell, so they spell
+absent as `-`: a person reads the dash, and a program reads `--json`'s `null`.
 
 The document is an object and never a bare array. The object carries
 `version`, `kind` and the counts the text form puts on stderr. An array would
 have nowhere to grow.
 
-See docs/reference.md#the-listing
+See examples/docs/reference.md#the-listing
 """
 
 from __future__ import annotations
@@ -34,6 +36,8 @@ HEADING = ("slug", "state")
 
 _INDENT = "  "
 _GAP = "  "
+#: The one sentinel, and only in the columns: see the module docstring.
+_ABSENT = "-"
 
 
 def records(
@@ -78,6 +82,25 @@ def records(
             if name not in heading and value is not None
         ]
     return lines
+
+
+def columns(rows: Sequence[Mapping[str, Any]], keys: Sequence[str]) -> list[str]:
+    """`--fields`' form: a header line of the key names, then one aligned line
+    per row, the last column never padded. A cell spelling empty prints `-`,
+    since a column cannot omit one. See examples/docs/reference.md#the-listing
+    """
+    if not rows:
+        return []
+    table = [list(keys)] + [
+        [_spell(row.get(key)) or _ABSENT for key in keys] for row in rows
+    ]
+    widths = [max(len(line[at]) for line in table) for at in range(len(keys))]
+    return [
+        _GAP.join(
+            f"{cell:<{width}}" for cell, width in zip(line, widths, strict=True)
+        ).rstrip()
+        for line in table
+    ]
 
 
 def document(kind: str, rows: Sequence[Mapping[str, Any]], **meta: Any) -> str:

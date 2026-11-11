@@ -1,10 +1,9 @@
 """The two renderers, pure: no filesystem, no click, no declaration.
 
-The rows here are written by hand rather than traversed, which is the point —
-`fileplan.render` is a total function of the row layer, and if that stops
-being true these tests are where it shows. The control that the *same* rows
-reach both renderers in a real run lives in ``tests/test_cli.py``; this file
-pins what each one does with them.
+The rows here are written by hand, not traversed: `fileplan.render` is a
+total function of the row layer, and these tests show it when it stops being
+one. That the *same* rows reach both renderers in a real run is graded in
+``tests/test_cli.py``.
 """
 
 from __future__ import annotations
@@ -47,8 +46,7 @@ def test_a_record_heads_with_the_slug_and_the_state() -> None:
 
 def test_a_record_drops_an_absent_key() -> None:
     """Omission is how a record spells "absent", so there is no `-` that
-    another field could legally hold. The old tool printed `-` in a column,
-    which a consumer cannot tell from a legal value."""
+    another field could legally hold."""
     text = "\n".join(render.records(ROWS[:1]))
     assert "rootstock" not in text
     assert "cultivar" in text
@@ -84,6 +82,44 @@ def test_no_line_carries_trailing_whitespace() -> None:
     leave the padding behind on the end of the line."""
     lines = render.records([{"slug": "a", "state": "greenhouse"}])
     assert lines == ["a  greenhouse"]
+
+
+# --------------------------------------------------------------------------
+# The columns: what `--fields` prints
+# --------------------------------------------------------------------------
+
+
+def test_each_column_lines_up_under_its_header() -> None:
+    lines = render.columns(ROWS, ["state", "slug"])
+    assert lines == [
+        "state       slug",
+        "greenhouse  a-seedling",
+        "cold-frame  b-seedling",
+    ]
+
+
+def test_a_cell_spelling_empty_prints_a_dash() -> None:
+    """`None`, and a list present but empty, which carries nothing."""
+    rows = [{**ROWS[0], "after": []}, ROWS[1]]
+    assert render.columns(rows, ["rootstock", "after", "slug"]) == [
+        "rootstock  after  slug",
+        "-          -      a-seedling",
+        "-          -      b-seedling",
+    ]
+
+
+def test_a_list_cell_joins_as_the_record_joins_it() -> None:
+    assert render.columns(ROWS, ["after"])[1] == "b-seedling, c-seedling"
+
+
+def test_the_last_column_is_never_padded() -> None:
+    lines = render.columns(ROWS, ["slug", "cultivar"])
+    assert lines == ["slug        cultivar", "a-seedling  heirloom", "b-seedling  -"]
+    assert all(line == line.rstrip() for line in lines)
+
+
+def test_no_rows_print_no_columns() -> None:
+    assert render.columns([], ["slug"]) == []
 
 
 # --------------------------------------------------------------------------
@@ -123,9 +159,8 @@ def test_an_empty_result_still_parses_and_still_names_its_kind() -> None:
 
 
 def test_the_envelope_is_an_object_so_meta_has_somewhere_to_live() -> None:
-    """An array has nowhere to grow, and adding a wrapper later breaks every
-    consumer at once. The counts live here because stderr is silent under
-    `--json`."""
+    """An array has nowhere to grow, and wrapping one breaks every consumer
+    at once. The counts live here because stderr is silent under `--json`."""
     payload = json.loads(render.document("items", ROWS, matched=2, read=7))
     assert payload["matched"] == 2
     assert payload["read"] == 7
@@ -133,9 +168,9 @@ def test_the_envelope_is_an_object_so_meta_has_somewhere_to_live() -> None:
 
 
 def test_a_toml_date_goes_out_as_its_iso_spelling() -> None:
-    """A head's TOML date reads back as a `datetime.date`, which
-    JSON has no spelling for. It goes out as text rather than refusing the
-    whole listing over one field."""
+    """A head's TOML date reads back as a `datetime.date`, which JSON has no
+    spelling for. It goes out as text rather than refusing the whole listing
+    over one field."""
     import datetime as dt
 
     payload = json.loads(

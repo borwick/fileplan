@@ -2,10 +2,10 @@
 
 **No ``tmp_path`` anywhere in this file.** `fileplan.numbered.next_number`
 is a total function of the numbers already taken plus the one the item already
-holds, and both archive readers are total over a string — so the whole table
-costs no filesystem, the split every module since 1-1 keeps.
+holds, and both archive readers are total over a string, so the whole table
+costs no filesystem.
 
-The vocabulary is deliberately not this repo's. A register is integers and
+The vocabulary is not this repo's. A register is integers and
 slugs; nothing here needs a declaration at all.
 """
 
@@ -36,9 +36,9 @@ def test_the_next_number_is_one_past_the_highest() -> None:
 
 
 def test_an_empty_register_mints_the_first_number() -> None:
-    """A repo that has closed nothing and opened nothing. Before the old tool
-    had this case the only way in was to hand-write the one key that is meant
-    to be derived, which broke the invariant the tool exists to hold."""
+    """A repo that has closed nothing and opened nothing. Without this case
+    the only way in would be to hand-write the one key that is meant to be
+    derived, breaking the invariant the tool exists to hold."""
     assert numbered.next_number({}) == numbered.FIRST == 1
 
 
@@ -51,7 +51,7 @@ def test_an_item_already_here_keeps_its_number() -> None:
 
 
 def test_a_kept_number_is_not_graded_against_the_register() -> None:
-    """Deliberately: the item is not asking for a number, it already has one.
+    """The item is not asking for a number, it already has one.
     Grading it here would refuse an in-place verb on an item whose number a
     *different* defect made odd, which is the listing's job to report."""
     assert numbered.next_number(held(1, 2), current=9) == 9
@@ -133,10 +133,8 @@ def test_a_duplicate_produces_no_gap() -> None:
 
 
 def test_the_mint_refuses_on_the_arithmetic_the_listing_reports() -> None:
-    """One arithmetic, two readers. The walk moved out of `next_number` so the
-    refusal at mint time and the report on every read cannot come to disagree
-    about what a gap is; this is the half that says the extraction changed no
-    behaviour."""
+    """One arithmetic, two readers. The refusal at mint time and the report on
+    every read share one walk, so they cannot disagree about what a gap is."""
     with pytest.raises(Refusal) as refusal:
         numbered.next_number(held(1, 2, 5))
     assert "runs to 5 with 2 gap(s): 3, 4" in str(refusal.value)
@@ -154,7 +152,7 @@ def test_two_items_claiming_one_number_refuse_naming_both() -> None:
 
 
 def test_a_duplicate_refuses_even_when_the_item_is_keeping_its_own() -> None:
-    """Before the keep-what-you-have arm, deliberately: an in-place verb on a
+    """Before the keep-what-you-have arm: an in-place verb on a
     tree whose register is broken should say so rather than write over it."""
     with pytest.raises(Refusal, match="claimed by"):
         numbered.next_number(numbered.taken({"one": 3, "two": 3}), current=1)
@@ -185,7 +183,7 @@ def test_a_heading_with_no_title_is_not_an_entry() -> None:
 @pytest.mark.parametrize(
     "line",
     [
-        "## Section 168: Something",  # the one that actually bit the old tool
+        "## Section 168: Something",  # a word before the number
         "## 168 Something",  # no full stop
         "## How these plans are written",
         "## 1: A felled tree",  # a colon, not a full stop
@@ -226,10 +224,9 @@ def test_every_bad_heading_is_reported_not_just_the_first() -> None:
 
 
 def test_an_archive_with_nothing_in_it_is_legibly_empty() -> None:
-    """A repo that has closed nothing. It is not a broken parse, and it is why
-    the old tool's illegibility test dissolved: `heading_errors` runs on every
-    mint rather than only on an empty register, so by the time an empty
-    register is reached it can only mean an empty corpus."""
+    """A repo that has closed nothing. It is not a broken parse:
+    `heading_errors` runs on every mint rather than only on an empty register,
+    so an empty register can only mean an empty corpus."""
     assert numbered.numbers("") == []
     assert numbered.heading_errors(numbered.unreadable(""), WHERE) == []
     assert numbered.unreadable("") == []
@@ -242,8 +239,7 @@ def test_a_heading_that_parses_is_not_a_lost_close_out() -> None:
 
 def test_a_lost_close_out_comes_back_with_its_line_and_what_it_says() -> None:
     """1-based, and stripped: a person fixing one needs to find the line and
-    to see what it was written as. `## Section 168:` is the one that actually
-    bit the old tool."""
+    to see what it was written as."""
     text = "# The archive\n\n## 1. A felled tree\n\n## Section 168: Something\n"
     assert numbered.unreadable(text) == [(5, "## Section 168: Something")]
 
@@ -260,13 +256,12 @@ def test_every_lost_close_out_comes_back_in_document_order() -> None:
 
 
 def test_the_refusal_is_built_from_the_walk_the_report_is_built_from() -> None:
-    """The other half of the extraction's regression: `heading_errors` says
-    exactly what it said before, one message per line `unreadable` names, so
-    the mint and the listing cannot disagree about which line is lost."""
+    """`heading_errors` says one message per line `unreadable` names, so the
+    mint and the listing cannot disagree about which line is lost."""
     text = "## 1. Fine\n## Section 2: not fine\n## Section 4: nor this\n"
     said = numbered.heading_errors(numbered.unreadable(text), WHERE)
     assert len(said) == len(numbered.unreadable(text)) == 2
-    for message, (line, written) in zip(said, numbered.unreadable(text)):
+    for message, (line, written) in zip(said, numbered.unreadable(text), strict=True):
         assert message.startswith(f"{WHERE}:{line}: `{written}` is not a heading")
 
 
@@ -377,8 +372,8 @@ Closed before the ones below it were.
 
 
 def test_an_entry_goes_in_before_the_first_higher_one() -> None:
-    """Inserted, never appended: section 4 of this repo closed before section
-    3, and a verb that appended would have written 1, 2, 4, 3."""
+    """Inserted, never appended: sections close out of order, and a verb that
+    appended would write 1, 2, 4, 3."""
     written = numbered.entry(FILED, 3, "A middle one")
     assert numbered.numbers(written) == [1, 3, 7]
     assert "## 3. A middle one\n\n## 7. A late one" in written
@@ -399,7 +394,7 @@ def test_an_entry_lower_than_every_other_goes_above_them_all() -> None:
 
 
 def test_an_entry_into_an_empty_archive_is_the_whole_document() -> None:
-    """A repo that has closed nothing until now."""
+    """A repo that has closed nothing yet."""
     assert numbered.entry("", 1, "The first") == "## 1. The first\n"
 
 
@@ -413,7 +408,7 @@ def test_the_preamble_survives_the_insertion() -> None:
 def test_the_entry_is_the_strict_form_the_register_reads() -> None:
     """The whole reason the writer lives beside the readers. What it writes
     parses, and nothing it writes is a `##` the register cannot read — which
-    is the failure `docs/reference.md#the-register` records the old tool having."""
+    is the failure `examples/docs/reference.md#the-register` names."""
     written = numbered.entry(FILED, 3, "A middle one")
     assert numbered.heading_errors(numbered.unreadable(written), WHERE) == []
 
@@ -465,7 +460,7 @@ def test_a_number_the_archive_already_holds_refuses_naming_both() -> None:
 def test_a_gap_elsewhere_does_not_refuse_a_filing() -> None:
     """A gap refuses a *mint*, because the number above it may be spoken for.
     Filing is what fills a gap in, and a tool that refused there would be
-    declining to accept the fix. `FILED` has a five-number hole in it."""
+    declining to accept the fix. `FILED` has a hole in it."""
     assert numbered.numbers(numbered.entry(FILED, 2, "Two")) == [1, 2, 7]
 
 
@@ -480,7 +475,7 @@ def test_a_heading_the_register_cannot_read_is_not_an_insertion_point() -> None:
 def test_a_record_goes_under_the_heading_with_one_blank_line_between() -> None:
     """The half `archive-plan` needs: mint-then-fill cannot work when the run
     deletes the body the record is written from, so the prose comes in with
-    the run (`docs/reference.md#dissolving`)."""
+    the run (`examples/docs/reference.md#dissolving`)."""
     written = numbered.entry(FILED, 3, "A middle one", "What it decided.")
     assert "## 3. A middle one\n\nWhat it decided.\n\n## 7." in written
 
@@ -499,9 +494,8 @@ def test_a_records_own_blank_lines_at_the_edges_are_stripped() -> None:
 
 
 def test_an_empty_record_is_byte_identical_to_the_heading_alone() -> None:
-    """5-1's output, unchanged: a verb that *moves* the item still mints an
-    empty heading and the session fills it in, because the source material
-    survives the run."""
+    """5-1: a verb that *moves* the item mints an empty heading and the
+    session fills it in, because the source material survives the run."""
     assert numbered.entry(FILED, 3, "A middle one", "") == numbered.entry(
         FILED, 3, "A middle one"
     )
@@ -574,16 +568,16 @@ def test_a_number_below_the_floor_refuses_naming_it_and_its_source() -> None:
 
 
 def test_filing_a_number_below_the_floor_does_not_refuse() -> None:
-    """`current is not None` returns first, deliberately. An item already
+    """`current is not None` returns first. An item already
     carrying a below-floor number must still be fileable — a filing is not a
     mint, and the register the floor guards is the one being minted into."""
     assert numbered.next_number(held(100), current=100, first=192) == 100
 
 
 def test_a_register_with_no_declared_floor_starts_at_the_first_number() -> None:
-    """`FIRST` is now the field's **default** rather than a constant to branch
-    around: a state declaring nothing behaves exactly as it did before the
-    field existed, which is why neither call site needs an `if`."""
+    """`FIRST` is the field's **default** rather than a constant to branch
+    around: a state declaring nothing begins at `FIRST`, so neither call site
+    needs an `if`."""
     assert numbered.FIRST == 1
     assert numbered.next_number({}) == numbered.next_number({}, first=numbered.FIRST)
     assert numbered.missing(held(3)) == numbered.missing(held(3), first=numbered.FIRST)

@@ -15,12 +15,14 @@ A comment in a head is dropped on write, because `tomllib` does not surface
 one. The head is data. Commentary goes in the body, which is kept byte for
 byte.
 
-See docs/reference.md#the-head
+See examples/docs/reference.md#the-head
 """
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
+import json
 import os
 import re
 import tempfile
@@ -34,7 +36,7 @@ from fileplan import numbered, queued
 from fileplan.declaration import (
     CAPABILITY_KEYS,
     INTRINSIC_KEYS,
-    SUFFIX,  # noqa: F401 — re-exported, read elsewhere as `item.SUFFIX`
+    SUFFIX,  # noqa: F401  re-exported, read elsewhere as `item.SUFFIX`
     Declaration,
     Refusal,
     State,
@@ -42,8 +44,6 @@ from fileplan.declaration import (
     named,
 )
 
-#: Three characters, not YAML's `---`, so nothing reads a head's opening line
-#: as a Markdown thematic break.
 FENCE = "+++"
 
 #: What an item file is called: its slug, then `SUFFIX`. The suffix is
@@ -91,7 +91,7 @@ class Item:
 def parse(text: str) -> tuple[dict[str, Any], str]:
     """`(head, body)` from one item file's text, or raise `Refusal`.
 
-    The fence walk and its three refusals. A file with no opening fence has no
+    The fence walk and its refusals. A file with no opening fence has no
     head at all and one whose fence never closes has a head running into the
     prose; neither may read as "no frontmatter, carry on", because an item
     without a head is invisible to every filter.
@@ -210,35 +210,14 @@ def _literal(name: str, value: Any, *, noun: str = "head") -> str:
     )
 
 
-_ESCAPES = {
-    "\\": "\\\\",
-    '"': '\\"',
-    "\b": "\\b",
-    "\f": "\\f",
-    "\n": "\\n",
-    "\r": "\\r",
-    "\t": "\\t",
-}
-
-
 def _string(value: str) -> str:
-    """A TOML basic string. Every control character is escaped, not passed through.
+    """A TOML basic string, by JSON's quoting: every control character escaped.
 
     Escaping only `\\` and `"` would let a title carrying a newline write a
-    head this reader then refused. Unicode passes through raw: TOML is UTF-8.
+    head this reader then refused. DEL, which JSON passes raw, is illegal in
+    TOML. Unicode passes through raw: TOML is UTF-8.
     """
-    return (
-        '"'
-        + "".join(
-            _ESCAPES[character]
-            if character in _ESCAPES
-            else f"\\u{ord(character):04x}"
-            if character < " " or character == "\x7f"
-            else character
-            for character in value
-        )
-        + '"'
-    )
+    return json.dumps(value, ensure_ascii=False).replace("\x7f", "\\u007f")
 
 
 #: Which module grades each capability key's value. A mapping rather than an
@@ -336,23 +315,12 @@ def read(path: str | os.PathLike[str], declaration: Declaration) -> Item:
     that is not one refuses rather than being skipped.
     """
     path = Path(path)
-    try:
-        with path.open(encoding="utf-8", newline="") as handle:
-            text = handle.read()
-    except UnicodeDecodeError:
-        raise Refusal(
-            f"{named(path, declaration.root)} is not UTF-8, so it is not an item file"
-        ) from None
-    except OSError as exc:
-        raise Refusal(
-            f"{named(path, declaration.root)} could not be read: {exc.strerror}"
-        ) from None
-
+    text = read_text(path, declaration.root, "an item file")
     try:
         head, body = parse(text)
     except Refusal as refusal:
         raise Refusal(
-            [_not_usable(path, declaration.root), *refusal.messages]
+            [not_usable(path, declaration.root, "item file"), *refusal.messages]
         ) from None
 
     # The state comes first, because it says which capability keys this item
@@ -365,7 +333,7 @@ def read(path: str | os.PathLike[str], declaration: Declaration) -> Item:
             f"(declared: {', '.join(declaration.states)})"
         )
     if errors:
-        raise Refusal([_not_usable(path, declaration.root), *errors])
+        raise Refusal([not_usable(path, declaration.root, "item file"), *errors])
 
     # The body is the text's exact suffix, so what precedes it is the head as
     # written. The parsed head has dropped its comments and blank lines.
@@ -373,8 +341,27 @@ def read(path: str | os.PathLike[str], declaration: Declaration) -> Item:
     return Item(path=path, state=state, head=head, body=body, opening=opening)
 
 
-def _not_usable(path: Path, root: Path) -> str:
-    return f"{named(path, root)} is not a usable item file"
+def read_text(path: Path, root: Path, noun: str) -> str:
+    """`path`'s text, byte for byte, or raise `Refusal` naming it from `root`.
+
+    `noun`, with its article, is what a file that is not UTF-8 is not.
+    """
+    try:
+        with path.open(encoding="utf-8", newline="") as handle:
+            return handle.read()
+    except UnicodeDecodeError:
+        raise Refusal(
+            f"{named(path, root)} is not UTF-8, so it is not {noun}"
+        ) from None
+    except OSError as exc:
+        raise Refusal(
+            f"{named(path, root)} could not be read: {exc.strerror}"
+        ) from None
+
+
+def not_usable(path: Path, root: Path, noun: str) -> str:
+    """The line a file's defects are reported under, so it names itself once."""
+    return f"{named(path, root)} is not a usable {noun}"
 
 
 def write(item: Item) -> None:
@@ -394,7 +381,7 @@ def replace(path: Path, text: str) -> None:
     writes the archive this way too — one copy of the dance rather than a
     second that could learn a different answer about modes or cleanup.
     """
-    handle = tempfile.NamedTemporaryFile(  # noqa: SIM115 — closed by the `with` inside the `try`, so the cleanup also covers a failed write
+    handle = tempfile.NamedTemporaryFile(  # noqa: SIM115  closed by the `with` inside the `try`, so the cleanup also covers a failed write
         "w",
         encoding="utf-8",
         newline="",
@@ -406,11 +393,13 @@ def replace(path: Path, text: str) -> None:
     try:
         with handle:
             handle.write(text)
-        try:
-            os.chmod(handle.name, path.stat().st_mode & 0o777)
-        except FileNotFoundError:
-            pass  # No target to copy from: the temp file's 0600 stands.
-        os.replace(handle.name, path)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temp = Path(handle.name)
+        # No target to copy from: the temp file's 0600 stands.
+        with contextlib.suppress(FileNotFoundError):
+            temp.chmod(path.stat().st_mode & 0o777)
+        temp.replace(path)
     except BaseException:
         Path(handle.name).unlink(missing_ok=True)
         raise

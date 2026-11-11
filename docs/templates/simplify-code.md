@@ -30,9 +30,8 @@ is for is that the codebase stays easy to maintain and modify.
 
 **How to run it.** Fan the reading out to subagents, and pick the model to fit
 the job — a smaller one for the broad reads — so a comprehensive pass costs
-what it is worth. This is the wide pass over the whole tree, rather than a
-narrow one over what changed recently.
+what it is worth.
 
 **Done when:** the suite is green with its count reported, what was simplified
-is committed, and what was looked at and deliberately left alone is written
-down with the reason — so the next pass does not re-derive it.
+is committed and what was looked at and deliberately left alone is written
+down with the reason.
