@@ -287,3 +287,39 @@ def test_a_non_string_entry_is_compared_as_text_and_the_others_kept_verbatim_her
         7,
         "d-tree",
     ]
+
+
+# --------------------------------------------------------------------------
+# A wait loop: the chain back to the item, or none
+# --------------------------------------------------------------------------
+
+
+def test_a_loop_through_the_item_itself_is_the_one_link_chain() -> None:
+    assert depends.loop("a-tree", ("a-tree",), {}) == ("a-tree",)
+
+
+def test_a_loop_two_steps_long_names_the_chain_from_the_given_edge() -> None:
+    """`b-tree` waits on `c-tree`, which waits on `a-tree`: `a-tree` waiting
+    on `b-tree` closes it, and the chain reads in waiting order."""
+    holders = {"b-tree": ("c-tree",), "c-tree": ("a-tree",)}
+    assert depends.loop("a-tree", ("b-tree",), holders) == (
+        "b-tree",
+        "c-tree",
+        "a-tree",
+    )
+
+
+def test_a_loop_is_the_shortest_chain() -> None:
+    holders = {"b-tree": ("c-tree", "a-tree"), "c-tree": ("a-tree",)}
+    assert depends.loop("a-tree", ("b-tree",), holders) == ("b-tree", "a-tree")
+
+
+def test_no_loop_is_none() -> None:
+    holders = {"b-tree": ("c-tree",), "c-tree": ()}
+    assert depends.loop("a-tree", ("b-tree", "c-tree"), holders) is None
+
+
+def test_a_loop_elsewhere_in_the_tree_stops_the_walk_rather_than_hanging() -> None:
+    """`b-tree` and `c-tree` wait on each other, and neither on `a-tree`."""
+    holders = {"b-tree": ("c-tree",), "c-tree": ("b-tree",)}
+    assert depends.loop("a-tree", ("b-tree",), holders) is None

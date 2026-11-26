@@ -20,7 +20,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 import pytest
-from conftest import EXAMPLE, FIXTURES, REPO, UNPRUNED, copy_fixture
+from conftest import EXAMPLE, FIXTURE, FIXTURES, REPO, UNPRUNED, copy_fixture
 
 from fileplan import depends, subphase
 from fileplan.cli import main
@@ -147,7 +147,7 @@ def test_a_state_declaring_an_exit_check_refuses_by_name() -> None:
 
 
 def test_a_key_declaring_a_companion_refuses_by_name() -> None:
-    """13-1: a key carries no `companion`. The rule it carried is a test over
+    """13-1: a key carries no `companion`. Its rule is a test over
     this repo's own `plan.toml`: `test_docs.py`'s
     `test_no_transition_this_repo_declares_drops_the_draft`."""
     document = well_formed()
@@ -374,7 +374,7 @@ def test_a_transition_carries_no_field_a_kind_replaced(field: str) -> None:
     reads the kind too. With no attribute to read, a branch in `cli.py` or
     `transition.py` that asked would fail the first time it ran, rather than
     answering from a second writer."""
-    assert not hasattr(load(FIXTURES / "plan.toml").transitions["espalier"], field)
+    assert not hasattr(load(FIXTURE).transitions["espalier"], field)
 
 
 def test_an_unknown_kind_refuses_naming_the_kinds() -> None:
@@ -413,7 +413,7 @@ def test_a_to_on_a_kind_that_does_not_move_refuses(kind: str, says: str) -> None
 def test_a_kind_that_stays_lands_where_it_started() -> None:
     """The loader fills a staying kind's `to` from its `from`, once, so
     everything downstream reads where the item is when the run is over."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     tend = declaration.transitions["tend"]
     assert (tend.kind, tend.source, tend.to) == (
         "edit",
@@ -506,7 +506,7 @@ def test_without_every_kind_the_rules_across_tables_stay_quiet() -> None:
     [
         EXAMPLE,
         REPO / "src" / "fileplan" / "starter" / "plan.toml",
-        FIXTURES / "plan.toml",
+        FIXTURE,
     ],
     ids=["example", "starter", "fixture"],
 )
@@ -1145,7 +1145,7 @@ def test_refuses_naming_a_claims_field_refuses_by_name() -> None:
 
 
 def test_a_state_knows_which_capabilities_it_has() -> None:
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.states["orchard"].has("queued")
     assert not declaration.states["greenhouse"].has("queued")
     assert declaration.has("queued")
@@ -1154,7 +1154,7 @@ def test_a_state_knows_which_capabilities_it_has() -> None:
 def test_a_capabilitys_key_is_carried_but_not_declared() -> None:
     """`carried` is what an item may hold; `keys` is what `plan.toml`
     declares. A capability's key is in the first and never the second."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert "position" in declaration.carried
     assert "position" not in declaration.keys
     assert declaration.states["orchard"].capability_keys == ("position", "number")
@@ -1168,7 +1168,7 @@ def test_the_claimed_capability_is_implemented_and_gives_no_head_key() -> None:
     there."""
     assert CAPABILITIES == ("queued", "claimed", "numbered", "bulleted")
     assert "claimed" not in CAPABILITY_KEYS
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     bench = declaration.states["potting-bench"]
     assert bench.has("claimed") and bench.capability_keys == ()
     assert declaration.has("claimed")
@@ -1183,14 +1183,14 @@ def test_the_claims_fields_are_carried_only_where_a_state_claims() -> None:
     `plan.toml`, which claims: the suite must not depend on the host repo's
     vocabulary in either direction.
     """
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.has("claimed")
     for name in CLAIM_KEYS:
         assert name in declaration.carried
         assert name not in declaration.keys
 
     plain = Declaration(
-        source=FIXTURES / "plan.toml",
+        source=FIXTURE,
         root=FIXTURES,
         states={"greenhouse": State(name="greenhouse", path="greenhouse")},
         keys={},
@@ -1349,7 +1349,7 @@ def test_a_transition_carries_what_it_claims() -> None:
     """4-4: `claims` is read off the declaration like every other field. The
     fixture's `tend` claims where it stands and `bench` — which arrives in
     the same state — does not, so the option comes from the verb."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.transitions["tend"].claims
     assert declaration.transitions["pot-up"].claims
     assert not declaration.transitions["bench"].claims
@@ -1503,7 +1503,7 @@ def test_a_transition_naming_the_blocked_by_field_refuses(field: str) -> None:
 
 def test_a_declaration_reading_dependencies_carries_the_derived_field() -> None:
     """The fixture's `orchard` names one, so `--has blocked-by` reaches it."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.has_dependencies
     assert {depends.BLOCKED, depends.BLOCKS} <= set(declaration.carried)
 
@@ -1516,9 +1516,7 @@ def test_a_declaration_with_no_dependencies_carries_neither(
     nothing for `--has` to reach."""
     source = copy_fixture(
         tmp_path,
-        plan=(FIXTURES / "plan.toml")
-        .read_text()
-        .replace('dependencies      = "after"', ""),
+        plan=FIXTURE.read_text().replace('dependencies      = "after"', ""),
     )
     declaration = load(source)
     assert not declaration.has_dependencies
@@ -1552,7 +1550,7 @@ def test_the_same_reference_on_two_states_loads_clean() -> None:
 
 
 def test_a_state_carries_its_references_and_the_declaration_its_inverses() -> None:
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert dict(declaration.states["greenhouse"].references) == {
         "replaces": "replaced-by"
     }
@@ -1697,9 +1695,7 @@ def test_a_transition_naming_an_inverse_refuses_as_undeclared(field: str) -> Non
 def test_a_declaration_with_no_references_carries_no_inverse(tmp_path: Path) -> None:
     source = copy_fixture(
         tmp_path,
-        plan=re.sub(
-            r"(?m)^references\s*=.*\n", "", (FIXTURES / "plan.toml").read_text()
-        ),
+        plan=re.sub(r"(?m)^references\s*=.*\n", "", FIXTURE.read_text()),
     )
     declaration = load(source)
     assert not declaration.has_references
@@ -1795,7 +1791,7 @@ def test_the_fixtures_carrier_state_reads_its_owner_off_the_declaration() -> Non
     """The fixture's carrier names a **tree of `orchard`**, in the fixture's
     own words — so nothing about the check can pass by agreeing with this
     repo's `opened-for`, `sub-phase` or `done`."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.states["propagator"].opened_for == "for-tree"
 
 
@@ -1803,7 +1799,7 @@ def test_naming_an_owner_gives_a_row_no_key_at_all() -> None:
     """Unlike every capability, this derives no field: what comes out of it is
     a refusal at the close, not a value beside an item. So there is nothing
     here for `--has` to reach, and nothing to refuse a redeclaration of."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert OPENED_FOR not in declaration.carried
 
 
@@ -1849,7 +1845,7 @@ def test_the_stale_field_is_carried_by_every_declaration() -> None:
     """31-1: the age needs no switch, so even a declaration of one plain
     state carries it, and `--has` and `--lacks` reach it everywhere."""
     plain = Declaration(
-        source=FIXTURES / "plan.toml",
+        source=FIXTURE,
         root=FIXTURES,
         states={"greenhouse": State(name="greenhouse", path="greenhouse")},
         keys={},
@@ -1857,7 +1853,7 @@ def test_the_stale_field_is_carried_by_every_declaration() -> None:
     )
     for name in STALE_KEYS:
         assert name in plain.carried
-        assert name not in load(FIXTURES / "plan.toml").keys
+        assert name not in load(FIXTURE).keys
 
 
 # --------------------------------------------------------------------------
@@ -2068,7 +2064,7 @@ def test_a_transition_carries_what_it_mints() -> None:
     """`claims`' field, read off the declaration the same way. The fixture's
     `espalier` mints and `graft-on` — an in-place verb into the same state —
     does not, which is what says the option comes from the verb."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.transitions["espalier"].kind == "add-bullet"
     assert declaration.transitions["graft-on"].kind == "edit"
     assert declaration.transitions["harvest"].kind == "move"
@@ -2134,7 +2130,7 @@ def test_a_transition_carries_the_word_it_marks() -> None:
     workflow's and the tool supplies only the bold around it. The fixture's
     `pot-on` marks and `mist` — the verb that writes the bullets it marks —
     does not, which is what says the positional comes from the verb."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.transitions["pot-on"].marks == "rooted"
     assert declaration.transitions["mist"].marks is None
     assert declaration.transitions["espalier"].marks is None
@@ -2330,7 +2326,7 @@ def test_a_transition_carries_the_table_it_files_by() -> None:
     capability and each role wants a name. The fixture's `line-out` files
     and `pot-on` beside it does not, which is what says the options come from
     the verb rather than from the state they share."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.transitions["line-out"].files == {
         "state": "greenhouse",
         "item": "batch",
@@ -2344,7 +2340,7 @@ def test_a_transition_carries_the_table_it_files_by() -> None:
 def test_a_filing_verb_reads_the_keys_it_writes_onto_the_filed_item() -> None:
     """`files_sets` is the table's `sets`, so no caller reaches into it, and
     the carrier's own `sets` stays empty: the key lands where it is written."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.transitions["line-out"].files_sets == ("cultivar",)
     assert declaration.transitions["line-out"].sets == ()
     assert declaration.transitions["pot-on"].files_sets == ()
@@ -2657,7 +2653,7 @@ def test_a_numbered_state_with_no_floor_loads_and_begins_at_one() -> None:
     document = floored(well_formed(), 192)
     del document["states"]["orchard"][FIRST_NUMBER]
     assert shape_errors(document) == []
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.states["orchard"].first_number == 1
 
 
@@ -2749,7 +2745,7 @@ def test_a_transition_carries_whether_it_archives() -> None:
     state, does not, so the flag comes from the verb rather than from either
     state it names. Every way out of `orchard` archives, because the state is
     numbered."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.transitions["grub-out"].archives
     assert not declaration.transitions["espalier"].archives
 
@@ -2913,7 +2909,7 @@ def test_a_transition_carries_whether_it_dissolves() -> None:
     """The fixture's shapes, read off the declaration: `fell` archives and
     dissolves, `compost` only dissolves, and `grub-out` — which archives out of
     the same state `fell` does — dissolves nothing."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.transitions["fell"].kind == "close"
     assert declaration.transitions["fell"].archives
     assert declaration.transitions["compost"].kind == "close"
@@ -2924,7 +2920,7 @@ def test_a_transition_carries_whether_it_dissolves() -> None:
 def test_a_dissolving_verb_names_no_destination() -> None:
     """`to` is `None` rather than a state, which is what lets the executor ask
     "is there a destination?" instead of every arm re-deriving it."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.transitions["fell"].to is None
     assert declaration.transitions["grub-out"].to == "firewood"
 
@@ -2933,7 +2929,7 @@ def test_a_dissolving_verb_leaves_its_source_state() -> None:
     """`_leaves` is true of a `None` destination, so a dissolving verb is
     graded like any other leaving verb's. It is pinned because nothing else
     would notice if it stopped being true."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.transitions["fell"].leaves
     assert declaration.transitions["compost"].leaves
 
@@ -3011,7 +3007,7 @@ def test_a_verb_that_dissolves_and_absorbs_is_well_formed() -> None:
 def test_a_transition_carries_whether_it_absorbs() -> None:
     """The fixture's shapes read off the declaration: `inarch` absorbs, and
     the verbs that dissolve or archive without absorbing do not."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.transitions["inarch"].kind == "merge"
     assert declaration.transitions["compost"].kind == "close"
     assert declaration.transitions["fell"].kind == "close"
@@ -3108,7 +3104,7 @@ def test_an_empty_archive_file_is_a_repo_that_has_closed_nothing(
 def test_the_register_key_is_carried_and_never_declared() -> None:
     """`number` is the tool's, like `position`: minted on entry and dropped on
     exit, so a declaration naming it would be a second spelling of that rule."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert "number" in declaration.carried
     assert "number" not in declaration.keys
 
@@ -3153,7 +3149,7 @@ def test_a_transition_setting_a_key_of_another_name_loads_clean() -> None:
 
 def test_the_shipped_declaration_and_the_fixture_both_still_load() -> None:
     """The refusal is a real rule, so this says neither tree tripped it."""
-    for path in (EXAMPLE, FIXTURES / "plan.toml"):
+    for path in (EXAMPLE, FIXTURE):
         assert load(path).transitions
 
 
@@ -3339,7 +3335,7 @@ SINGLE_VALUE = [
 
 
 def fixture_document() -> dict:
-    return tomllib.loads((FIXTURES / "plan.toml").read_text())
+    return tomllib.loads(FIXTURE.read_text())
 
 
 @pytest.mark.parametrize(("where", "field"), SINGLE_VALUE)
@@ -3561,7 +3557,7 @@ def test_a_transition_knows_whether_it_ends_the_state_it_is_in(
     """One predicate, so the validator and the executor cannot disagree about
     which verbs end a state: `bed-out` leaves the bench, `tend` writes in
     place, and `pot-up` has no state to leave."""
-    assert load(FIXTURES / "plan.toml").transitions[name].leaves is leaves
+    assert load(FIXTURE).transitions[name].leaves is leaves
 
 
 # --------------------------------------------------------------------------
@@ -3657,7 +3653,7 @@ def test_the_identity_doc_is_graded_like_every_other_pointer() -> None:
 
 
 def test_a_loaded_declaration_carries_the_declared_names_in_order() -> None:
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.pid_names == ("GREENHOUSE_PID", "SPROUT_PID")
 
 
@@ -3872,7 +3868,7 @@ def test_an_empty_env_override_still_does_not_fall_back(
 
 def test_transitions_iterate_in_toml_document_order() -> None:
     """1-3: subcommands register in this order, so it is not incidental."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert list(declaration.transitions) == [
         "transplant",
         "sprout",
@@ -3904,7 +3900,7 @@ def test_transitions_iterate_in_toml_document_order() -> None:
 
 
 def test_a_states_path_is_carried_through_verbatim() -> None:
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.states["orchard"].path == "orchard"
 
 
@@ -3912,7 +3908,7 @@ def test_the_next_sub_phase_field_is_carried_where_a_state_counts() -> None:
     """`--has` and `--lacks` reach what a row carries, so a body-derived field
     that no filter could name would be a fact you have to read every line to
     find."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.counts_sub_phases
     assert subphase.NEXT in declaration.carried
     assert subphase.NEXT not in declaration.keys
@@ -3922,7 +3918,7 @@ def test_nothing_is_carried_for_a_declaration_that_counts_no_sub_phases() -> Non
     """Corpus-independent, and declaration-dependent: a workflow with no
     counted state has no such field on a row and none in its filters."""
     plain = Declaration(
-        source=FIXTURES / "plan.toml",
+        source=FIXTURE,
         root=FIXTURES,
         states={"greenhouse": State(name="greenhouse", path="greenhouse")},
         keys={},
@@ -4049,7 +4045,7 @@ def test_this_repos_plan_state_declares_two_marking_verbs() -> None:
 def test_derived_lists_the_gated_names_in_table_order() -> None:
     """The fixture opts into every gate, so `derived` is the whole roster
     — and in the roster's order, which is the order a row spells them."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.derived == (*DERIVABLE, *declaration.inverses)
     assert declaration.derived == (
         *CLAIM_KEYS,
@@ -4067,7 +4063,7 @@ def test_a_declaration_with_no_such_state_derives_only_the_age() -> None:
     Graded on a document rather than on the worked example, which claims and
     counts."""
     plain = Declaration(
-        source=FIXTURES / "plan.toml",
+        source=FIXTURE,
         root=FIXTURES,
         states={"greenhouse": State(name="greenhouse", path="greenhouse")},
         keys={},
@@ -4081,7 +4077,7 @@ def test_a_declaration_with_no_such_state_derives_only_the_age() -> None:
 def test_every_derived_name_is_carried() -> None:
     """`carried` is what `--has` and `--lacks` reach, so a derived key it
     omitted would be a field on every row that no filter could name."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert set(declaration.derived) <= set(declaration.carried)
     assert subphase.NAME in declaration.carried
 
@@ -4090,7 +4086,7 @@ def test_no_derived_name_is_also_a_declared_key() -> None:
     """The roster's names are the tool's, and every one of them refuses as a
     redeclaration — which the refusal tests above grade one at a time. Here
     is the same fact said over the whole roster at once."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     for name in DERIVABLE:
         assert name not in declaration.keys
 
@@ -4101,7 +4097,7 @@ def test_the_roster_gates_read_the_declaration_and_nothing_else() -> None:
     way. Graded by calling every one of them on a declaration with no tree
     behind it at all."""
     plain = Declaration(
-        source=FIXTURES / "plan.toml",
+        source=FIXTURE,
         root=FIXTURES / "nowhere",
         states={"greenhouse": State(name="greenhouse", path="greenhouse")},
         keys={},
@@ -4222,7 +4218,7 @@ def test_a_sort_naming_a_derived_key_the_state_gives_loads() -> None:
 
 
 def test_the_fixture_orchard_carries_its_declared_sort() -> None:
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.states["orchard"].sort == "position"
     assert declaration.states["greenhouse"].sort is None
 
@@ -4308,7 +4304,7 @@ def test_a_state_sorts_by_each_derived_group_it_carries() -> None:
 
 def test_a_state_without_listed_is_listed() -> None:
     """Absent means listed, so a forgotten field hides nothing."""
-    declaration = load(FIXTURES / "plan.toml")
+    declaration = load(FIXTURE)
     assert declaration.states["greenhouse"].listed is True
     assert declaration.states["firewood"].listed is False
 
@@ -4327,7 +4323,7 @@ def test_a_listed_that_is_not_a_bool_refuses_by_name(value: object) -> None:
 
 
 def test_the_declaration_names_its_unlisted_states(tmp_path: Path) -> None:
-    assert load(FIXTURES / "plan.toml").unlisted == ("firewood",)
+    assert load(FIXTURE).unlisted == ("firewood",)
     copy_fixture(tmp_path)
     plan = tmp_path / "plan.toml"
     plan.write_text(plan.read_text().replace("listed = false\n", ""))

@@ -36,7 +36,7 @@ from fileplan import numbered, queued
 from fileplan.declaration import (
     CAPABILITY_KEYS,
     INTRINSIC_KEYS,
-    SUFFIX,  # noqa: F401  re-exported, read elsewhere as `item.SUFFIX`
+    SUFFIX,  # also read elsewhere as `item.SUFFIX`
     Declaration,
     Refusal,
     State,
@@ -46,9 +46,15 @@ from fileplan.declaration import (
 
 FENCE = "+++"
 
-#: What an item file is called: its slug, then `SUFFIX`. The suffix is
-#: declared beside `[fileplan].ignore`'s check and read here, by the executor
-#: that writes an item and the traversal that finds one, as `item.SUFFIX`.
+
+def filename(slug: str) -> str:
+    """What an item file is called: its slug, then `SUFFIX`.
+
+    The suffix is declared beside `[fileplan].ignore`'s check. The executor
+    writes an item under this name, and the traversal finds one by
+    `item.SUFFIX`.
+    """
+    return f"{slug}{SUFFIX}"
 
 
 @dataclass(frozen=True)
@@ -364,9 +370,17 @@ def not_usable(path: Path, root: Path, noun: str) -> str:
     return f"{named(path, root)} is not a usable {noun}"
 
 
+def text(head: Mapping[str, Any], body: str) -> str:
+    """The text `write` puts down for `head` and `body`.
+
+    A caller that compares against a write reads it here, never composes it.
+    """
+    return render(table(head), body)
+
+
 def write(item: Item) -> None:
     """Render `item` and put it in place of its file, atomically."""
-    replace(item.path, render(table(item.head), item.body))
+    replace(item.path, text(item.head, item.body))
 
 
 def replace(path: Path, text: str) -> None:

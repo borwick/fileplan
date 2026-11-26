@@ -29,7 +29,7 @@ import os
 from importlib import resources
 from pathlib import Path
 
-from fileplan.declaration import PLAN_TOML_NAME, Refusal, load
+from fileplan.declaration import PLAN_TOML_NAME, Refusal, found_above, load
 from fileplan.lock import LOCAL_DIR
 
 #: The package directory the example tree ships in.
@@ -127,12 +127,11 @@ def _refuse_an_existing_install(target: Path) -> None:
     would change meaning with the directory it ran from.
     """
     here = target.resolve()
-    if (here / PLAN_TOML_NAME).is_file():
-        return _already(here / PLAN_TOML_NAME, "already")
-    for directory in here.parents:
-        if (candidate := directory / PLAN_TOML_NAME).is_file():
-            return _already(candidate, "under a tree that is already")
-    return None
+    if (found := found_above(here)) is None:
+        return None
+    if found.parent == here:
+        return _already(found, "already")
+    return _already(found, "under a tree that is already")
 
 
 def _already(found: Path, said: str) -> None:

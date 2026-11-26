@@ -13,7 +13,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
@@ -773,17 +773,12 @@ def _placement_options(transition: Transition) -> list[click.Parameter]:
 
     Generated where `_places` says placing is something the run does.
     """
-    for flag, *_ in PLACEMENT:
-        _own_flag(
-            transition,
-            flag,
-            f"a transition into a {queued.NAME} state",
-            "for where the item goes in the order",
-        )
-    return [
-        click.Option([f"--{flag}", flag], metavar=metavar, type=kind, help=said)
-        for flag, metavar, kind, said in PLACEMENT
-    ]
+    return _roster(
+        PLACEMENT,
+        transition,
+        f"a transition into a {queued.NAME} state",
+        "for where the item goes in the order",
+    )
 
 
 def _minting_options(transition: Transition) -> list[click.Parameter]:
@@ -792,23 +787,12 @@ def _minting_options(transition: Transition) -> list[click.Parameter]:
     `_placement_options`' shape. `--title` cannot collide with the positional: an add-bullet always
     has a `from`, so its positional is an item rather than a title.
     """
-    for flag, *_ in MINTING:
-        _own_flag(
-            transition,
-            flag,
-            "a transition that mints a sub-phase",
-            "for what it writes into the body",
-        )
-    return [
-        click.Option(
-            [f"--{flag}", flag],
-            metavar=metavar,
-            type=kind,
-            is_flag=kind is None,
-            help=said,
-        )
-        for flag, metavar, kind, said in MINTING
-    ]
+    return _roster(
+        MINTING,
+        transition,
+        "a transition that mints a sub-phase",
+        "for what it writes into the body",
+    )
 
 
 def _writing_options() -> list[click.Parameter]:
@@ -818,17 +802,7 @@ def _writing_options() -> list[click.Parameter]:
     no `sets`, so no declared key can be called either. See
     examples/docs/reference.md#annotate
     """
-    return [
-        click.Option(
-            [f"--{flag}", flag],
-            metavar=metavar,
-            type=kind,
-            is_flag=kind is None,
-            required=kind is not None,
-            help=said,
-        )
-        for flag, metavar, kind, said in WRITING
-    ]
+    return _roster(WRITING, required=True)
 
 
 def _filing_options(transition: Transition) -> list[click.Parameter]:
@@ -838,16 +812,42 @@ def _filing_options(transition: Transition) -> list[click.Parameter]:
     `--body` is refused by the executor in the creating verb's own words.
     See examples/docs/reference.md#filing
     """
-    for flag, *_ in FILING:
-        _own_flag(
-            transition,
-            flag,
-            "a transition that files an item",
-            "for what it writes into that item",
-        )
+    return _roster(
+        FILING,
+        transition,
+        "a transition that files an item",
+        "for what it writes into that item",
+    )
+
+
+def _roster(
+    roster: Sequence[tuple[str, str | None, Any, str]],
+    transition: Transition | None = None,
+    taker: str = "",
+    purpose: str = "",
+    *,
+    required: bool = False,
+) -> list[click.Parameter]:
+    """One option per `(flag, metavar, type, help)` in `roster`.
+
+    Given a `transition`, each flag is first checked against its declared
+    keys, as `_own_flag` says, `taker` and `purpose` wording the refusal. A
+    row whose type is `None` is a bare flag, and `required` holds for every
+    other row: a flag is never required.
+    """
+    if transition is not None:
+        for flag, *_ in roster:
+            _own_flag(transition, flag, taker, purpose)
     return [
-        click.Option([f"--{flag}", flag], metavar=metavar, type=kind, help=said)
-        for flag, metavar, kind, said in FILING
+        click.Option(
+            [f"--{flag}", flag],
+            metavar=metavar,
+            type=kind,
+            is_flag=kind is None,
+            required=required and kind is not None,
+            help=said,
+        )
+        for flag, metavar, kind, said in roster
     ]
 
 
@@ -976,18 +976,30 @@ def _option(
     `requires`, which the run supplies rather than the head. Otherwise a key
     that must be present is enforced by the next transition's `requires`.
     See examples/docs/reference.md#transitions. A list-valued key's option repeats and says so in its metavar, because click
-    renders no marker of its own.
+    renders no marker of its own. Given `''`, the option clears the key.
     See examples/docs/reference.md#list-valued
     """
     key = declaration.keys[key_name]
     return click.Option(
         [f"--{key_name}", _variable(key_name)],
-        type=click.Choice(key.values) if key.values else None,
+        type=_Clearable(key.values) if key.values else None,
         multiple=key.list_valued,
         metavar=_repeated(key) if key.list_valued else None,
         required=required,
         help=key.help,
     )
+
+
+class _Clearable(click.Choice):
+    """A closed key's choices, which also take `''`: the value that clears
+    the key. Left out of `choices`, so `--help` and `--json` list only the
+    values a key may hold. See examples/docs/reference.md#transitions
+    """
+
+    def convert(
+        self, value: Any, param: click.Parameter | None, ctx: click.Context | None
+    ) -> Any:
+        return "" if value == "" else super().convert(value, param, ctx)
 
 
 def _repeated(key: Key) -> str:
@@ -1539,28 +1551,23 @@ def _stranded(one: Mapping[str, Any]) -> str:
     )
 
 
-def _unknown(one: Mapping[str, Any]) -> str:
-    """One edge naming nothing filed, as the text form's exception line.
+def _dangling(label: str) -> Callable[[Mapping[str, Any]], str]:
+    """The text form's exception line for an edge naming nothing filed,
+    opening with `label`: a dependency's or a reference's.
 
-    Named rather than read as satisfied. See examples/docs/reference.md#dependencies
+    Named rather than read as satisfied. See
+    examples/docs/reference.md#dependencies and
+    examples/docs/reference.md#references
     """
-    return (
-        f"unknown dependency: {one[depends.SLUG]} names "
-        f'"{one[depends.NAMES]}" in {one[depends.KEY]}, and no item carries '
-        "that slug"
-    )
 
+    def line(one: Mapping[str, Any]) -> str:
+        return (
+            f"{label}: {one[depends.SLUG]} names "
+            f'"{one[depends.NAMES]}" in {one[depends.KEY]}, and no item carries '
+            "that slug"
+        )
 
-def _unresolved(one: Mapping[str, Any]) -> str:
-    """One reference naming nothing filed, as the text form's exception line.
-
-    `_unknown`'s shape, for a reference. See examples/docs/reference.md#references
-    """
-    return (
-        f"unresolved reference: {one[depends.SLUG]} names "
-        f'"{one[depends.NAMES]}" in {one[depends.KEY]}, and no item carries '
-        "that slug"
-    )
+    return line
 
 
 def _unfound(one: Mapping[str, Any]) -> str:
@@ -1693,9 +1700,9 @@ def _unread(one: Mapping[str, Any]) -> str:
 REPORT_LINES: Mapping[str, Callable[[Any], str] | None] = {
     "stranded": _stranded,
     "undecomposed": _undecomposed,
-    "unknown": _unknown,
+    "unknown": _dangling("unknown dependency"),
     "misordered": _misordered,
-    "unresolved": _unresolved,
+    "unresolved": _dangling("unresolved reference"),
     "gaps": _gap,
     "lost": _lost,
     "register": None,
@@ -1740,12 +1747,7 @@ def _sorts(declaration: Declaration, given: tuple[str, ...]) -> list[read.Sort]:
     would drop the other without saying so.
     """
     sorts = [read.sorting(declaration, one) for one in given]
-    keys = [one.key for one in sorts]
-    if twice := next((key for key in keys if keys.count(key) > 1), None):
-        raise Refusal(
-            f"--sort names {twice} {keys.count(twice)} times, and a key sorts "
-            "one way. Keeping one would drop the others without saying so"
-        )
+    _once("--sort", [one.key for one in sorts], "a key sorts one way")
     return sorts
 
 
@@ -1753,12 +1755,21 @@ def _fields(declaration: Declaration, given: tuple[str, ...]) -> tuple[str, ...]
     """Every `--fields` KEY, checked before the walk, or refuse, as `_sorts`
     refuses a repeated key."""
     keys = tuple(read.field(declaration, one) for one in given)
+    _once("--fields", keys, "a row holds a key once")
+    return keys
+
+
+def _once(option: str, keys: Sequence[str], why: str) -> None:
+    """Refuse the first of `keys` that `option` was given more than once.
+
+    `why` says what the option does with a key, so the refusal can say why
+    a second one cannot be kept.
+    """
     if twice := next((key for key in keys if keys.count(key) > 1), None):
         raise Refusal(
-            f"--fields names {twice} {keys.count(twice)} times, and a row holds "
-            "a key once. Keeping one would drop the others without saying so"
+            f"{option} names {twice} {keys.count(twice)} times, and {why}. "
+            "Keeping one would drop the others without saying so"
         )
-    return keys
 
 
 # --------------------------------------------------------------------------

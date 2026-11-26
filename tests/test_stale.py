@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+from conftest import GARDENER
 from dulwich.index import commit_tree
 from dulwich.objects import Blob, Commit
 from dulwich.repo import Repo
@@ -23,8 +24,6 @@ from fileplan import stale
 
 #: The day every backdated commit is measured against. Any fixed date will do.
 TODAY = dt.date(2026, 9, 4)
-
-WHO = b"A Gardener <gardener@example.invalid>"
 
 
 # --------------------------------------------------------------------------
@@ -71,21 +70,26 @@ def write(root: Path, name: str, text: str = "hello") -> Path:
     return path
 
 
-def commit(repo: Repo, *names: str, ago: int, message: bytes = b"a commit") -> None:
-    """Stage ``names`` and commit them, authored ``ago`` days before
-    `TODAY` at noon UTC — so the date the tool reads is that day and no
-    other, whatever zone the suite runs in."""
-    when = int(
+def noon(ago: int) -> int:
+    """Noon UTC ``ago`` days before `TODAY`, as a timestamp: the date the tool
+    reads is that day and no other, whatever zone the suite runs in."""
+    return int(
         dt.datetime.combine(
             TODAY - dt.timedelta(days=ago), dt.time(12), tzinfo=dt.UTC
         ).timestamp()
     )
+
+
+def commit(repo: Repo, *names: str, ago: int, message: bytes = b"a commit") -> None:
+    """Stage ``names`` and commit them, authored at `noon` ``ago`` days
+    before `TODAY`."""
+    when = noon(ago)
     worktree = repo.get_worktree()
     worktree.stage([name.encode("utf-8") for name in names])
     worktree.commit(
         message,
-        committer=WHO,
-        author=WHO,
+        committer=GARDENER,
+        author=GARDENER,
         author_timestamp=when,
         author_timezone=0,
         commit_timestamp=when,
@@ -204,11 +208,7 @@ def raw_commit(
     """A commit of exactly ``files`` on ``parents``, built as objects and
     pointed at by HEAD, so two branches can hold different trees with no
     worktree or index in between."""
-    when = int(
-        dt.datetime.combine(
-            TODAY - dt.timedelta(days=ago), dt.time(12), tzinfo=dt.UTC
-        ).timestamp()
-    )
+    when = noon(ago)
     blobs = []
     for name, text in files.items():
         blob = Blob.from_string(text)
@@ -217,7 +217,7 @@ def raw_commit(
     made = Commit()
     made.tree = commit_tree(repo.object_store, blobs)
     made.parents = parents
-    made.author = made.committer = WHO
+    made.author = made.committer = GARDENER
     made.author_time = made.commit_time = when
     made.author_timezone = made.commit_timezone = 0
     made.message = b"a commit"

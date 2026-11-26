@@ -23,12 +23,13 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-from conftest import EXAMPLE, FIXTURES, REPO, copy_fixture
+from conftest import EXAMPLE, FIXTURE, REPO, copy_fixture
 
 from fileplan import claim
 from fileplan.claim import ALIVE, DEAD, ELSEWHERE, UNKNOWN, Claim, Identity
@@ -41,11 +42,6 @@ VENDOR = ("CLAUDE_PID", "CLAUDE_CODE_SESSION_ID")
 TAKEN = dt.datetime(2026, 9, 2, 14, 30, tzinfo=dt.UTC)
 
 HERE = Identity(host="this-host", pid=4213)
-
-
-@pytest.fixture
-def declaration() -> Declaration:
-    return load(FIXTURES / "plan.toml")
 
 
 # --------------------------------------------------------------------------
@@ -104,7 +100,7 @@ def test_a_declaration_with_no_identity_table_offers_no_pid(
     available, which is a usable declaration as long as no state claims
     anything — a `claimed` state without one refuses at load, and that
     refusal is `test_declaration.py`'s."""
-    text = (FIXTURES / "plan.toml").read_text()
+    text = FIXTURE.read_text()
     # Both halves of the capability come out together: a verb that claims into
     # a state that does not opt in refuses, which is what says the two are one
     # declaration read from its two ends.
@@ -417,9 +413,13 @@ def tree(tmp_path: Path) -> Declaration:
     return load(tmp_path / "plan.toml")
 
 
-def written(root: Path, slug: str, *, host: str, pid: int | None = None) -> Path:
-    """A claim record written by hand under `root`, taken at `TAKEN`."""
+def written(
+    root: Path, slug: str, *, host: str | None = None, pid: int | None = None
+) -> Path:
+    """A claim record written by hand under `root`, taken at `TAKEN`, on this
+    host unless `host` names another."""
     path = claim.path(root, slug)
+    host = socket.gethostname() if host is None else host
     claim.write(path, Claim(host=host, pid=pid, taken=TAKEN))
     return path
 

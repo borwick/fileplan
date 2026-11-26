@@ -29,10 +29,19 @@ from typing import Any
 
 import click
 import pytest
-from conftest import EXAMPLE, RECORD_TEXT, REPO, UNPRUNED, UNSTRUCK, copy_fixture
-from dulwich.repo import Repo
+from conftest import (
+    EXAMPLE,
+    RECORD_TEXT,
+    REPO,
+    UNPRUNED,
+    UNSTRUCK,
+    cli_tree,
+    commit_files,
+    staked,
+    unclaimed,
+)
 
-from fileplan import claim, cli, render, subphase
+from fileplan import claim, cli, item, render, subphase
 from fileplan.cli import (
     CHECK,
     FILING,
@@ -67,19 +76,31 @@ RESERVED_OPTIONS = (
 # that is honestly dead is, each have one home rather than a copy in every
 # test that needs them.
 from test_claim import exited, written
-from test_docs import CITATION
+from test_docs import CITATION, _verb
 
 
 @pytest.fixture
 def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A tree the CLI discovers the way an operator's would: cwd plus the
-    environment override, both pointed at a copy of the fixture."""
-    copy_fixture(tmp_path)
-    for state in load(tmp_path / "plan.toml").states.values():
-        (tmp_path / state.path).mkdir(parents=True)
-    monkeypatch.setenv("FILEPLAN_PLAN_TOML", str(tmp_path / "plan.toml"))
-    monkeypatch.chdir(tmp_path)
-    return tmp_path
+    return cli_tree(tmp_path, monkeypatch)
+
+
+def listing(capsys: pytest.CaptureFixture[str], *given: str) -> dict[str, Any]:
+    """``list --json`` over ``given``, as the envelope it printed."""
+    capsys.readouterr()
+    assert main(["list", "--json", *given]) == 0
+    return json.loads(capsys.readouterr().out)
+
+
+def rows(capsys: pytest.CaptureFixture[str], *given: str) -> list[dict]:
+    """``list --json`` over ``given``, as the rows it found."""
+    return listing(capsys, *given)["rows"]
+
+
+def helped(capsys: pytest.CaptureFixture[str], *argv: str) -> str:
+    """What ``fileplan ARGV --help`` prints."""
+    capsys.readouterr()
+    assert main([*argv, "--help"]) == 0
+    return capsys.readouterr().out
 
 
 # --------------------------------------------------------------------------
@@ -90,8 +111,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_every_declared_transition_registers_as_a_subcommand(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main(["--help"]) == 0
-    out = capsys.readouterr().out
+    out = helped(capsys)
     for name in load(tree / "plan.toml").transitions:
         assert name in out
 
@@ -102,16 +122,14 @@ def test_help_lists_transitions_in_toml_order_not_alphabetically(
     """`plan.toml` declares `transplant` before `sprout`: document order is not
     alphabetical order, which is what makes this mean something. The
     workflow's order is the sequence work moves through."""
-    main(["--help"])
-    out = capsys.readouterr().out
+    out = helped(capsys)
     assert out.index("transplant") < out.index("sprout")
 
 
 def test_each_subcommand_carries_its_declared_help(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    main(["--help"])
-    out = capsys.readouterr().out
+    out = helped(capsys)
     for transition in load(tree / "plan.toml").transitions.values():
         assert transition.help in out
 
@@ -119,8 +137,7 @@ def test_each_subcommand_carries_its_declared_help(
 def test_a_transitions_set_keys_become_its_options(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    main(["sprout", "--help"])
-    out = capsys.readouterr().out
+    out = helped(capsys, "sprout")
     assert "--cultivar" in out
     # A key with declared `values` becomes a click.Choice.
     assert "heirloom" in out and "hybrid" in out
@@ -130,8 +147,7 @@ def test_a_transitions_set_keys_become_its_options(
 def test_a_moving_transition_takes_the_handle_and_no_body(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    main(["transplant", "--help"])
-    out = capsys.readouterr().out
+    out = helped(capsys, "transplant")
     assert "ITEM" in out
     assert "--body" not in out
     assert "--rootstock" in out
@@ -144,8 +160,7 @@ def test_the_read_takes_three_filters_and_no_option_named_after_a_key(
     no lock. A key is something `--has` *names*, so no key's name is an
     option, and no key's name is written in the CLI either way. `--sort` names
     a key the same way, and orders rather than filters."""
-    assert main(["list", "--help"]) == 0
-    out = capsys.readouterr().out
+    out = helped(capsys, "list")
     assert "--state" in out and "--json" in out
     assert "--has" in out and "--lacks" in out
     declared = load(tree / "plan.toml")
@@ -168,9 +183,7 @@ def test_the_read_takes_three_filters_and_no_option_named_after_a_key(
 
 def places(capsys: pytest.CaptureFixture[str], verb: str) -> int:
     """How many of the order options ``verb`` carries."""
-    capsys.readouterr()
-    assert main([verb, "--help"]) == 0
-    out = capsys.readouterr().out
+    out = helped(capsys, verb)
     return sum(one in out for one in ("--above", "--below", "--at"))
 
 
@@ -181,8 +194,7 @@ def test_a_transition_arriving_in_a_queued_state_carries_the_placement_options(
     `sets` keys become its `--options`: `transplant` moves into `orchard`,
     which is the fixture's `queued` state, so the tree arrives with no place
     and the run gives it one."""
-    assert main(["transplant", "--help"]) == 0
-    out = capsys.readouterr().out
+    out = helped(capsys, "transplant")
     assert "--above" in out and "--below" in out and "--at" in out
     assert "ITEM" in out and "N" in out
 
@@ -455,8 +467,7 @@ def test_the_help_says_the_option_repeats(
     second half of this test is what keeps the `[a|b]` before it from
     drifting: it is click's own rendering of the same `Choice`, and this
     builds a scalar option over that `Choice` to say so."""
-    assert main(["transplant", "--help"]) == 0
-    out = capsys.readouterr().out
+    out = helped(capsys, "transplant")
     assert "[aphid|canker|scab]..." in out
 
     values = load(tree / "plan.toml").keys["pest"].values
@@ -507,8 +518,7 @@ def test_a_word_in_a_title_finds_the_item_ignoring_case(
     assert main(["list", "--has", "title~ANOTHER", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert [row["slug"] for row in payload["rows"]] == ["another-seedling"]
-    assert main(["list", "--has", "title~seed", "--json"]) == 0
-    assert len(json.loads(capsys.readouterr().out)["rows"]) == 2
+    assert len(rows(capsys, "--has", "title~seed")) == 2
 
 
 def test_a_word_search_over_a_key_with_declared_values_refuses(
@@ -751,8 +761,7 @@ def test_a_state_is_listed_by_its_declared_name_not_its_path(
     (tree / "beds" / "hardening-off" / "a-seedling.md").write_text(
         '+++\ntitle = "A seedling"\n+++\n\nProse.\n'
     )
-    assert main(["list", "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys)
     assert row["state"] == "cold-frame"
     assert row["path"] == "beds/hardening-off/a-seedling.md"
 
@@ -824,10 +833,8 @@ def test_a_filter_value_may_carry_a_comparison(
     is the only reason `>=` means anything here."""
     filed(tree)
     capsys.readouterr()
-    assert main(["list", "--has", "cultivar>=hybrid", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["rows"] == []
-    assert main(["list", "--has", "cultivar<=heirloom", "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    assert rows(capsys, "--has", "cultivar>=hybrid") == []
+    (row,) = rows(capsys, "--has", "cultivar<=heirloom")
     assert row["slug"] == "a-seedling"
 
 
@@ -836,8 +843,7 @@ def test_has_and_lacks_ask_about_presence(
 ) -> None:
     filed(tree)
     capsys.readouterr()
-    assert main(["list", "--lacks", "cultivar", "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys, "--lacks", "cultivar")
     assert row["slug"] == "another-seedling"
 
 
@@ -846,10 +852,7 @@ def test_two_filters_narrow_together(
 ) -> None:
     filed(tree)
     capsys.readouterr()
-    assert (
-        main(["list", "--state", "orchard", "--has", "cultivar=hybrid", "--json"]) == 0
-    )
-    assert json.loads(capsys.readouterr().out)["rows"] == []
+    assert rows(capsys, "--state", "orchard", "--has", "cultivar=hybrid") == []
 
 
 def test_a_filter_value_outside_a_keys_values_refuses_by_name(
@@ -920,11 +923,6 @@ def sorted_orchard(tree: Path) -> None:
     assert main(["sprout", "Zebra", "--body", "Prose."]) == 0
 
 
-def sorted_listing(capsys: pytest.CaptureFixture[str], *given: str) -> dict:
-    assert main(["list", *given, "--json"]) == 0
-    return json.loads(capsys.readouterr().out)
-
-
 def test_a_sort_orders_numbers_as_numbers_within_each_state(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -932,14 +930,14 @@ def test_a_sort_orders_numbers_as_numbers_within_each_state(
     no rootstock: a sort orders the rows inside a state, never across them."""
     sorted_orchard(tree)
     capsys.readouterr()
-    payload = sorted_listing(capsys, "--sort", "rootstock")
+    payload = listing(capsys, "--sort", "rootstock")
     assert [row["slug"] for row in payload["rows"]] == [
         "zebra",
         "birch",
         "apple",
         "cherry",
     ]
-    payload = sorted_listing(capsys, "--sort", "-rootstock")
+    payload = listing(capsys, "--sort", "-rootstock")
     assert [row["slug"] for row in payload["rows"]] == [
         "zebra",
         "apple",
@@ -963,7 +961,7 @@ def test_a_sort_names_each_item_missing_its_key(
         "(orchard/cherry.md)" in err
     )
     assert "unsorted: zebra" in err and "unsorted: apple" not in err
-    payload = sorted_listing(capsys, "--sort", "rootstock")
+    payload = listing(capsys, "--sort", "rootstock")
     assert [one["slug"] for one in payload["unsorted"]] == ["zebra", "cherry"]
 
 
@@ -994,10 +992,10 @@ def test_the_unsorted_report_follows_the_invocation_and_the_declaration(
     """Present but empty wherever the read sorts anything, which `orchard`'s
     declared sort makes every read here. Absent where nothing is declared and
     no `--sort` is given. The shape never depends on the corpus."""
-    assert sorted_listing(capsys)["unsorted"] == []
+    assert listing(capsys)["unsorted"] == []
     unsorting(tree)
-    assert "unsorted" not in sorted_listing(capsys)
-    assert sorted_listing(capsys, "--sort", "title")["unsorted"] == []
+    assert "unsorted" not in listing(capsys)
+    assert listing(capsys, "--sort", "title")["unsorted"] == []
 
 
 def test_a_declared_sort_orders_the_listing_and_a_sort_flag_replaces_it(
@@ -1010,10 +1008,10 @@ def test_a_declared_sort_orders_the_listing_and_a_sort_flag_replaces_it(
     orchard(tree, "Second tree")
     orchard(tree, "A wedge", "--above", "second-tree")
     capsys.readouterr()
-    rows = sorted_listing(capsys, "--state", "orchard")["rows"]
-    assert [row["slug"] for row in rows] == ["first-tree", "a-wedge", "second-tree"]
-    rows = sorted_listing(capsys, "--state", "orchard", "--sort", "title")["rows"]
-    assert [row["slug"] for row in rows] == ["a-wedge", "first-tree", "second-tree"]
+    found = rows(capsys, "--state", "orchard")
+    assert [row["slug"] for row in found] == ["first-tree", "a-wedge", "second-tree"]
+    found = rows(capsys, "--state", "orchard", "--sort", "title")
+    assert [row["slug"] for row in found] == ["a-wedge", "first-tree", "second-tree"]
 
 
 def test_a_queued_item_with_no_place_is_named_in_the_default_read(
@@ -1030,7 +1028,7 @@ def test_a_queued_item_with_no_place_is_named_in_the_default_read(
     out, err = capsys.readouterr()
     assert out.index("birch") < out.index("apple")
     assert "unsorted: apple carries no position" in err
-    payload = sorted_listing(capsys, "--state", "orchard")
+    payload = listing(capsys, "--state", "orchard")
     assert [one["slug"] for one in payload["unsorted"]] == ["apple"]
 
 
@@ -1043,9 +1041,8 @@ def test_an_offer_from_a_queued_state_comes_in_place_order(
     orchard(tree, "Second tree")
     orchard(tree, "A wedge", "--above", "second-tree")
     capsys.readouterr()
-    assert main(["list", "--has", "commands=grub-out", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert [row["slug"] for row in rows] == ["first-tree", "a-wedge", "second-tree"]
+    found = rows(capsys, "--has", "commands=grub-out")
+    assert [row["slug"] for row in found] == ["first-tree", "a-wedge", "second-tree"]
 
 
 def test_a_sort_naming_no_key_refuses_by_name(
@@ -1133,8 +1130,7 @@ def test_the_read_names_the_operator_in_its_own_help(
 ) -> None:
     """A word the read takes and does not spell is a word only somebody
     reading `src/` finds."""
-    assert main(["list", "--help"]) == 0
-    assert "pest:aphid,scab" in capsys.readouterr().out
+    assert "pest:aphid,scab" in helped(capsys, "list")
 
 
 # --------------------------------------------------------------------------
@@ -1222,7 +1218,7 @@ def test_the_toc_index_and_the_contract_cannot_disagree(
     assert main([]) == 0
     index = declared(capsys.readouterr().out)
     for name in declaration.transitions:
-        epilog = helped(name, capsys)
+        epilog = helped(capsys, name)
         block = epilog.partition("Declares\n")[2].partition("\n\n")[0]
         halves = [line.strip() for line in block.splitlines() if line.strip()]
         assert index.get(name, "") == ", ".join(halves), name
@@ -1272,8 +1268,7 @@ HELP_OPTION = re.compile(r"^  (--[\w-]+)")
 
 def scraped(argv: list[str], capsys: pytest.CaptureFixture[str]) -> set[str]:
     """Every option `fileplan ARGV --help` prints, `--help` itself aside."""
-    assert main([*argv, "--help"]) == 0
-    section = capsys.readouterr().out.split("Options:\n", 1)[1].split("\n\n")[0]
+    section = helped(capsys, *argv).split("Options:\n", 1)[1].split("\n\n")[0]
     found = {
         match[1] for line in section.splitlines() if (match := HELP_OPTION.match(line))
     }
@@ -1353,7 +1348,7 @@ def test_a_required_option_and_a_fixed_value_are_in_the_help(
     """Click marks the option `[required]`, and the `Writes` block follows
     `Drops`, the value written as declared."""
     stamped_transplant(tree)
-    out = helped("transplant", capsys)
+    out = helped(capsys, "transplant")
     rootstock = next(line for line in out.splitlines() if "--rootstock" in line)
     assert "[required]" in rootstock
     assert '  Drops\n    tag\n\n  Writes\n    planted = "{today}"\n' in out
@@ -1478,7 +1473,7 @@ def test_a_verb_declaring_nothing_carries_the_empty_keys_anyway(
     assert row["declares"] == []
     assert row["requires"] == [] and row["drops"] == [] and row["sets"] == []
     assert row["writes"] == {}
-    assert declared_by(helped("bed-out", capsys)) == ["move"]
+    assert declared_by(helped(capsys, "bed-out")) == ["move"]
 
 
 def test_the_reading_block_answers_the_shared_half_question(
@@ -1576,7 +1571,7 @@ def test_the_text_contract_and_the_json_are_two_renderings_of_one_function(
     rows = {row["name"]: row for row in declaration_json(capsys)["rows"]}
     assert rows
     for name, row in rows.items():
-        assert printed_epilog(helped(name, capsys)) == rebuilt(row), name
+        assert printed_epilog(helped(capsys, name)) == rebuilt(row), name
 
 
 def test_a_command_beside_the_declarations_json_refuses(
@@ -1677,7 +1672,7 @@ def test_an_entry_holding_a_comma_refuses_naming_it_and_the_option(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Refused, never split: `--has 'KEY:a,b'` reads a comma as a separator,
-    so the entry could never be matched. `--check` says the same."""
+    so the entry could never be matched."""
     for check in ([], ["--check"]):
         invocation = ["sprout", "A seedling", "--body", "P.", "--replaces", "a,b"]
         assert main([*invocation, *check]) == 2
@@ -1832,10 +1827,13 @@ def test_a_plan_toml_refusal_names_the_declaration_as_given(tree: Path) -> None:
 # --------------------------------------------------------------------------
 
 
-def orchard(tree: Path, title: str, *placement: str) -> None:
-    assert main(["sprout", title, "--body", "Prose.", "--cultivar", "heirloom"]) == 0
-    slug = title.lower().replace(" ", "-")
+def orchard(tree: Path, title: str, *placement: str, body: str = "Prose.") -> str:
+    """One seedling sprouted with `body` and transplanted into the orchard,
+    at `placement` when one is given. Returns its slug."""
+    assert main(["sprout", title, "--body", body, "--cultivar", "heirloom"]) == 0
+    slug = item.slug(title)
     assert main(["transplant", slug, *placement]) == 0
+    return slug
 
 
 def test_the_count_of_sub_phases_reaches_both_renderings(
@@ -1856,8 +1854,7 @@ def test_the_count_of_sub_phases_reaches_both_renderings(
     assert main(["list", "--state", "orchard"]) == 0
     assert "sub-phases       3" in capsys.readouterr().out
 
-    assert main(["list", "--state", "orchard", "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys, "--state", "orchard")
     assert row["sub-phases"] == 3
 
 
@@ -1981,16 +1978,8 @@ def test_a_cursor_survives_a_bullet_inserted_above_the_one_it_names(
     assert main(["graft-on", "first-tree", "--graft-status", "done"]) == 0
     assert 'graft = "graft-3"' in path.read_text()
     capsys.readouterr()
-    assert main(["list", "--state", "orchard", "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys, "--state", "orchard")
     assert (row["graft"], row["sub-phases"]) == ("graft-3", 4)
-
-
-def rows(capsys: pytest.CaptureFixture[str], *given: str) -> list[dict]:
-    """``list --json`` over ``given``, as the rows it found."""
-    capsys.readouterr()
-    assert main(["list", "--json", *given]) == 0
-    return json.loads(capsys.readouterr().out)["rows"]
 
 
 def test_the_next_sub_phase_is_in_the_default_read_and_moves_with_the_verb(
@@ -2256,8 +2245,7 @@ def test_the_body_is_never_read_to_find_the_status(
     assert main(["graft-on", "first-tree", "--graft-status", "open"]) == 0
     capsys.readouterr()
 
-    assert main(["list", "--state", "orchard", "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys, "--state", "orchard")
     assert row["graft-status"] == "open"
     assert row["sub-phases"] == 2
     assert "Done" in path.read_text()
@@ -2307,9 +2295,8 @@ def test_the_listing_shows_a_queued_state_in_its_own_order(
     orchard(tree, "A wedge", "--above", "second-tree")
     capsys.readouterr()
 
-    assert main(["list", "--state", "orchard", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert [(row["slug"], row["position"]) for row in rows] == [
+    found = rows(capsys, "--state", "orchard")
+    assert [(row["slug"], row["position"]) for row in found] == [
         ("first-tree", 100),
         ("a-wedge", 150),
         ("second-tree", 200),
@@ -2338,9 +2325,8 @@ def test_the_place_filter_compares_as_a_number(
     orchard(tree, "A wedge", "--at", "50")
     capsys.readouterr()
 
-    assert main(["list", "--has", "position>=100", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert [row["slug"] for row in rows] == ["first-tree"]
+    found = rows(capsys, "--has", "position>=100")
+    assert [row["slug"] for row in found] == ["first-tree"]
 
 
 # --------------------------------------------------------------------------
@@ -2439,6 +2425,55 @@ def test_a_run_handed_an_edge_naming_nothing_refuses_and_writes_nothing(
         assert tree_bytes(tree) == was
 
     assert main(["transplant", "second-tree", "--after", "first-tree"]) == 0
+
+
+def test_a_stake_on_a_tree_itself_refuses_and_writes_nothing(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A self-wait would block the tree forever, so the run refuses in the
+    words an edge naming nothing gets, and `--check` says the same."""
+    staked(tree / "plan.toml")
+    orchard(tree, "First tree")
+    capsys.readouterr()
+    was = tree_bytes(tree)
+
+    for check in ([], ["--check"]):
+        assert main(["stake", "first-tree", "--after", "first-tree", *check]) == 2
+        assert (
+            'after names "first-tree", the item itself, so it would wait on '
+            "itself forever"
+        ) in capsys.readouterr().err
+        assert tree_bytes(tree) == was
+
+
+def test_a_stake_given_an_empty_after_leaves_no_line(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    staked(tree / "plan.toml")
+    orchard(tree, "First tree")
+    orchard(tree, "Second tree")
+    assert main(["stake", "second-tree", "--after", "first-tree"]) == 0
+    path = tree / "orchard" / "second-tree.md"
+    assert "after = " in path.read_text()
+
+    assert main(["stake", "second-tree", "--after", ""]) == 0
+    assert not [
+        line for line in path.read_text().splitlines() if line.startswith("after")
+    ]
+
+
+def test_a_closed_key_given_empty_is_cleared(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`''` passes a closed key's choices, so it reaches the run and clears
+    the key, and the choices `--json` lists stay the declared ones."""
+    staked(tree / "plan.toml")
+    orchard(tree, "First tree")
+    assert main(["stake", "first-tree", "--pest", "aphid"]) == 0
+    path = tree / "orchard" / "first-tree.md"
+    assert "pest = " in path.read_text()
+    assert main(["stake", "first-tree", "--pest", ""]) == 0
+    assert "pest" not in path.read_text()
 
 
 def test_an_edge_naming_no_filed_item_is_named_rather_than_read_as_satisfied(
@@ -2623,8 +2658,7 @@ def test_a_declaration_with_no_dependencies_carries_neither_field_nor_filter(
     payload = json.loads(capsys.readouterr().out)
     assert "unknown" not in payload and "misordered" not in payload
 
-    assert main(["list", "--help"]) == 0
-    assert "--blocked-by" not in capsys.readouterr().out
+    assert "--blocked-by" not in helped(capsys, "list")
     assert main(["list", "--has", "blocked-by=first-tree"]) == 2
 
 
@@ -2672,13 +2706,10 @@ def test_an_unresolvable_edge_does_not_narrow_the_offer(
 # subprocess runs, and no clock is mocked — a commit is written with an
 # explicit author timestamp instead.
 
-GARDENER = b"A Gardener <gardener@example.invalid>"
-
 
 def hardened(tree: Path, title: str) -> str:
     """One item filed all the way into the dated state. Returns its slug."""
-    orchard(tree, title)
-    slug = title.lower().replace(" ", "-")
+    slug = orchard(tree, title)
     assert main(["harvest", slug]) == 0
     return slug
 
@@ -2693,19 +2724,7 @@ def committed(tree: Path, *slugs: str, ago: int) -> None:
         dt.datetime.now().astimezone().date() - dt.timedelta(days=ago), dt.time(12)
     ).astimezone()
     here = load(tree / "plan.toml").states["cold-frame"].path
-    started = Repo(str(tree)) if (tree / ".git").exists() else Repo.init(str(tree))
-    with started as repo:
-        worktree = repo.get_worktree()
-        worktree.stage([f"{here}/{slug}.md".encode() for slug in slugs])
-        worktree.commit(
-            b"filed",
-            committer=GARDENER,
-            author=GARDENER,
-            author_timestamp=int(when.timestamp()),
-            author_timezone=int(when.utcoffset().total_seconds()),
-            commit_timestamp=int(when.timestamp()),
-            commit_timezone=0,
-        )
+    commit_files(tree, [f"{here}/{slug}.md" for slug in slugs], when)
 
 
 def test_stale_days_reaches_both_renderings(
@@ -2806,17 +2825,15 @@ def test_the_number_reaches_both_renderings_and_its_own_filter(
     orchard(tree, "First tree")
     capsys.readouterr()
 
-    assert main(["list", "--state", "orchard", "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys, "--state", "orchard")
     assert row["number"] == 2
 
     assert main(["list", "--state", "orchard"]) == 0
     # Padded to the widest label the listing carries, `sub-phases-left`.
     assert "  number           2" in capsys.readouterr().out
 
-    assert main(["list", "--has", "number>=2", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert [one["slug"] for one in rows] == ["first-tree"]
+    found = rows(capsys, "--has", "number>=2")
+    assert [one["slug"] for one in found] == ["first-tree"]
 
 
 def test_a_lost_archive_heading_refuses_with_the_operator_contract(
@@ -3247,17 +3264,18 @@ def test_an_extra_argument_naming_no_state_gets_only_clicks_refusal(
 
 def planted(tree: Path, title: str, body: str, *, into: str = "orchard") -> None:
     """A seedling with `body`, sprouted, then moved on `into` a later state."""
-    assert main(["sprout", title, "--body", body, "--cultivar", "heirloom"]) == 0
-    slug = title.lower().replace(" ", "-")
-    if into in ("orchard", "firewood"):
-        assert main(["transplant", slug]) == 0
+    if into == "greenhouse":
+        assert main(["sprout", title, "--body", body, "--cultivar", "heirloom"]) == 0
+        return
+    slug = orchard(tree, title, body=body)
     if into == "firewood":
         assert main(["grub-out", slug]) == 0
 
 
 def pear_orchard(tree: Path) -> None:
-    """Three trees filed in this order, so their places run apple, birch,
-    pear: two hold "pear" in the body alone, and one in the title."""
+    """Four trees filed in this order, so their places run apple, birch,
+    pear, cherry: two hold "pear" in the body alone, one in the title, and
+    cherry not at all."""
     planted(tree, "Apple", "Grafted onto a Pear rootstock.")
     planted(tree, "Birch", "Planted beside the pear.")
     planted(tree, "Pear", "Prose.")
@@ -3276,7 +3294,7 @@ def test_a_word_lists_an_item_whose_body_alone_holds_it(
     out, err = capsys.readouterr()
     assert "apple" in out and "cherry" not in out
     assert "showing 1 of 2 items" in err
-    payload = sorted_listing(capsys, "pear")
+    payload = listing(capsys, "pear")
     assert [row["slug"] for row in payload["rows"]] == ["apple"]
     assert (payload["matched"], payload["read"]) == (1, 2)
     assert main(["show", "apple", "--json"]) == 0
@@ -3291,10 +3309,10 @@ def test_a_title_hit_lists_before_a_body_hit_under_any_sort(
     way the title hit leads, and the body hits keep that sort's order."""
     pear_orchard(tree)
     capsys.readouterr()
-    rows = sorted_listing(capsys, "pear")["rows"]
-    assert [row["slug"] for row in rows] == ["pear", "apple", "birch"]
-    rows = sorted_listing(capsys, "pear", "--sort", "-title")["rows"]
-    assert [row["slug"] for row in rows] == ["pear", "birch", "apple"]
+    found = rows(capsys, "pear")
+    assert [row["slug"] for row in found] == ["pear", "apple", "birch"]
+    found = rows(capsys, "pear", "--sort", "-title")
+    assert [row["slug"] for row in found] == ["pear", "birch", "apple"]
 
 
 def test_a_word_narrows_with_the_other_filters(
@@ -3331,12 +3349,10 @@ def test_a_word_counts_a_hit_in_an_unlisted_state_and_the_state_lists_it(
 def test_the_help_names_the_word_and_show_takes_none(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main(["list", "--help"]) == 0
-    out = capsys.readouterr().out
+    out = helped(capsys, "list")
     assert "Usage: fileplan list [OPTIONS] [WORD]" in out
     assert "title or body holds it" in out
-    assert main(["show", "--help"]) == 0
-    assert "WORD" not in capsys.readouterr().out
+    assert "WORD" not in helped(capsys, "show")
 
 
 # --------------------------------------------------------------------------
@@ -3373,8 +3389,8 @@ def test_the_fields_narrow_each_json_row_and_leave_the_envelope_alone(
 ) -> None:
     pear_orchard(tree)
     capsys.readouterr()
-    narrowed = sorted_listing(capsys, "--fields", "title", "--fields", "slug")
-    whole = sorted_listing(capsys)
+    narrowed = listing(capsys, "--fields", "title", "--fields", "slug")
+    whole = listing(capsys)
     assert {tuple(row) for row in narrowed["rows"]} == {("title", "slug")}
     assert list(narrowed) == list(whole)
     assert narrowed["matched"] == whole["matched"]
@@ -3391,7 +3407,7 @@ def test_the_fields_come_after_every_filter_and_sort(
     given = ["pear", "--state", "orchard", "--sort", "-title", "--fields", "slug"]
     assert main(["list", *given]) == 0
     assert capsys.readouterr().out.splitlines() == ["slug", "pear", "birch", "apple"]
-    assert sorted_listing(capsys, *given)["rows"] == [
+    assert rows(capsys, *given) == [
         {"slug": "pear"},
         {"slug": "birch"},
         {"slug": "apple"},
@@ -3446,9 +3462,8 @@ def test_an_in_place_verb_leaves_the_order_alone(
 
     assert main(["graft-on", "first-tree", "--graft-status", "open"]) == 0
     capsys.readouterr()
-    assert main(["list", "--state", "orchard", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert [(row["slug"], row["position"]) for row in rows] == [
+    found = rows(capsys, "--state", "orchard")
+    assert [(row["slug"], row["position"]) for row in found] == [
         ("first-tree", 100),
         ("second-tree", 200),
         ("third-tree", 300),
@@ -3469,9 +3484,8 @@ def test_an_in_place_verb_still_places_when_asked(
 
     assert main(["respace", "first-tree", "--below", "second-tree"]) == 0
     capsys.readouterr()
-    assert main(["list", "--state", "orchard", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert [(row["slug"], row["position"]) for row in rows] == [
+    found = rows(capsys, "--state", "orchard")
+    assert [(row["slug"], row["position"]) for row in found] == [
         ("second-tree", 200),
         ("first-tree", 300),
     ]
@@ -3521,13 +3535,11 @@ def test_has_and_lacks_reach_a_capabilitys_key(
     assert main(["sprout", "A seedling", "--body", "Prose."]) == 0
     capsys.readouterr()
 
-    assert main(["list", "--has", "position", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert [row["slug"] for row in rows] == ["first-tree"]
+    found = rows(capsys, "--has", "position")
+    assert [row["slug"] for row in found] == ["first-tree"]
 
-    assert main(["list", "--lacks", "position", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert [row["slug"] for row in rows] == ["a-seedling"]
+    found = rows(capsys, "--lacks", "position")
+    assert [row["slug"] for row in found] == ["a-seedling"]
 
 
 # --------------------------------------------------------------------------
@@ -3554,21 +3566,7 @@ ANOTHER_LIVE_SESSION = 1
 def session(monkeypatch: pytest.MonkeyPatch) -> str:
     """Who this session is, for the length of one test."""
     monkeypatch.setenv("GREENHOUSE_PID", str(MINE))
-    monkeypatch.delenv("SPROUT_PID", raising=False)
     return socket.gethostname()
-
-
-def unclaimed(tree: Path) -> None:
-    """The same declaration with nothing claimed: the state stays, so every
-    `from`/`to` still resolves and the capability is the only difference.
-
-    Both halves go together — the state's opt-in and the `claims = true` on
-    the verbs that take one — because either alone refuses at load.
-    """
-    plan = (tree / "plan.toml").read_text()
-    (tree / "plan.toml").write_text(
-        plan.replace('capabilities = ["claimed"]\n', "").replace("claims = true\n", "")
-    )
 
 
 def benched(tree: Path, title: str = "A seedling") -> str:
@@ -3578,14 +3576,10 @@ def benched(tree: Path, title: str = "A seedling") -> str:
     without it the bench holds a seedling nobody has picked up.
     """
     assert main(["sprout", title, "--body", "Prose.", "--cultivar", "heirloom"]) == 0
-    slug = title.lower().replace(" ", "-")
+    slug = item.slug(title)
     assert main(["bench", slug]) == 0
     assert main(["tend", slug, "--rootstock", "M9"]) == 0
     return slug
-
-
-def sibling(tree: Path, slug: str, *, pid: int, host: str | None = None) -> Path:
-    return written(tree, slug, host=host or socket.gethostname(), pid=pid)
 
 
 def test_release_registers_only_where_a_state_claims_something(
@@ -3593,12 +3587,10 @@ def test_release_registers_only_where_a_state_claims_something(
 ) -> None:
     """The `--position` precedent: a capability generates what it needs and
     nothing else."""
-    assert main(["--help"]) == 0
-    assert "release" in capsys.readouterr().out
+    assert "release" in helped(capsys)
 
-    unclaimed(tree)
-    assert main(["--help"]) == 0
-    assert "release" not in capsys.readouterr().out
+    unclaimed(tree / "plan.toml")
+    assert "release" not in helped(capsys)
 
 
 def test_a_declared_transition_named_release_refuses_by_name(
@@ -3607,7 +3599,7 @@ def test_a_declared_transition_named_release_refuses_by_name(
     """Reserved **unconditionally** — this declaration claims nothing, so the
     command is not even registered, and the name is still refused. Otherwise
     the same plan.toml would break the day it grew a claimed state."""
-    unclaimed(tree)
+    unclaimed(tree / "plan.toml")
     plan = (tree / "plan.toml").read_text()
     (tree / "plan.toml").write_text(
         plan.replace("[transitions.sprout]", "[transitions.release]")
@@ -3626,8 +3618,7 @@ def test_a_transition_takes_no_option_for_a_claim(
     typed. `bench` moves into the claimed state and carries nothing for it —
     unlike a transition into the ordered state, which carries the placement
     options."""
-    assert main(["bench", "--help"]) == 0
-    out = capsys.readouterr().out
+    out = helped(capsys, "bench")
     assert "ITEM" in out
     assert "--claim" not in out and "--above" not in out
 
@@ -3651,7 +3642,7 @@ def test_release_frees_a_dead_sessions_claim_naming_whose_it_was(
     named as it is freed — nothing is ever released quietly, or on its own."""
     slug = benched(tree)
     gone = exited()
-    sibling(tree, slug, pid=gone)
+    written(tree, slug, pid=gone)
     capsys.readouterr()
 
     assert main(["release", slug]) == 0
@@ -3666,7 +3657,7 @@ def test_release_refuses_a_live_sessions_claim(
     """A claim is freed when its holder is gone, not to take an item off
     somebody."""
     slug = benched(tree)
-    held = sibling(tree, slug, pid=ANOTHER_LIVE_SESSION).read_bytes()
+    held = written(tree, slug, pid=ANOTHER_LIVE_SESSION).read_bytes()
     capsys.readouterr()
 
     assert main(["release", slug]) == 2
@@ -3683,7 +3674,7 @@ def test_release_refuses_a_claim_from_another_host_naming_the_record(
     """This machine cannot probe that one, so a person there — or `rm` — is
     the only honest answer, and the refusal says which file."""
     slug = benched(tree)
-    path = sibling(tree, slug, pid=MINE, host="another-host")
+    path = written(tree, slug, pid=MINE, host="another-host")
     capsys.readouterr()
 
     assert main(["release", slug]) == 2
@@ -3782,14 +3773,12 @@ def test_the_claims_filters_register_only_where_a_state_claims(
     where no state opts in. The roster is where a key is offered (13-3):
     there is no option named after one, so this is the same control read one
     surface over."""
-    assert main(["list", "--help"]) == 0
-    out = capsys.readouterr().out
+    out = helped(capsys, "list")
     assert claim.BY in out and claim.STATUS in out
     assert f"{claim.HOLDER}={claim.THIS_SESSION}" in out
 
-    unclaimed(tree)
-    assert main(["list", "--help"]) == 0
-    out = capsys.readouterr().out
+    unclaimed(tree / "plan.toml")
+    out = helped(capsys, "list")
     assert claim.BY not in out and claim.STATUS not in out
     assert claim.HOLDER not in out
 
@@ -3821,13 +3810,11 @@ def test_a_second_session_is_not_offered_claimed_work(
     claimed = benched(tree, "A seedling")
     capsys.readouterr()
 
-    assert main(["list", "--lacks", "claimed-by", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert [row["slug"] for row in rows] == [free]
+    found = rows(capsys, "--lacks", "claimed-by")
+    assert [row["slug"] for row in found] == [free]
 
-    assert main(["list", "--has", "claimed-by", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert [row["slug"] for row in rows] == [claimed]
+    found = rows(capsys, "--has", "claimed-by")
+    assert [row["slug"] for row in found] == [claimed]
 
 
 def test_arriving_in_a_claimed_state_leaves_the_item_on_offer(
@@ -3846,9 +3833,8 @@ def test_arriving_in_a_claimed_state_leaves_the_item_on_offer(
     capsys.readouterr()
 
     assert not claim.path(tree, "a-seedling").exists()
-    assert main(["list", "--lacks", "claimed-by", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert "a-seedling" in [row["slug"] for row in rows]
+    found = rows(capsys, "--lacks", "claimed-by")
+    assert "a-seedling" in [row["slug"] for row in found]
 
 
 def test_two_sessions_divide_the_work_and_neither_item_moves(
@@ -3864,17 +3850,13 @@ def test_two_sessions_divide_the_work_and_neither_item_moves(
     arrival."""
     for title in ("A seedling", "Another seedling"):
         assert main(["sprout", title, "--body", "Prose."]) == 0
-        assert main(["bench", title.lower().replace(" ", "-")]) == 0
+        assert main(["bench", item.slug(title)]) == 0
     assert main(["tend", "a-seedling"]) == 0
     capsys.readouterr()
 
     # This session sees only what it does not hold; the other item is free.
-    assert (
-        main(["list", "--state", "potting-bench", "--lacks", "claimed-by", "--json"])
-        == 0
-    )
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert [row["slug"] for row in rows] == ["another-seedling"]
+    found = rows(capsys, "--state", "potting-bench", "--lacks", "claimed-by")
+    assert [row["slug"] for row in found] == ["another-seedling"]
 
     # A second session: the same tree, the same host, another pid. Its pick
     # read offers the other item, and taking up this one refuses by name.
@@ -3892,12 +3874,8 @@ def test_two_sessions_divide_the_work_and_neither_item_moves(
     monkeypatch.setenv("GREENHOUSE_PID", str(MINE))
     assert main(["release", "a-seedling"]) == 0
     capsys.readouterr()
-    assert (
-        main(["list", "--state", "potting-bench", "--lacks", "claimed-by", "--json"])
-        == 0
-    )
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert [row["slug"] for row in rows] == ["a-seedling"]
+    found = rows(capsys, "--state", "potting-bench", "--lacks", "claimed-by")
+    assert [row["slug"] for row in found] == ["a-seedling"]
     assert (tree / "potting-bench" / "a-seedling.md").exists()
 
 
@@ -3911,17 +3889,15 @@ def test_a_dead_claim_is_reported_by_name_and_found_by_its_status(
     # before this session claims the live one, so this session holds one.
     dead = benched(tree, "Another seedling")
     gone = exited()
-    sibling(tree, dead, pid=gone)
+    written(tree, dead, pid=gone)
     live = benched(tree, "A seedling")
     capsys.readouterr()
 
-    assert main(["list", "--has", f"claim-status={claim.DEAD}", "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys, "--has", f"claim-status={claim.DEAD}")
     assert row["slug"] == dead
     assert row["claimed-by"] == f"{session} pid {gone}"
 
-    assert main(["list", "--has", f"claim-status={claim.ALIVE}", "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys, "--has", f"claim-status={claim.ALIVE}")
     assert row["slug"] == live
 
 
@@ -3952,12 +3928,10 @@ def test_keep_claims_is_on_a_claiming_verb_and_nowhere_else(
     """The option a verb's `claims` generates, the way `mints` gives `--last`.
     `--help` says which refusal it lifts; `bench` arrives in the same claimed
     state and claims nothing, so it has nothing to keep."""
-    assert main(["tend", "--help"]) == 0
-    out = capsys.readouterr().out
+    out = helped(capsys, "tend")
     assert "--keep-claims" in out
     assert "already holds a claim" in " ".join(out.split())
-    assert main(["bench", "--help"]) == 0
-    assert "--keep-claims" not in capsys.readouterr().out
+    assert "--keep-claims" not in helped(capsys, "bench")
 
 
 def test_a_sets_key_colliding_with_keep_claims_refuses_by_name(
@@ -3992,8 +3966,7 @@ def test_an_unclaimed_item_carries_both_fields_as_null(
     depends on the declaration, never on the corpus."""
     assert main(["sprout", "A seedling", "--body", "Prose."]) == 0
     capsys.readouterr()
-    assert main(["list", "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys)
     assert row["claimed-by"] is None and row["claim-status"] is None
 
 
@@ -4026,7 +3999,7 @@ def test_a_stranded_claim_is_named_in_both_renderings(
     it away: it goes to stderr beside the counts, and into the envelope where
     the counts already live."""
     benched(tree)
-    sibling(tree, "ghost-seedling", pid=ANOTHER_LIVE_SESSION)
+    written(tree, "ghost-seedling", pid=ANOTHER_LIVE_SESSION)
     capsys.readouterr()
 
     assert main(["list"]) == 0
@@ -4052,7 +4025,7 @@ def test_the_stranded_array_is_present_wherever_the_declaration_claims(
     assert main(["list", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["stranded"] == []
 
-    unclaimed(tree)
+    unclaimed(tree / "plan.toml")
     assert main(["list", "--json"]) == 0
     assert "stranded" not in json.loads(capsys.readouterr().out)
 
@@ -4077,22 +4050,15 @@ def test_this_sessions_claims_are_exactly_its_own_and_a_pid_prefix_is_not(
     `--has claimed-by~PID` gets wrong."""
     theirs = benched(tree, "Another seedling")
     prefixed = int(f"{MINE}9")
-    sibling(tree, theirs, pid=prefixed)
+    written(tree, theirs, pid=prefixed)
     mine = benched(tree, "A seedling")
     capsys.readouterr()
 
-    assert (
-        main(["list", "--has", f"{claim.HOLDER}={claim.THIS_SESSION}", "--json"]) == 0
-    )
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys, "--has", f"{claim.HOLDER}={claim.THIS_SESSION}")
     assert row["slug"] == mine
     assert row["claimed-by"] == f"{session} pid {MINE}"
 
-    assert (
-        main(["list", "--has", f"{claim.HOLDER}={claim.ANOTHER_SESSION}", "--json"])
-        == 0
-    )
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys, "--has", f"{claim.HOLDER}={claim.ANOTHER_SESSION}")
     assert row["slug"] == theirs
     assert row["claimed-by"] == f"{session} pid {prefixed}"
 
@@ -4107,10 +4073,9 @@ def test_the_unclaimed_work_lacks_a_claim_holder(
     benched(tree, "A seedling")
     capsys.readouterr()
 
-    assert main(["list", "--lacks", claim.HOLDER, "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert free in [row["slug"] for row in rows]
-    assert all(row[claim.HOLDER] is None for row in rows)
+    found = rows(capsys, "--lacks", claim.HOLDER)
+    assert free in [row["slug"] for row in found]
+    assert all(row[claim.HOLDER] is None for row in found)
 
 
 def test_an_offer_narrows_to_this_sessions_claims(
@@ -4124,20 +4089,17 @@ def test_an_offer_narrows_to_this_sessions_claims(
     mine = benched(tree, "A seedling")
     capsys.readouterr()
 
-    assert main(["list", "--has", "commands=bed-out", "--json"]) == 0
-    assert {row["slug"] for row in json.loads(capsys.readouterr().out)["rows"]} == {
+    assert {row["slug"] for row in rows(capsys, "--has", "commands=bed-out")} == {
         mine,
         "free",
     }
-    argv = [
-        "list",
+    (row,) = rows(
+        capsys,
         "--has",
         "commands=bed-out",
         "--has",
         f"{claim.HOLDER}={claim.THIS_SESSION}",
-    ]
-    assert main([*argv, "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    )
     assert row["slug"] == mine
 
 
@@ -4421,12 +4383,6 @@ def as_directory(tree: Path, entries: dict[str, str] | None = None) -> Path:
     return directory
 
 
-def listed(capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
-    capsys.readouterr()
-    assert main(["list", "--json"]) == 0
-    return json.loads(capsys.readouterr().out)
-
-
 def test_an_archive_that_is_a_directory_loads_and_one_that_is_missing_refuses(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -4468,7 +4424,7 @@ def test_one_corpus_as_a_file_and_as_a_directory_lists_the_same_register(
     (tree / "orchard-archive.md").write_text(
         "# The archive\n\n## 1. A felled tree\n\n## 3. Third\n\nWhy.\n\n## 5. Fifth\n"
     )
-    as_file = listed(capsys)
+    as_file = listing(capsys)
 
     (tree / "orchard-archive.md").unlink()
     as_directory(
@@ -4479,7 +4435,7 @@ def test_one_corpus_as_a_file_and_as_a_directory_lists_the_same_register(
             "5-fifth.md": "## 5. Fifth\n",
         },
     )
-    as_dir = listed(capsys)
+    as_dir = listing(capsys)
 
     def without_archive(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [{k: v for k, v in one.items() if k != "archive"} for one in records]
@@ -4560,7 +4516,7 @@ def test_an_unreadable_heading_in_an_entry_file_is_named_by_that_file_and_line(
             "2-lost.md": "Preamble.\n\n## Section 2: lost\n",
         },
     )
-    (lost,) = listed(capsys)["lost"]
+    (lost,) = listing(capsys)["lost"]
     assert (lost["archive"], lost["line"], lost["text"]) == (
         f"{ENTRIES}/2-lost.md",
         3,
@@ -4585,7 +4541,7 @@ def test_a_markdown_file_with_no_heading_there_is_a_lost_close_out(
             "README.md": "# What this is\n",
         },
     )
-    (lost,) = listed(capsys)["lost"]
+    (lost,) = listing(capsys)["lost"]
     assert (lost["archive"], lost["line"], lost["text"]) == (
         f"{ENTRIES}/README.md",
         1,
@@ -4607,7 +4563,7 @@ def test_an_ignored_name_there_is_not_a_lost_close_out(
             "CLAUDE.md": "# How to work here\n",
         },
     )
-    assert listed(capsys)["lost"] == []
+    assert listing(capsys)["lost"] == []
 
 
 def test_a_file_that_is_not_markdown_there_is_left_alone(
@@ -4622,7 +4578,7 @@ def test_a_file_that_is_not_markdown_there_is_left_alone(
             "notes.txt": "## Section 9: not read\n",
         },
     )
-    payload = listed(capsys)
+    payload = listing(capsys)
     assert payload["lost"] == [] and payload["gaps"] == []
     assert [one["highest"] for one in payload["register"]] == [1]
 
@@ -4821,8 +4777,7 @@ def test_the_bullets_of_a_state_with_no_register_are_counted_like_any_other(
     assert main(["mist", "a-batch", "--title", "Bottom heat", "--last"]) == 0
     capsys.readouterr()
 
-    assert main(["list", "--state", "propagator", "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys, "--state", "propagator")
     assert row["sub-phases"] == 1
     # The row's shape is the *declaration's*, so the key is there — carried by
     # the state that mints one, empty for the state that does not. That the
@@ -4836,8 +4791,7 @@ def test_a_verb_that_mints_carries_the_minting_options(
     """Generated by the capability, the way the placement options are — but
     asked of the *transition*, because writing a body is something a verb opts
     into rather than something arriving does."""
-    assert main(["espalier", "--help"]) == 0
-    out = capsys.readouterr().out
+    out = helped(capsys, "espalier")
     assert "--title" in out and "--last" in out
 
 
@@ -4847,8 +4801,7 @@ def test_a_verb_into_the_same_state_that_mints_nothing_carries_neither(
     """`graft-on` is an in-place verb into the same `bulleted` state. Without
     `mints` it carries no option, which is the whole point of the opt-in:
     otherwise every verb into the state could cut a section up."""
-    assert main(["graft-on", "--help"]) == 0
-    out = capsys.readouterr().out
+    out = helped(capsys, "graft-on")
     assert "--title" not in out and "--last" not in out
 
 
@@ -4912,8 +4865,7 @@ def test_a_minted_bullet_is_counted_and_pointable_at_with_no_hand_editing(
     assert main(["espalier", "first-tree", "--title", "The register"]) == 0
     capsys.readouterr()
 
-    assert main(["list", "--state", "orchard", "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys, "--state", "orchard")
     # The register already holds 1 (a closed tree in `orchard-archive.md`), so
     # this tree is 2 and its first step is `2-1`.
     assert row["number"] == 2
@@ -4921,8 +4873,7 @@ def test_a_minted_bullet_is_counted_and_pointable_at_with_no_hand_editing(
 
     assert main(["graft-on", "first-tree", "--graft", "2-1"]) == 0
     capsys.readouterr()
-    assert main(["list", "--state", "orchard", "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys, "--state", "orchard")
     assert row["graft"] == "2-1"
 
 
@@ -5136,11 +5087,9 @@ def test_a_verb_refusing_its_own_key_on_presence_runs_once(
     assert 'tend refuses an item carrying "rootstock"' in capsys.readouterr().err
     assert path.read_bytes() == was
 
-    assert main(["list", "--has", "commands=tend", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["rows"] == []
+    assert rows(capsys, "--has", "commands=tend") == []
     assert contract_json("tend", capsys)["refuses"] == {"rootstock": True}
-    assert main(["tend", "--help"]) == 0
-    assert "rootstock (any value)" in capsys.readouterr().out
+    assert "rootstock (any value)" in helped(capsys, "tend")
 
 
 def test_a_run_that_writes_says_nothing_new(
@@ -5238,15 +5187,13 @@ def greenhoused(cultivar: str | None, title: str) -> str:
     if cultivar is not None:
         argv += ["--cultivar", cultivar]
     assert main(argv) == 0
-    return title.lower().replace(" ", "-")
+    return item.slug(title)
 
 
 def offered(capsys: pytest.CaptureFixture[str], verb: str, *argv: str) -> list[str]:
     """The items `verb` could take right now: the rows whose `commands` name
     it."""
-    capsys.readouterr()
-    assert main(["list", "--has", f"commands={verb}", *argv, "--json"]) == 0
-    return [row["slug"] for row in json.loads(capsys.readouterr().out)["rows"]]
+    return [row["slug"] for row in rows(capsys, "--has", f"commands={verb}", *argv)]
 
 
 def commands_of(capsys: pytest.CaptureFixture[str], slug: str) -> list[str]:
@@ -5279,7 +5226,7 @@ def test_a_section_another_session_holds_is_not_offered(
     assert main(["sprout", "B seedling", "--body", "Prose."]) == 0
     assert main(["bench", "a-seedling"]) == 0
     assert main(["bench", "b-seedling"]) == 0
-    sibling(tree, "a-seedling", pid=ANOTHER_LIVE_SESSION)
+    written(tree, "a-seedling", pid=ANOTHER_LIVE_SESSION)
     assert offered(capsys, "tend") == ["b-seedling"]
 
 
@@ -5298,9 +5245,8 @@ def test_a_section_this_session_holds_is_offered_because_work_would_take_it(
     assert main(["tend", slug, "--rootstock", "M9"]) == 0
 
     capsys.readouterr()
-    assert main(["list", "--lacks", "claimed-by", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert slug not in [row["slug"] for row in rows]
+    found = rows(capsys, "--lacks", "claimed-by")
+    assert slug not in [row["slug"] for row in found]
 
 
 # --------------------------------------------------------------------------
@@ -5329,8 +5275,7 @@ def test_the_item_reads_are_untouched_by_a_mark(
     cuttings("The first")
     assert main(["pot-on", "a-batch", "c1"]) == 0
     capsys.readouterr()
-    assert main(["list", "--json"]) == 0
-    (row,) = json.loads(capsys.readouterr().out)["rows"]
+    (row,) = rows(capsys)
     assert row["slug"] == "a-batch" and row["sub-phases"] == 1
     assert "rooted" not in json.dumps(row)
 
@@ -5584,13 +5529,11 @@ def test_a_dispositions_help_takes_the_item_and_then_the_bullet(
     """Two positionals in that order — which item, then which of its bullets
     — and the kind in the contract's `Declares` block, which is what lets a
     composed session pick a disposition by kind rather than by name."""
-    assert main(["pot-on", "--help"]) == 0
-    out = capsys.readouterr().out
+    out = helped(capsys, "pot-on")
     assert "Usage: fileplan pot-on [OPTIONS] ITEM NAME" in out
     assert declared_by(out) == ["mark-bullet"]
 
-    assert main(["mist", "--help"]) == 0
-    other = capsys.readouterr().out
+    other = helped(capsys, "mist")
     assert "Usage: fileplan mist [OPTIONS] ITEM" in other
     assert declared_by(other) == ["add-bullet"]
 
@@ -5636,9 +5579,8 @@ def test_which_items_came_from_this_carrier_is_one_read(
     assert main(["line-out", "a-batch", "c2", "--body", "More prose."]) == 0
     capsys.readouterr()
 
-    assert main(["list", "--has", "batch=a-batch", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert [(row["slug"], row["cutting"]) for row in rows] == [
+    found = rows(capsys, "--has", "batch=a-batch")
+    assert [(row["slug"], row["cutting"]) for row in found] == [
         ("the-first", "c1"),
         ("the-second", "c2"),
     ]
@@ -5664,8 +5606,7 @@ def test_a_filings_help_takes_two_positionals_its_options_and_both_halves(
     `Declares` — which is what lets a composed session reach for this verb by
     what it declares rather than by its name — and `Files`, which says which
     head the key lands on."""
-    assert main(["line-out", "--help"]) == 0
-    out = capsys.readouterr().out
+    out = helped(capsys, "line-out")
     assert "Usage: fileplan line-out [OPTIONS] ITEM NAME" in out
     assert "--title TEXT" in out and "--body TEXT" in out
     assert "--cultivar [heirloom|hybrid]" in out
@@ -5825,7 +5766,7 @@ def test_no_declared_verb_is_named_anywhere_under_src() -> None:
     ]
     assert verbs, "the repo declares no transitions, so this control proves nothing"
     for verb in verbs:
-        assert not re.search(rf"\b{re.escape(verb)}\b", source), verb
+        assert not re.search(_verb(verb), source), verb
 
 
 def test_the_control_skips_the_tools_own_words_and_nothing_else() -> None:
@@ -5885,8 +5826,7 @@ def test_every_derived_key_is_reachable_by_a_filter(
     declared = load(tree / "plan.toml")
     assert declared.derived, "the fixture derives nothing, so this proves nothing"
     assert set(declared.derived) <= {*DERIVABLE, *declared.inverses}
-    assert main(["list", "--help"]) == 0
-    roster = re.sub(r"-\n\s+", "-", capsys.readouterr().out)
+    roster = re.sub(r"-\n\s+", "-", helped(capsys, "list"))
     for key in declared.derived:
         assert key in roster
 
@@ -5904,8 +5844,7 @@ def test_a_key_the_roster_grows_is_filterable_without_a_second_table(
         "fileplan.declaration.DERIVED_KEYS",
         (*DERIVED_KEYS, Derived(lambda one: True, ("invented",), None)),
     )
-    assert main(["list", "--help"]) == 0
-    assert "invented" in capsys.readouterr().out
+    assert "invented" in helped(capsys, "list")
     assert main(["list", "--has", "invented"]) == 0
 
 
@@ -5981,9 +5920,8 @@ def test_the_listing_skips_a_declared_name_and_show_has_no_arm_for_it(
     filed(tree)
     (tree / "greenhouse" / "AGENTS.md").write_text("# How to work in here\n")
     capsys.readouterr()
-    assert main(["list", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)["rows"]
-    assert "AGENTS.md" not in {row["path"].rsplit("/", 1)[-1] for row in rows}
+    found = rows(capsys)
+    assert "AGENTS.md" not in {row["path"].rsplit("/", 1)[-1] for row in found}
     assert main(["show", "AGENTS.md"]) == 2
     assert 'no item starts with "AGENTS.md"' in capsys.readouterr().err
 
@@ -6017,8 +5955,7 @@ def test_show_renders_the_row_list_builds(
 
     assert render.records(payload["rows"]) == printed
 
-    main(["list", "--state", "orchard", "--json"])
-    assert payload["rows"] == json.loads(capsys.readouterr().out)["rows"]
+    assert payload["rows"] == rows(capsys, "--state", "orchard")
 
 
 def test_show_carries_the_keys_the_file_does_not_hold(
@@ -6042,7 +5979,7 @@ def test_show_frames_and_reports_over_the_whole_tree(
     is still named. No read narrows a report: `show` would be the first to
     hide one, for no reason but tidiness."""
     filed(tree)
-    sibling(tree, "a-ghost", pid=ANOTHER_LIVE_SESSION)
+    written(tree, "a-ghost", pid=ANOTHER_LIVE_SESSION)
     capsys.readouterr()
 
     assert main(["show", "a-seedling"]) == 0
@@ -6070,9 +6007,7 @@ def test_show_takes_no_filters(tree: Path, capsys: pytest.CaptureFixture[str]) -
     on an item somewhere else would say "no such item" about an item that
     exists — the failure tree-wide resolution prevents."""
     filed(tree)
-    capsys.readouterr()
-    assert main(["show", "--help"]) == 0
-    printed = capsys.readouterr().out
+    printed = helped(capsys, "show")
     assert "ITEM" in printed
     # The options, not the prose above them: `show --help` says *why* it
     # takes no `--state`, and saying so must not read as offering one.
@@ -6243,7 +6178,7 @@ def test_a_bullet_read_frames_and_reports_over_the_whole_tree(
     was item-narrowing; a disposition's offer counts bullets because its
     rows are bullets, and here there are no rows."""
     batched(tree)
-    sibling(tree, "a-ghost", pid=ANOTHER_LIVE_SESSION)
+    written(tree, "a-ghost", pid=ANOTHER_LIVE_SESSION)
     capsys.readouterr()
 
     assert main(["show", "a-batch", "c2"]) == 0
@@ -6307,8 +6242,7 @@ def test_show_help_says_the_exception_to_row_never_body(
 ) -> None:
     """The sentence that would otherwise lie. A positional is not a flag, so
     the named-report control is untouched."""
-    assert main(["show", "--help"]) == 0
-    out = capsys.readouterr().out
+    out = helped(capsys, "show")
     assert "ITEM [NAME]" in out
     assert "NAME" in out.split("Options:")[0]
 
@@ -6419,8 +6353,7 @@ def test_the_record_option_is_on_every_verb_that_archives(
     its source material survives and the heading can still be filled by hand;
     `compost` archives nothing to write under."""
     for name in ("fell", "grub-out", "compost", "transplant"):
-        assert main([name, "--help"]) == 0
-        printed = capsys.readouterr().out
+        printed = helped(capsys, name)
         assert ("--record" in printed) == (name in ("fell", "grub-out"))
         # The option's own help, up to the next option, which is `--check`.
         said = " ".join(printed.split("--record", 1)[-1].split("--check")[0].split())
@@ -6618,8 +6551,7 @@ def test_the_note_option_is_on_every_marking_verb_and_no_other(
     disposition with no reason is the ordinary case. `line-out` is the filing
     one, and it takes a note for the same reason `pot-on` does."""
     for name in ("pot-on", "line-out", "espalier", "fell", "transplant"):
-        assert main([name, "--help"]) == 0
-        printed = capsys.readouterr().out
+        printed = helped(capsys, name)
         assert ("--note" in printed) == (name in ("pot-on", "line-out"))
         if name == "pot-on":
             assert "[required]" not in printed
@@ -6851,8 +6783,7 @@ def test_the_into_option_is_only_on_the_verb_that_absorbs(
     the edges at. The other dissolving verbs take the edges out instead, so
     offering them a survivor would be an option that means nothing."""
     for name in ("inarch", "compost", "fell", "grub-out", "transplant"):
-        assert main([name, "--help"]) == 0
-        printed = capsys.readouterr().out
+        printed = helped(capsys, name)
         assert ("--into" in printed) == (name == "inarch")
         if name == "inarch":
             assert "[required]" in printed
@@ -6962,8 +6893,8 @@ def test_only_the_absorbing_verb_takes_several_items(
 ) -> None:
     """The usage line says so: `ITEM...` on `inarch`, `ITEM` on `compost`,
     which dissolves out of the same state and absorbs nothing."""
-    assert "Usage: fileplan inarch [OPTIONS] ITEM...\n" in helped("inarch", capsys)
-    assert "Usage: fileplan compost [OPTIONS] ITEM\n" in helped("compost", capsys)
+    assert "Usage: fileplan inarch [OPTIONS] ITEM...\n" in helped(capsys, "inarch")
+    assert "Usage: fileplan compost [OPTIONS] ITEM\n" in helped(capsys, "compost")
 
 
 def test_a_merge_moves_each_body_into_the_survivor(
@@ -7136,11 +7067,6 @@ def test_a_check_names_the_sub_phase_each_item_would_become(
 # branch for a test to have to pick a side of. examples/docs/reference.md#the-contract.
 
 
-def helped(name: str, capsys: pytest.CaptureFixture[str]) -> str:
-    assert main([name, "--help"]) == 0
-    return capsys.readouterr().out
-
-
 def test_every_transitions_help_names_its_own_doc_and_every_key_it_sets(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -7150,7 +7076,7 @@ def test_every_transitions_help_names_its_own_doc_and_every_key_it_sets(
     what the value *is*, and this block is where it surfaces."""
     declaration = load(tree / "plan.toml")
     for transition in declaration.transitions.values():
-        out = helped(transition.name, capsys)
+        out = helped(capsys, transition.name)
         assert "Reading" in out
         assert transition.doc in out, transition.name
         for key in transition.sets:
@@ -7163,16 +7089,16 @@ def test_the_help_says_where_the_item_goes_in_each_of_the_four_shapes(
     """A verb declares where the item goes, or that it goes nowhere. The
     in-place shape is the one worth spelling: `from orchard to orchard` would
     read as a move that happens not to move."""
-    assert "into greenhouse" in helped("sprout", capsys)
-    assert "out of greenhouse and into orchard" in helped("transplant", capsys)
-    assert "stays in orchard" in helped("graft-on", capsys)
-    assert "out of orchard, and the file is deleted" in helped("fell", capsys)
+    assert "into greenhouse" in helped(capsys, "sprout")
+    assert "out of greenhouse and into orchard" in helped(capsys, "transplant")
+    assert "stays in orchard" in helped(capsys, "graft-on")
+    assert "out of orchard, and the file is deleted" in helped(capsys, "fell")
 
 
 def test_the_help_spells_what_the_verb_requires_and_refuses(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    out = helped("transplant", capsys)
+    out = helped(capsys, "transplant")
     assert "Requires" in out and "cultivar" in out
     assert "Refuses" in out and 'cultivar = "hybrid"' in out
 
@@ -7190,25 +7116,25 @@ def test_the_contract_names_the_keys_the_run_drops(
     declaration = load(tree / "plan.toml")
     dropping = declaration.transitions["ripen"].drops
     assert dropping, "the fixture's ripen drops nothing, so this proves nothing"
-    out = helped("ripen", capsys)
+    out = helped(capsys, "ripen")
     assert "Drops" in out
     for key in dropping:
         assert key in out
 
     assert not declaration.transitions["thin"].drops
-    assert "Drops" not in helped("thin", capsys)
+    assert "Drops" not in helped(capsys, "thin")
 
 
 def test_the_help_names_the_kind_and_the_options_the_verb_declares(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """So the interpreter knows a claim will be taken before it takes one."""
-    tend = helped("tend", capsys)
+    tend = helped(capsys, "tend")
     assert tend.partition("Declares")[2].split("Reading")[0].split() == [
         "edit",
         "claims",
     ]
-    assert declared_by(helped("inarch", capsys)) == ["merge"]
+    assert declared_by(helped(capsys, "inarch")) == ["merge"]
 
 
 # --------------------------------------------------------------------------
@@ -7233,7 +7159,7 @@ def test_every_generated_transition_carries_the_check_flag(
     the reservation one of them makes partway through is the write a bespoke
     rule would have let through."""
     for name in load(tree / "plan.toml").transitions:
-        assert "--check" in helped(name, capsys), name
+        assert "--check" in helped(capsys, name), name
 
 
 def test_a_check_that_passes_prints_its_sentence_and_writes_nothing(
@@ -7472,7 +7398,7 @@ def test_a_transition_with_no_doc_prints_no_reading_block(
         .replace('doc         = "method.md#replaces"\n', "")
     )
     assert load(plan).transitions["sprout"].doc is None
-    out = helped("sprout", capsys)
+    out = helped(capsys, "sprout")
     assert "Reading" not in out
     assert contract_json("sprout", capsys)["reading"] == {}
     assert main(["sprout", "A seedling", "--body", "Prose."]) == 0
@@ -7502,7 +7428,7 @@ def test_the_overview_prints_each_default_it_chose(
     assert re.search(r"(?m)^  orchard +orchard/ +sorted by position$", out)
     assert re.search(r"(?m)^  greenhouse +greenhouse/$", out)
     assert "Create an item in greenhouse." in out
-    assert "Create an item in greenhouse." in helped("sprout", capsys)
+    assert "Create an item in greenhouse." in helped(capsys, "sprout")
 
 
 def test_an_empty_tree_names_the_command_that_files_the_first_item(
@@ -7719,11 +7645,9 @@ def felled(tree: Path) -> None:
 def listed_slugs(
     capsys: pytest.CaptureFixture[str], *given: str
 ) -> tuple[list[str], str]:
-    capsys.readouterr()
-    assert main(["list", "--json", *given]) == 0
-    payload = json.loads(capsys.readouterr().out)
+    slugs = [row["slug"] for row in rows(capsys, *given)]
     assert main(["list", *given]) == 0
-    return [row["slug"] for row in payload["rows"]], capsys.readouterr().err
+    return slugs, capsys.readouterr().err
 
 
 def test_a_plain_list_leaves_an_unlisted_state_out_and_says_so(

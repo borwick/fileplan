@@ -13,6 +13,7 @@ word would be one workflow's convention baked into the tool.
 from __future__ import annotations
 
 import pytest
+from conftest import UNPRUNED
 
 from fileplan import declaration, subphase
 
@@ -671,7 +672,7 @@ def test_the_prefix_and_the_reader_agree_on_what_a_bullet_is_called():
 #: The fixture's pending bullet, as its content after `- `. Fixture words for
 #: the heading's reason: nothing here may pass by agreeing with this repo's
 #: own `plan.toml`.
-PENDING = "**unpruned — Say what the rest of the training is.**"
+PENDING = UNPRUNED
 
 #: The prefix a section numbered 7 mints under.
 PREFIX = "7-"

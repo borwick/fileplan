@@ -30,6 +30,7 @@ from fileplan.declaration import (
     FIRST_NUMBER,
     NUMBERED,
     RESERVED_KEYS,
+    SUFFIX,
     Refusal,
     whole,
     whole_errors,
@@ -269,7 +270,7 @@ def filename(number: int, slug: str) -> str:
     The number keeps it findable by what the register calls it, and the slug
     makes a directory listing readable. What it holds is `entry`'s.
     """
-    return f"{number}-{slug}.md"
+    return f"{number}-{slug}{SUFFIX}"
 
 
 def archived(text: str, where: str) -> dict[str, int]:

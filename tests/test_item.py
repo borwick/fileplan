@@ -15,9 +15,9 @@ import datetime as dt
 from pathlib import Path
 
 import pytest
-from conftest import FIXTURES, copy_fixture
+from conftest import made_tree
 
-from fileplan.declaration import Declaration, Refusal, load
+from fileplan.declaration import Declaration, Refusal
 from fileplan.item import Item, head_errors, parse, read, render, slug, table, write
 
 CANONICAL = """\
@@ -34,20 +34,8 @@ The body starts here.
 
 
 @pytest.fixture
-def declaration() -> Declaration:
-    return load(FIXTURES / "plan.toml")
-
-
-@pytest.fixture
 def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Declaration:
-    """A ``plan.toml`` and its method doc copied into ``tmp_path``, with the
-    declared directories made. The declaration's root is what a state's `path`
-    resolves against, so the fixture cannot be loaded from where it lives."""
-    copy_fixture(tmp_path)
-    declaration = load(tmp_path / "plan.toml")
-    for state in declaration.states.values():
-        (tmp_path / state.path).mkdir(parents=True)
-    return declaration
+    return made_tree(tmp_path)
 
 
 def item_at(declaration: Declaration, state: str, name: str, text: str) -> Path:

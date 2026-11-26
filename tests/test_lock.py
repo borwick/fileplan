@@ -13,10 +13,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import copy_fixture
+from conftest import made_tree
 
 from fileplan import item
-from fileplan.declaration import Declaration, Refusal, load
+from fileplan.declaration import Declaration, Refusal
 from fileplan.lock import LOCAL_DIR, LOCK_NAME, run_lock
 from fileplan.transition import execute
 
@@ -45,11 +45,7 @@ time.sleep(float(sys.argv[2]))
 
 @pytest.fixture
 def tree(tmp_path: Path) -> Declaration:
-    copy_fixture(tmp_path)
-    declaration = load(tmp_path / "plan.toml")
-    for state in declaration.states.values():
-        (tmp_path / state.path).mkdir(parents=True)
-    return declaration
+    return made_tree(tmp_path)
 
 
 def lock_file(root: Path) -> Path:

@@ -383,7 +383,8 @@ The option a transition's `sets` gives a list-valued key **repeats** —
 marker of its own, so an option you may give once would otherwise look
 identical. Given no times the option writes **no key at all**, which is what
 an option not given has always meant. The empty list is not a value the item
-carries.
+carries. Given `''` alone, `--pest ''`, the option clears the key: the run
+drops it from the head.
 
 Shapes that refuse **by name**, each a silent failure rather than a loud one:
 
@@ -405,6 +406,9 @@ Shapes that refuse **by name**, each a silent failure rather than a loud one:
   [`--check`](#the-check) gives it in the same words. A fixed value in a
   list-valued key whose entry holds a comma refuses when the declaration
   loads.
+* an **empty entry beside others**, `--pest aphid --pest ''`. An empty entry
+  there clears nothing, so the run refuses and says to give `--pest ''`
+  alone to clear the key.
 
 [`dependencies`](#dependencies) is the deliberate exception and refuses
 nothing. A bare string is already one edge and a list is already many, so a
@@ -1616,7 +1620,7 @@ says to write `edit` or `reorder`. A reorder refuses in a state that is not
 no `sets`, no `drops` and no `claims` refuses, because it would write nothing.
 
 A plan.toml written before kinds refuses by name, and the refusal says the
-line to write. The kind it suggests is read off the fields that used to spell
+line to write. The kind it suggests is read off the pre-kinds fields that spell
 it: no `from` is a create, `mints` an add-bullet, `marks` a mark-bullet,
 `retitles` a rename, `dissolves` a close and `dissolves` with `absorbs` a
 merge. A `to` that differs from `from` is a move. A transition staying where
@@ -1797,6 +1801,13 @@ carries refuses before anything is written, naming the near misses the way
 [a handle](#the-handle) does. `--check` gives the same refusal. The slug has
 to be exact: nothing is resolved from a prefix or rewritten. An edge that
 dangles later, after a rename or an abandon, is still only reported.
+
+**A run whose edges would close a wait loop refuses them.** An item waiting
+on itself, directly or through the items it waits on, would block forever.
+So a run handed an edge that leads back to the item refuses before anything
+is written, and names the chain: `after names "b", which already waits on a
+(b waits on a), so a would wait on itself forever`. `--check` gives the
+same refusal.
 
 ### references
 
@@ -3329,19 +3340,25 @@ one substitution: the run writes its local date there, in the shape
 `--decided 2026-10-18` writes. It is a calendar date, not a timestamp, so it
 names the writer's day rather than a UTC instant. Any other brace refuses at
 load, so there is no escape syntax to learn.
-An entry of a list-valued key may not hold a comma, because a filter reads
-the comma as a separator between values. Write each value as its own list
-entry ([list-valued](#list-valued)).
+An entry of a list-valued key may not hold a comma
+([list-valued](#list-valued)).
 
 **A fixed value is never an option, and never a default.** A session cannot
 override it. If it could, `deprecate` could write `status = "accepted"`, and
 the transition's name would no longer say what it writes.
 
+**An option given `''` drops its key.** The run takes the key off the head
+rather than writing `""`, so a wait or a draft set once can be cleared by
+the same transition that set it, and [`--check`](#the-check) names it
+`drop <key>`. A closed key's option takes `''` beside its `values`. A
+create, or a filed item, given `''` writes no key at all.
+
 **A key in both `requires` and the options is a required option.** Above,
 `finalise` takes a draft that carries no `decided` yet, because this run
 supplies one. Without `--decided` the run refuses, and `--help` marks the
-option `[required]`. The row's `commands` counts the key as met, since the
-item cannot carry a value the session has not given yet. `refuses` still
+option `[required]`. `--decided ''` refuses the same way, because a
+required key cannot be dropped. The row's `commands` counts the key as met,
+since the item cannot carry a value the session has not given yet. `refuses` still
 reads the head before the run, so a transition stamping a value it also
 refuses does not refuse itself. A key in `requires` with a fixed value keeps
 the plain meaning: the head must already carry it.

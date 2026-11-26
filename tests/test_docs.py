@@ -14,8 +14,8 @@
   `test_cli.py`'s control grades the source.
 
 `declaration.pointer_errors` grades the `doc =` fields at every invocation.
-It cannot see a citation in a comment or a docstring, such as `plan.toml`'s
-`# See examples/docs/reference.md#title`; this module does. Both ask
+It cannot see a citation in a comment or a docstring, such as
+`examples/plan.toml`'s `See docs/reference.md#title`; this module does. Both ask
 `declaration.heading_slugs` what headings a document has.
 
 This module grades the repo's own artifacts, like the controls in
@@ -33,9 +33,9 @@ from pathlib import Path
 
 import click
 import pytest
-from conftest import EXAMPLE, REPO, copy_fixture
+from conftest import EXAMPLE, REPO, cli_tree
 
-from fileplan import read
+from fileplan import read, subphase
 from fileplan.cli import DECLARED, LIST_HELP, _build_group, contract, main
 from fileplan.declaration import KINDS, _slug, heading_slugs, load
 
@@ -174,9 +174,6 @@ INDEX = Path("docs/index.md")
 CONTAINERS = frozenset({"the-method", "states", "keys", "item-files", "transitions"})
 
 
-#: One fenced block, opening and closing fence at the start of a line.
-FENCED = re.compile(r"^```.*?^```", re.MULTILINE | re.DOTALL)
-
 #: What makes a fenced block a **transcript** rather than an example: a shell
 #: prompt, in the style every walked document here pastes output in.
 PROMPT = re.compile(r"^\$ ", re.MULTILINE)
@@ -192,9 +189,25 @@ def prose(text: str) -> str:
     Structural, not a list of exempted documents (1-6): a name list catches
     only what somebody remembered to add.
     """
-    return FENCED.sub(
-        lambda block: "" if PROMPT.search(block.group(0)) else block.group(0), text
-    )
+    lines = text.splitlines()
+    kept: list[str] = []
+    for fenced, run in _runs(lines):
+        if not (fenced and any(PROMPT.match(line) for line in run)):
+            kept.extend(run)
+    return "\n".join(kept)
+
+
+def _runs(lines: list[str]) -> list[tuple[bool, list[str]]]:
+    """``lines`` cut into runs, each marked whether it is fenced, by
+    `subphase.unfenced`, the one fence parser: either marker, indented or
+    not, the delimiter lines fenced too."""
+    runs: list[tuple[bool, list[str]]] = []
+    for line, outside in zip(lines, subphase.unfenced(lines), strict=True):
+        if runs and runs[-1][0] == (not outside):
+            runs[-1][1].append(line)
+        else:
+            runs.append((not outside, [line]))
+    return runs
 
 
 def citations(text: str) -> list[tuple[str, str | None]]:
@@ -220,18 +233,23 @@ def _own_sources() -> list[str]:
     return [name for name in OWN_SOURCES if (REPO / name).exists()]
 
 
+def _shipped() -> list[Path]:
+    """What a reader is sent to: the shipped documents, the files every
+    session reads, `src/`, and the skills."""
+    files = [REPO / name for name in (*SOURCES, *_own_sources())]
+    files += sorted((REPO / "src").rglob("*.py"))
+    files += sorted((REPO / SKILLS).rglob("*.md"))
+    return files
+
+
 def _haystack() -> list[Path]:
-    """Every file `_cited()` extracts from.
+    """Every file `_cited()` extracts from: `_shipped()` and the filed items.
 
     Apart from `_cited()` so a guard can ask what was **read**, not what was
     found. The two differ for a file that cites nothing, which for a filed
     item is the ordinary case.
     """
-    files = [REPO / name for name in (*SOURCES, *_own_sources())]
-    files += sorted((REPO / "src").rglob("*.py"))
-    files += _filed()
-    files += sorted((REPO / SKILLS).rglob("*.md"))
-    return files
+    return _shipped() + _filed()
 
 
 def _cited() -> list[tuple[str, str, str | None]]:
@@ -465,7 +483,7 @@ def test_every_skill_this_repo_ships_opens_with_a_name_and_a_description() -> No
 
 
 def test_the_citation_guard_reads_the_comment_pointer_errors_cannot() -> None:
-    """`plan.toml` cites `examples/docs/reference.md#title` in a *comment*, because
+    """`examples/plan.toml` cites `docs/reference.md#title` in a *comment*, because
     `title` is intrinsic and has no table to hold a `doc =`. `pointer_errors`
     reads `doc =` fields only, so this guard is that citation's only check."""
     declared = {_anchor_in_the_method(pointer) for _, pointer in _pointers()}
@@ -825,7 +843,7 @@ def test_no_skill_this_repo_ships_names_a_verb_this_repo_declares() -> None:
     for where, source in skills.items():
         assert source, f"{where} is empty, so this control proves nothing"
         for verb in verbs:
-            assert not re.search(rf"\b{re.escape(verb)}\b", source), (where, verb)
+            assert not re.search(_verb(verb), source), (where, verb)
 
 
 #: A read a skill runs, `fileplan list …` or `fileplan show …`, inside a code
@@ -867,10 +885,9 @@ def test_the_verb_name_control_catches_a_verb_written_into_a_skill() -> None:
     and the citation strip does not swallow it; otherwise the control above
     would pass forever by grading nothing."""
     verb = next(iter(load(EXAMPLE).transitions))
-    assert re.search(rf"\b{re.escape(verb)}\b", CITATION.sub("", f"Then run {verb}."))
+    assert re.search(_verb(verb), CITATION.sub("", f"Then run {verb}."))
     assert not re.search(
-        rf"\b{re.escape(verb)}\b",
-        CITATION.sub("", f"examples/docs/reference.md#{verb}"),
+        _verb(verb), CITATION.sub("", f"examples/docs/reference.md#{verb}")
     )
 
 
@@ -1085,7 +1102,7 @@ LINK = re.compile(
 
 def _prompts(text: str) -> list[str]:
     """Every shell prompt line in ``text``, stripped of trailing space."""
-    return [line.rstrip() for line in text.splitlines() if line.startswith("$ ")]
+    return [line.rstrip() for line in text.splitlines() if PROMPT.match(line)]
 
 
 def _linked() -> list[Path]:
@@ -1188,7 +1205,8 @@ def _unfenced(text: str) -> str:
     `archive = "…"` is the **declaration** quoted back, not somewhere a
     reader is sent. A fenced line is not a line at all (11-1).
     """
-    return FENCED.sub("", text)
+    runs = _runs(text.splitlines())
+    return "\n".join(line for fenced, run in runs if not fenced for line in run)
 
 
 @own_tree
@@ -1207,12 +1225,7 @@ def test_no_shipped_document_points_a_reader_into_the_plan_archive() -> None:
     """
     archives = _archives()
     assert archives, "no state declares an archive, so this guard proves nothing"
-    graded = [
-        REPO / name for name in (*SOURCES, *_own_sources()) if name != "plan.toml"
-    ]
-    graded += sorted((REPO / "src").rglob("*.py"))
-    graded += sorted((REPO / SKILLS).rglob("*.md"))
-    for path in graded:
+    for path in [p for p in _shipped() if p != REPO / "plan.toml"]:
         where = str(path.relative_to(REPO))
         named = {
             target
@@ -1274,11 +1287,7 @@ def _emitted(
     """Every top-level key `list --json` emits over the fixture declaration,
     which turns on every conditional array: it claims, carries a cursor,
     reads dependencies, numbers, marks, counts sub-phases, and closes a key."""
-    copy_fixture(tmp_path)
-    for state in load(tmp_path / "plan.toml").states.values():
-        (tmp_path / state.path).mkdir(parents=True)
-    monkeypatch.setenv("FILEPLAN_PLAN_TOML", str(tmp_path / "plan.toml"))
-    monkeypatch.chdir(tmp_path)
+    cli_tree(tmp_path, monkeypatch)
     capsys.readouterr()
     assert main(["list", "--json"]) == 0
     return list(json.loads(capsys.readouterr().out))

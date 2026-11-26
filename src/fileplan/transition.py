@@ -96,16 +96,19 @@ def value_errors(
     takes as an option, whichever head it lands on: the carrier's `sets`, and
     the keys a verb that files writes onto the filed item. And a required
     option the run was not given, which click refuses too, for a caller that
-    is not the CLI.
+    is not the CLI. A required option given empty was not given either: an
+    empty value clears a key, and a required key cannot be cleared. An empty
+    entry beside real ones in a list-valued key refuses by name, because it
+    clears nothing.
     See examples/docs/reference.md#list-valued
     """
     errors = [
         f'{transition.name} requires "{key}", and this run was not given it'
         for key in transition.sets
-        if key in transition.requires and key not in given
+        if key in transition.requires and (key not in given or cleared(given[key]))
     ]
     for key in (*transition.sets, *transition.files_sets):
-        if key not in given:
+        if key not in given or cleared(given[key]):
             continue
         declared = keys.get(key)
         holds_several = declared is not None and declared.list_valued
@@ -129,7 +132,24 @@ def value_errors(
                 for entry in given[key]
                 if "," in str(entry)
             ]
+            if any(entry == "" for entry in given[key]):
+                errors.append(
+                    f'{transition.name} sets "{key}", and this run gave it an '
+                    "empty entry beside others. An empty entry clears nothing "
+                    f"there: clear the key by giving --{key} '' alone"
+                )
     return errors
+
+
+def cleared(value: Any) -> bool:
+    """Whether a value a run was given asks for its key to be dropped: `""`,
+    `[]`, or a list whose every entry is `""`, which is what the CLI hands
+    on for `--KEY ''` on a list-valued key.
+    See examples/docs/reference.md#transitions
+    """
+    return read.empty(value) or (
+        isinstance(value, list) and all(entry == "" for entry in value)
+    )
 
 
 def dangle_errors(
@@ -295,25 +315,25 @@ def _record(declaration: Declaration, slug: str) -> claim.Claim | None:
     return claim.read(path, declaration.root) if path.exists() else None
 
 
-def _markable(one: item.Item) -> bool:
-    """Whether `one` carries a bullet a mark could still go on: unmarked, and
-    with nothing after its bold run in the way. See examples/docs/reference.md#marking"""
-    return any(
+def _open(one: item.Item) -> int:
+    """How many of `one`'s bullets a mark could still go on: unmarked, and
+    with nothing after the bold run in the way."""
+    return sum(
         bullet.mark is None and not bullet.unmarkable
         for bullet in read.bullets_of(one.body, one.state)
     )
 
 
+def _markable(one: item.Item) -> bool:
+    """Whether `one` carries a bullet a mark could still go on.
+    See examples/docs/reference.md#marking"""
+    return _open(one) >= 1
+
+
 def _foldable(one: item.Item) -> bool:
     """Whether `one` carries two bullets a fold could take: one to mark, and
     one unmarked to move its prose under. See examples/docs/reference.md#marking"""
-    return (
-        sum(
-            bullet.mark is None and not bullet.unmarkable
-            for bullet in read.bullets_of(one.body, one.state)
-        )
-        >= 2
-    )
+    return _open(one) >= 2
 
 
 def _writable(one: item.Item) -> bool:
@@ -345,7 +365,8 @@ class _Running:
     #: `--body` as given. What a run writes is `_bulleting`'s answer.
     body: str | None
     #: The verb's `sets` keys, the ones given nothing already dropped, then
-    #: its fixed values with `TODAY` substituted.
+    #: its fixed values with `TODAY` substituted. A key given empty is not
+    #: here but in `cleared`.
     given: Mapping[str, Any]
     #: What the destination state's capabilities were asked for.
     asked: Mapping[str, Any]
@@ -353,6 +374,9 @@ class _Running:
     say: Callable[[str], None]
     #: Stop at the seam each arm documents, having written nothing.
     check: bool = False
+    #: The keys the run was given empty, which it drops rather than writes.
+    #: See examples/docs/reference.md#transitions
+    cleared: tuple[str, ...] = ()
 
 
 def execute(
@@ -378,6 +402,9 @@ def execute(
     # Before the lock and before either arm, so `--check` says it in the same words.
     if wrong := value_errors(given, transition, declaration.keys):
         raise Refusal(wrong)
+    # Decided once, here: a key given empty is dropped, never written as "".
+    emptied = tuple(key for key, value in given.items() if cleared(value))
+    given = {key: value for key, value in given.items() if key not in emptied}
     # After the grading, which is of what the caller gave. A fixed value is
     # graded at load, and it wins over a caller's: it is never an option.
     given |= _stamped(transition)
@@ -396,6 +423,7 @@ def execute(
         asked=dict(asked or {}),
         say=announce or _unheard,
         check=check,
+        cleared=emptied,
     )
     with run_lock(declaration.root):
         if transition.source is None:
@@ -511,7 +539,7 @@ def _create(running: _Running) -> Path | str:
     claiming = _claiming(running, slug=stem)
     entering = _entering(running)
 
-    destination = _directory(running, make=not running.check) / f"{stem}{item.SUFFIX}"
+    destination = _directory(running, make=not running.check) / item.filename(stem)
     if running.check:
         # The seam: the reservation below is a write, partway through this arm.
         return _would(
@@ -545,7 +573,7 @@ def _cursor_errors(
         return []
 
     head = dict(original.head)
-    if state.cursor in running.transition.drops:
+    if state.cursor in (*running.transition.drops, *_clears(running)):
         head.pop(state.cursor, None)
     writes = state.cursor in running.transition.lands and state.cursor in running.given
     if writes:
@@ -608,6 +636,7 @@ def _move(running: _Running) -> Path | str:
         running.declaration.states[running.transition.to],
         _landing(running, running.transition.lands),
     )
+    errors += _loop_errors(running, original, renaming)
     errors += _cursor_errors(running, original, body, marking)
     if errors:
         # Nothing written yet, and nothing will be.
@@ -620,11 +649,12 @@ def _move(running: _Running) -> Path | str:
 
     # Resolved beside the rebuild, so the check can only name what this run
     # really takes off. The capability keys shed below are not among these.
-    dropped = [key for key in running.transition.drops if key in original.head]
+    taken = (*running.transition.drops, *_clears(running))
+    dropped = [key for key in dict.fromkeys(taken) if key in original.head]
     head = {
         key: value
         for key, value in original.head.items()
-        if key not in running.transition.drops and key not in CAPABILITY_KEYS.values()
+        if key not in taken and key not in CAPABILITY_KEYS.values()
     }
     head.update(_landing(running, running.transition.lands))
     head.update(entering)
@@ -633,7 +663,7 @@ def _move(running: _Running) -> Path | str:
         head["title"] = renaming.title
 
     destination = _directory(running, make=not running.check) / (
-        source.name if renaming is None else f"{renaming.slug}{item.SUFFIX}"
+        source.name if renaming is None else item.filename(renaming.slug)
     )
     moving = destination.resolve() != source.resolve()
     if moving and destination.exists():
@@ -644,8 +674,8 @@ def _move(running: _Running) -> Path | str:
     before = None if moving else source.read_bytes()
     _place(running, destination, head, body)
     # After the grading, so a refusal keeps its order. One comparison, against
-    # the bytes `item.write` puts down, so the check and the run cannot differ.
-    unchanged = before == item.render(item.table(head), body).encode("utf-8")
+    # what `item.write` puts down, so the check and the run cannot differ.
+    unchanged = before == item.text(head, body).encode("utf-8")
     if running.check:
         # The seam, inside `_place`: the head is the last thing a run refuses over.
         if unchanged:
@@ -703,6 +733,63 @@ def _move(running: _Running) -> Path | str:
             f"{_unchanged(running, claiming)}"
         )
     return destination
+
+
+def _clears(running: _Running) -> tuple[str, ...]:
+    """The keys given empty that this run takes off the item it moves: its
+    `sets` keys only, since a `files.sets` key given empty belongs to the
+    item it files, which simply does not get it."""
+    return tuple(key for key in running.cleared if key in running.transition.sets)
+
+
+def _loop_errors(
+    running: _Running, original: item.Item, renaming: _Renaming | None
+) -> list[str]:
+    """Every edge this run hands the item that would close a wait loop.
+
+    Read through the destination state's dependencies key, on the edges the
+    run was given, which replace the item's own: so its current edges are left
+    out of the walk. Every other filed item contributes the edges its own
+    state's key holds, the way the default read builds what blocks what. On a
+    rename the item carries its new slug, and the edges naming its old one
+    are read as naming the new, because the rename repoints them.
+    See examples/docs/reference.md#dependencies
+    """
+    key = running.declaration.states[running.transition.to].dependencies
+    if key is None:
+        return []
+    given = depends.edges(_landing(running, running.transition.lands), key)
+    if not given:
+        return []
+    slug = original.slug if renaming is None else renaming.slug
+
+    def own(edge: str) -> str:
+        return slug if edge == original.slug else edge
+
+    holders = {
+        one.slug: tuple(
+            own(edge) for edge in depends.edges(one.head, one.state.dependencies)
+        )
+        for one in read.items(running.declaration)
+        if one.path.resolve() != original.path.resolve()
+    }
+    errors: list[str] = []
+    for edge in dict.fromkeys(given):
+        chain = depends.loop(slug, (edge,), holders)
+        if chain is None:
+            continue
+        if chain == (slug,):
+            errors.append(
+                f'{key} names "{edge}", the item itself, so it would wait on '
+                "itself forever"
+            )
+        else:
+            errors.append(
+                f'{key} names "{edge}", which already waits on {slug} '
+                f"({' waits on '.join(chain)}), so {slug} would wait on itself "
+                "forever"
+            )
+    return errors
 
 
 def _unchanged(running: _Running, claiming: _Claiming) -> str:
@@ -803,10 +890,7 @@ def _archived(
         for error in numbered.heading_errors(entry.lost, entry.where)
     ]:
         raise Refusal(lost)
-    archived: dict[str, int] = {}
-    for entry in archive:
-        archived.update(numbered.archived(entry.text, entry.where))
-    return archive, archived
+    return archive, read.archived_numbers(archive)
 
 
 #: The keys `execute` reads out of `asked`, each the CLI's for the option it
@@ -1432,7 +1516,7 @@ def _filing(
         raise Refusal(_taken(stem, held, running.declaration.root))
 
     state = running.declaration.states[running.transition.files["state"]]
-    path = running.declaration.root / state.path / f"{stem}{item.SUFFIX}"
+    path = running.declaration.root / state.path / item.filename(stem)
     # Not made: `make=False`, because a check leaves no directory behind.
     moved = _directory(running, make=False) / original.path.name
     given = _landing(running, running.transition.files_sets)
@@ -2120,11 +2204,11 @@ def release(declaration: Declaration, handle: str) -> tuple[str, claim.Claim]:
     """
     with run_lock(declaration.root):
         one = read.resolve(declaration, handle)
-        path = claim.path(declaration.root, one.slug)
-        if not path.exists():
+        held = _record(declaration, one.slug)
+        if held is None:
             raise Refusal(f"{one.slug} holds no claim, so there is nothing to free")
 
-        held = claim.read(path, declaration.root)
+        path = claim.path(declaration.root, one.slug)
         who = claim.identity(declaration)
         status = claim.alive(held, who)
         if not claim.owns(held, who) and status != claim.DEAD:
@@ -2197,7 +2281,7 @@ def _held_by(
     """The file holding `stem` in `states`, every declared one by default, or
     `None`."""
     for state in declaration.states.values() if states is None else states:
-        candidate = declaration.root / state.path / f"{stem}{item.SUFFIX}"
+        candidate = declaration.root / state.path / item.filename(stem)
         if candidate.exists():
             return candidate
     return None

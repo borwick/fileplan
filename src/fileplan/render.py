@@ -86,8 +86,8 @@ def records(
 
 def columns(rows: Sequence[Mapping[str, Any]], keys: Sequence[str]) -> list[str]:
     """`--fields`' form: a header line of the key names, then one aligned line
-    per row, the last column never padded. A cell spelling empty prints `-`,
-    since a column cannot omit one. See examples/docs/reference.md#the-listing
+    per row, the last column never padded. A cell spelling empty prints `-`.
+    See examples/docs/reference.md#the-listing
     """
     if not rows:
         return []

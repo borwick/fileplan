@@ -42,14 +42,11 @@ from pathlib import Path
 
 import pytest
 from conftest import EXAMPLE, REPO, copy_fixture
+from test_init import CAPTURE
 
 from fileplan.declaration import PLAN_TOML_ENV, PLAN_TOML_NAME, load
 
 SRC = REPO / "src"
-
-#: What the starter declaration calls the verb that files, so the stranger's
-#: walk can be driven without spelling this repo's own vocabulary.
-CAPTURE = "capture"
 
 #: The fixture's own walk into the one state that asks git something: the
 #: `dated` state. Spelled out because these are the

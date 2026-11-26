@@ -239,13 +239,13 @@ def archive(declaration: Declaration, state: State) -> list[Archived]:
     where = state.archive
     path = declaration.root / where
     if not path.is_dir():
-        text = path.read_text(encoding="utf-8")
+        text = item.read_text(path, declaration.root, "an archive")
         return [Archived(where, text, numbered.unreadable(text))]
     found = []
     for one in sorted(documents(declaration, path), key=lambda p: p.name):
         if not one.is_file():
             continue
-        text = one.read_text(encoding="utf-8")
+        text = item.read_text(one, declaration.root, "an archive entry")
         found.append(
             Archived(
                 (PurePosixPath(where) / one.name).as_posix(),
@@ -254,6 +254,18 @@ def archive(declaration: Declaration, state: State) -> list[Archived]:
             )
         )
     return found
+
+
+def archived_numbers(entries: Sequence[Archived]) -> dict[str, int]:
+    """The number each slug closed under, across `entries`.
+
+    The archive's half of the register, read by `_register` and by the
+    minting executor, so the two cannot count an archive differently.
+    """
+    numbers: dict[str, int] = {}
+    for entry in entries:
+        numbers.update(numbered.archived(entry.text, entry.where))
+    return numbers
 
 
 # --------------------------------------------------------------------------
@@ -941,12 +953,13 @@ def _register(
             for one in found
             if one.state.name == state.name
         }
-        for entry in archive(declaration, state):
+        entries = archive(declaration, state)
+        for entry in entries:
             lost += [
                 numbered.lost(state.name, entry.where, line, said)
                 for line, said in entry.lost
             ]
-            held.update(numbered.archived(entry.text, entry.where))
+        held.update(archived_numbers(entries))
         held_numbers = numbered.taken(held)
         gaps += [
             {

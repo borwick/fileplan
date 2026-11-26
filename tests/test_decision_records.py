@@ -19,14 +19,14 @@ from test_cli import rows as listed
 from fileplan.cli import main
 from fileplan.declaration import load
 
-FIXTURE = FIXTURES / "decision-records.toml"
+RECORDS = FIXTURES / "decision-records.toml"
 
 
 @pytest.fixture
 def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """The consumer's tree: its `plan.toml`, and the empty archive its
     comment says to create."""
-    (tmp_path / "plan.toml").write_text(FIXTURE.read_text())
+    (tmp_path / "plan.toml").write_text(RECORDS.read_text())
     (tmp_path / "decisions-archive.md").write_text("")
     monkeypatch.setenv("FILEPLAN_PLAN_TOML", str(tmp_path / "plan.toml"))
     monkeypatch.chdir(tmp_path)
@@ -89,3 +89,18 @@ def test_the_decision_record_workflow_runs_end_to_end(
     err = capsys.readouterr().err
     assert "showing 0 of 2 items" in err
     assert "not listed: decisions (2). --state decisions lists them" in err
+
+
+def test_a_required_option_given_empty_refuses_as_not_given(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An empty value clears a key, and a required key cannot be cleared, so
+    `--decided ''` is refused in the words a missing one gets."""
+    assert main(["propose", "Use TOML", "--body", "The first take."]) == 0
+    capsys.readouterr()
+    assert main(["finalise", "use-toml", "--decided", ""]) == 2
+    assert (
+        'finalise requires "decided", and this run was not given it'
+        in capsys.readouterr().err
+    )
+    assert (tree / "drafts" / "use-toml.md").exists()

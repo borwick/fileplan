@@ -48,13 +48,17 @@ COUNTED = "-"
 #: The strict named form: a counted bullet whose very first thing is a bold run.
 NAMED = re.compile(r"^-\s+\*\*(?P<bold>[^*]+?)\*\*")
 
+#: The dashes that end a name, beside whitespace: an em dash, which the
+#: writer puts down (`DASH`), and an en dash, read the same.
+DASHES = "\u2014\u2013"
+
 #: A counted bullet opening a bold run, whether or not `NAMED` can read it:
 #: the token is what a name would be, up to whatever ends one or a `*`.
-BOLDED = re.compile(r"^-\s+\*\*(?P<token>[^\s*\u2014\u2013]*)")
+BOLDED = re.compile(rf"^-\s+\*\*(?P<token>[^\s*{DASHES}]*)")
 
 #: What ends a name inside that bold run. A bare hyphen is not one, so `4-1`
 #: survives whole and a name is always one token.
-NAME_END = re.compile(r"[\s\u2014\u2013]")
+NAME_END = re.compile(rf"[\s{DASHES}]")
 
 #: The strict marked form: a named bullet whose bold run is followed by a
 #: second one, holding the disposition. Where the state declares its marks,
@@ -127,9 +131,9 @@ FENCE = re.compile(
 #: `## Steps` is never forced into this repo's nesting.
 DEPTH = "###"
 
-#: What separates a minted bullet's name from its title, and one of
-#: `NAME_END`'s, so what is written stops where the reader says it does.
-DASH = "—"
+#: What separates a minted bullet's name from its title: the first of
+#: `DASHES`, so what is written stops where the reader says it does.
+DASH = DASHES[0]
 
 #: What every line written under a bullet opens with: as wide as `COUNTED`
 #: and the space after it, so the text lines up under the bullet's own. An
@@ -1059,22 +1063,17 @@ def _numbered_span(body: str, heading: str) -> list[tuple[int, str]]:
     Indented lines are dropped here rather than in each caller, and fenced
     lines with them.
     """
-    found = _headings(body, heading)
-    if not found:
-        return []
-
     lines = body.splitlines()
+    bounds = _bounds(lines, heading)
+    if bounds is None:
+        return []
     ok = unfenced(lines)
-    span: list[tuple[int, str]] = []
-    for number in range(found[0] + 1, len(lines)):
-        line = lines[number]
-        if not ok[number]:
-            continue
-        if HEADING.match(line):
-            break
-        if line and not line[0].isspace():
-            span.append((number + 1, line))
-    return span
+    start, end = bounds
+    return [
+        (number + 1, lines[number])
+        for number in range(start + 1, end)
+        if ok[number] and lines[number] and not lines[number][0].isspace()
+    ]
 
 
 def _counted(body: str, heading: str) -> list[tuple[int, str, str | None]]:
@@ -1176,7 +1175,7 @@ def _title(line: str) -> str | None:
     end = NAME_END.search(bold["bold"])
     if end is None:
         return None
-    return bold["bold"][end.end() :].strip(" \u2014\u2013") or None
+    return bold["bold"][end.end() :].strip(" " + DASHES) or None
 
 
 def _mark(line: str, marks: frozenset[str] | None = None) -> str | None:

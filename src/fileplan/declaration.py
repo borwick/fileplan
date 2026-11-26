@@ -2788,6 +2788,18 @@ def load(path: str | os.PathLike[str] | None = None) -> Declaration:
     )
 
 
+def found_above(start: Path) -> Path | None:
+    """The first `PLAN_TOML_NAME` file in `start` or a parent, like git's walk.
+
+    Discovery and `fileplan init`'s refusal both walk with it, so `init`
+    refuses exactly where discovery would find a declaration.
+    """
+    for directory in (start, *start.parents):
+        if (candidate := directory / PLAN_TOML_NAME).is_file():
+            return candidate
+    return None
+
+
 def _discover(path: str | os.PathLike[str] | None) -> Path:
     named, origin = (
         (path, "")
@@ -2802,10 +2814,8 @@ def _discover(path: str | os.PathLike[str] | None) -> Path:
         return source.resolve()
 
     start = Path.cwd()
-    for directory in (start, *start.parents):
-        candidate = directory / PLAN_TOML_NAME
-        if candidate.is_file():
-            return candidate.resolve()
+    if (found := found_above(start)) is not None:
+        return found.resolve()
     raise Refusal(
         f"no {PLAN_TOML_NAME} in {start} or any parent directory "
         f"(set {PLAN_TOML_ENV} to name one, or run `fileplan init` to write "

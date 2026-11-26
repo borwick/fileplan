@@ -25,7 +25,17 @@ from types import MappingProxyType
 from typing import Any
 
 import pytest
-from conftest import RECORD_TEXT, UNPRUNED, UNSTRUCK, copy_fixture
+from conftest import (
+    DECLARED,
+    RECORD_TEXT,
+    UNPRUNED,
+    UNSTRUCK,
+    archived,
+    copy_fixture,
+    floored,
+    made_tree,
+    staked,
+)
 
 # Sibling test modules, not a package: `tests/` is on `sys.path` at
 # collection. Imported for what a second session needs, a stamp and a pid
@@ -58,11 +68,7 @@ from fileplan.transition import (
 @pytest.fixture
 def tree(tmp_path: Path) -> Declaration:
     """The fixture declaration copied into ``tmp_path``, its directories made."""
-    copy_fixture(tmp_path)
-    declaration = load(tmp_path / "plan.toml")
-    for state in declaration.states.values():
-        (tmp_path / state.path).mkdir(parents=True)
-    return declaration
+    return made_tree(tmp_path)
 
 
 def seedling(declaration: Declaration, name: str, text: str) -> Path:
@@ -870,11 +876,6 @@ def test_a_stray_place_in_a_non_queued_state_refuses_the_move(
 # is the only record that its number is taken.
 
 
-def archive(tree: Declaration, text: str) -> None:
-    """Rewrite the fixture archive under this tree."""
-    (tree.root / tree.states["orchard"].archive).write_text(text, encoding="utf-8")
-
-
 def test_a_number_is_minted_over_the_closed_ones_in_the_archive(
     tree: Declaration,
 ) -> None:
@@ -896,28 +897,10 @@ def test_the_next_item_is_minted_past_the_live_ones_too(tree: Declaration) -> No
 
 def test_an_empty_archive_mints_the_first_number(tree: Declaration) -> None:
     """The bootstrap: a consumer's fresh repo, which has closed nothing."""
-    archive(tree, "")
+    archived(tree, "")
     seedling(tree, "a-seedling", READY)
     path = execute(tree, tree.transitions["transplant"], name="a-seedling")
     assert read(path, tree)["number"] == 1
-
-
-def floored(tree: Declaration, first: int) -> Declaration:
-    """``tree`` reloaded with `orchard`'s register declaring a floor.
-
-    Written into the tmp copy rather than into ``tests/fixtures/plan.toml``:
-    absence is the shape every other test here is about, and a fixture
-    carrying a floor would make every register test read against 192.
-    """
-    source = tree.source
-    source.write_text(
-        source.read_text(encoding="utf-8").replace(
-            'archive           = "orchard-archive.md"',
-            f'archive           = "orchard-archive.md"\nfirst-number      = {first}',
-        ),
-        encoding="utf-8",
-    )
-    return load(source)
 
 
 def test_a_declared_floor_mints_itself_over_an_empty_corpus(
@@ -928,7 +911,7 @@ def test_a_declared_floor_mints_itself_over_an_empty_corpus(
     begins, and the first mint is that number rather than 1. Without the
     field the same tree mints 1 (above); with it, 192 — and the declaration is
     the only thing that changed."""
-    archive(tree, "")
+    archived(tree, "")
     declaration = floored(tree, 192)
     seedling(declaration, "a-seedling", READY)
     path = execute(
@@ -945,7 +928,7 @@ def test_a_gap_left_by_a_lost_archive_entry_refuses_and_writes_nothing(
     before anything is written, like every other capability's refusal."""
     seedling(tree, "a-seedling", READY)
     execute(tree, tree.transitions["transplant"], name="a-seedling")
-    archive(tree, "# The orchard's archive\n")
+    archived(tree, "# The orchard's archive\n")
     source = seedling(tree, "b-seedling", READY.replace("A seedling", "B seedling"))
     before = source.read_bytes()
 
@@ -961,7 +944,7 @@ def test_an_archive_heading_the_parse_cannot_read_refuses_by_name(
     """The check the gap check structurally cannot make. The heading is there
     and unreadable, so nothing else covers its number and a mint could hand
     it out twice."""
-    archive(tree, "## Section 1: A felled tree\n")
+    archived(tree, "## Section 1: A felled tree\n")
     seedling(tree, "a-seedling", READY)
     with pytest.raises(Refusal) as refusal:
         execute(tree, tree.transitions["transplant"], name="a-seedling")
@@ -1117,7 +1100,7 @@ def test_the_entry_lands_at_its_place_in_the_register_not_at_the_end(
     rewritten after the mint so the number being filed belongs in the
     middle."""
     orchard(tree, "a-seedling")
-    archive(tree, "## 1. A felled tree\n\n## 5. A late one\n")
+    archived(tree, "## 1. A felled tree\n\n## 5. A late one\n")
     execute(tree, tree.transitions["grub-out"], name="a-seedling")
     assert numbered.numbers(filed(tree)) == [1, 2, 5]
     assert "## 2. A seedling\n\n## 5. A late one" in filed(tree)
@@ -1187,7 +1170,7 @@ def test_an_unreadable_heading_refuses_before_either_file_is_written(
     entry would join a document whose other entries are not all being counted,
     and the number about to be filed may be one of the lost ones."""
     path = orchard(tree, "a-seedling")
-    archive(tree, "## Section 1: A felled tree\n")
+    archived(tree, "## Section 1: A felled tree\n")
     before, document = path.read_bytes(), filed(tree)
 
     with pytest.raises(Refusal) as refusal:
@@ -1202,7 +1185,7 @@ def test_a_number_the_archive_already_holds_refuses_naming_both(
     """The mint's refusal, reached by the filing: two claimants for one number
     leave one of them unfindable once its file is gone."""
     path = orchard(tree, "a-seedling")
-    archive(tree, "## 1. A felled tree\n\n## 2. Something else\n")
+    archived(tree, "## 1. A felled tree\n\n## 2. Something else\n")
     document = filed(tree)
 
     with pytest.raises(Refusal) as refusal:
@@ -1218,7 +1201,7 @@ def test_a_gap_elsewhere_in_the_register_does_not_refuse_a_filing(
     """A gap refuses a *mint* and must not refuse a filing: filing is what
     fills a gap in, and refusing there would be the tool declining the fix."""
     orchard(tree, "a-seedling")
-    archive(tree, "## 5. A late one\n")
+    archived(tree, "## 5. A late one\n")
     execute(tree, tree.transitions["grub-out"], name="a-seedling")
     assert numbered.numbers(filed(tree)) == [2, 5]
 
@@ -1267,7 +1250,6 @@ MINE = 4213
 def session(monkeypatch: pytest.MonkeyPatch) -> Identity:
     """Who this session is, for the length of one test."""
     monkeypatch.setenv("GREENHOUSE_PID", str(MINE))
-    monkeypatch.delenv("SPROUT_PID", raising=False)
     return Identity(host=socket.gethostname(), pid=MINE)
 
 
@@ -1303,7 +1285,7 @@ def someone_else(
     host: str | None = None,
 ) -> Path:
     """A record a sibling session left behind, written by hand."""
-    return written(tree.root, slug, host=host or socket.gethostname(), pid=pid)
+    return written(tree.root, slug, host=host, pid=pid)
 
 
 def test_moving_into_a_claimed_state_takes_nothing_by_itself(
@@ -1670,7 +1652,7 @@ def test_taking_a_claim_with_no_pid_available_refuses_by_name(
     # verb that takes a claim, which is the one run without one.
     source = execute(tree, tree.transitions["bench"], name="a-seedling")
     before = source.read_bytes()
-    for name in ("GREENHOUSE_PID", "SPROUT_PID"):
+    for name in DECLARED:
         monkeypatch.delenv(name, raising=False)
 
     with pytest.raises(Refusal) as refusal:
@@ -1682,12 +1664,10 @@ def test_taking_a_claim_with_no_pid_available_refuses_by_name(
 
 
 def test_creating_into_a_claimed_state_with_no_pid_leaves_no_file(
-    tree: Declaration, monkeypatch: pytest.MonkeyPatch
+    tree: Declaration,
 ) -> None:
     """The reservation is itself a write, so the claim is resolved before it —
     the same reason a refused placement leaves no empty file behind."""
-    for name in ("GREENHOUSE_PID", "SPROUT_PID"):
-        monkeypatch.delenv(name, raising=False)
     with pytest.raises(Refusal, match="no session pid is set"):
         execute(tree, tree.transitions["pot-up"], name="A seedling", body="Prose.")
     assert list((tree.root / "potting-bench").iterdir()) == []
@@ -2981,7 +2961,7 @@ def test_a_refused_run_leaves_the_item_the_archive_and_every_referent(
     source = orchard(tree, "a-seedling")
     orchard(tree, "b-seedling")
     referent = waits(tree, "b-seedling", ["a-seedling"])
-    archive(tree, "## Section 1: A felled tree\n")
+    archived(tree, "## Section 1: A felled tree\n")
     before, held, document = (
         source.read_bytes(),
         referent.read_bytes(),
@@ -4040,7 +4020,7 @@ def test_a_carry_into_a_bulleted_survivor_indents_a_sub_phases_heading_it_brings
     carried(tree, "a-seedling")
     assert read(survivor, tree).body == (
         "## Steps\n\n- **2-1 — Plant**\n- **2-2 — Ay**\n  ## Steps\n\n"
-        "  - **1-1 — Dig**\n- **unpruned — Say what the rest of the training is.**\n"
+        f"  - **1-1 — Dig**\n- {UNPRUNED}\n"
     )
 
 
@@ -4436,3 +4416,138 @@ def test_the_claim_follows_the_slug(tree: Declaration, session: Identity) -> Non
     assert claim.owns(
         claim.read(claim.path(tree.root, "a-pear-tree"), tree.root), session
     )
+
+
+# --------------------------------------------------------------------------
+# A wait loop refuses, and an empty value clears its key
+# --------------------------------------------------------------------------
+#
+# `stake` is added to the tmp copy by `staked`: an edit from `orchard` that
+# sets `after` and `pest`. See examples/docs/reference.md#dependencies
+
+
+@pytest.fixture
+def staking(tree: Declaration) -> Declaration:
+    """``tree`` reloaded with `stake` declared."""
+    return load(staked(tree.source))
+
+
+def stake(tree: Declaration, name: str, **values: Any) -> Any:
+    return execute(tree, tree.transitions["stake"], name=name, values=values)
+
+
+def test_a_stake_on_the_tree_itself_refuses_and_writes_nothing(
+    staking: Declaration,
+) -> None:
+    path = orchard(staking, "a-seedling")
+    was = path.read_bytes()
+    with pytest.raises(Refusal) as refusal:
+        stake(staking, "a-seedling", after="a-seedling")
+    assert str(refusal.value) == (
+        "orchard/a-seedling.md cannot stake; "
+        'after names "a-seedling", the item itself, so it would wait on itself '
+        "forever"
+    )
+    assert path.read_bytes() == was
+
+
+def test_a_stake_closing_a_two_tree_loop_refuses_naming_the_chain(
+    staking: Declaration,
+) -> None:
+    path = orchard(staking, "a-seedling")
+    orchard(staking, "b-seedling")
+    stake(staking, "b-seedling", after="a-seedling")
+    was = path.read_bytes()
+    with pytest.raises(Refusal) as refusal:
+        stake(staking, "a-seedling", after="b-seedling")
+    assert (
+        'after names "b-seedling", which already waits on a-seedling '
+        "(b-seedling waits on a-seedling), so a-seedling would wait on itself "
+        "forever"
+    ) in str(refusal.value)
+    assert path.read_bytes() == was
+
+
+def test_a_move_closing_a_loop_through_an_orchard_tree_refuses(
+    tree: Declaration,
+) -> None:
+    """`transplant` lands `after` too, so the check is the move's as well as
+    the edit's: the seedling's edge is the orchard tree, which waits on it."""
+    orchard(tree, "b-seedling")
+    held = tree.root / "orchard" / "b-seedling.md"
+    held.write_text(held.read_text().replace("+++", '+++\nafter = "a-seedling"', 1))
+    seedling(tree, "a-seedling", READY)
+    with pytest.raises(Refusal) as refusal:
+        execute(
+            tree,
+            tree.transitions["transplant"],
+            name="a-seedling",
+            values={"after": "b-seedling"},
+        )
+    assert "(b-seedling waits on a-seedling)" in str(refusal.value)
+    assert (tree.root / "greenhouse" / "a-seedling.md").exists()
+    assert not (tree.root / "orchard" / "a-seedling.md").exists()
+
+
+def test_an_empty_value_drops_a_carried_key(
+    staking: Declaration,
+) -> None:
+    orchard(staking, "a-seedling")
+    orchard(staking, "b-seedling")
+    path = stake(staking, "a-seedling", after="b-seedling", pest=["aphid"])
+    stake(staking, "a-seedling", after="")
+    head = read(path, staking).head
+    assert "after" not in head
+    assert head["pest"] == ["aphid"]
+    stake(staking, "a-seedling", pest=[""])
+    assert "pest" not in read(path, staking).head
+    assert 'after = ""' not in path.read_text()
+
+
+def test_the_check_of_an_empty_value_says_drop(
+    staking: Declaration,
+) -> None:
+    orchard(staking, "a-seedling")
+    orchard(staking, "b-seedling")
+    path = stake(staking, "a-seedling", after="b-seedling")
+    was = path.read_bytes()
+    said = execute(
+        staking,
+        staking.transitions["stake"],
+        name="a-seedling",
+        values={"after": ""},
+        check=True,
+    )
+    assert said == (
+        "stake would rewrite orchard/a-seedling.md, which stays in orchard, "
+        "and would drop after"
+    )
+    assert path.read_bytes() == was
+
+
+def test_a_create_given_an_empty_value_writes_no_key(
+    tree: Declaration,
+) -> None:
+    path = execute(
+        tree,
+        tree.transitions["sprout"],
+        name="A seedling",
+        body="Prose.",
+        values={"replaces": [""]},
+    )
+    assert "replaces" not in read(path, tree).head
+
+
+def test_an_empty_entry_beside_others_refuses_by_name() -> None:
+    declaration = load(Path(__file__).parent / "fixtures" / "plan.toml")
+    assert value_errors(
+        {"pest": ["aphid", ""]},
+        declaration.transitions["transplant"],
+        declaration.keys,
+    ) == [
+        (
+            'transplant sets "pest", and this run gave it an empty entry beside '
+            "others. An empty entry clears nothing there: clear the key by giving "
+            "--pest '' alone"
+        )
+    ]

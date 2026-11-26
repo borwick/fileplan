@@ -3,8 +3,9 @@
 A state says which declared key holds an item's dependencies, and which keys
 hold its references. So the words a workflow spells them with appear nowhere
 in `src/`. `edges`, `without`, `repoint`, `unknown`, and `inverse` are about
-edges of either kind. Only `blocking` and `misordered` are about dependencies,
-because only a dependency waits: a reference is a record that blocks nothing.
+edges of either kind. Only `blocking`, `misordered` and `loop` are about
+dependencies, because only a dependency waits: a reference is a record that
+blocks nothing.
 
 Absence does not mean satisfied. A dependency naming an item that is not filed
 reads as `unknown`, never as met. Reading it as met would let a mistyped slug
@@ -158,6 +159,42 @@ def inverse(holders: Mapping[str, Iterable[str]]) -> dict[str, list[str]]:
         for one in dict.fromkeys(edges):
             named.setdefault(one, []).append(slug)
     return named
+
+
+def loop(
+    slug: str, edges: Iterable[str], holders: Mapping[str, Iterable[str]]
+) -> tuple[str, ...] | None:
+    """The shortest chain from one of `edges` back to `slug`, or `None`.
+
+    `edges` are what `slug` would wait on, and `holders` maps every other
+    slug to what it waits on. The chain starts at the given edge and ends at
+    `slug`, so `("b", "c", slug)` reads "b waits on c waits on `slug`". An
+    edge naming `slug` itself is the chain `(slug,)`.
+
+    Breadth-first, keeping a visited set, so a loop elsewhere in the tree
+    that does not pass through `slug` cannot hang the walk. Finds a chain and
+    refuses nothing: the caller says what it means.
+    See examples/docs/reference.md#dependencies
+    """
+    starts = list(dict.fromkeys(edges))
+    if slug in starts:
+        return (slug,)
+    came: dict[str, str | None] = {one: None for one in starts}
+    frontier = starts
+    while frontier:
+        following: list[str] = []
+        for one in frontier:
+            for named in holders.get(one, ()):
+                if named == slug:
+                    chain = [slug, one]
+                    while (before := came[chain[-1]]) is not None:
+                        chain.append(before)
+                    return tuple(reversed(chain))
+                if named not in came:
+                    came[named] = one
+                    following.append(named)
+        frontier = following
+    return None
 
 
 def blocking(edges: Iterable[str], filed: Container[str]) -> tuple[str, ...]:

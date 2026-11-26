@@ -29,7 +29,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from test_docs import FENCED
+from test_docs import _runs
+
+from fileplan import subphase
 
 #: A section shorter than this scores nothing and prints a dash. Reading ease
 #: over a handful of words is arithmetic without a meaning: `## Verbs` is one
@@ -120,8 +122,9 @@ def _prepared(text: str) -> str:
     `test_docs.py`'s `prose()` keeps a non-transcript fence, because it is
     building the *citation* haystack and this repo's own snippets really do
     name this repo's own sections. Different question, different answer. The
-    regex is that module's `FENCED`, imported rather than written again: two
-    fence parsers is the drift this repo refuses.
+    fences are that module's `_runs`, over `subphase.unfenced`, rather than
+    written again: two fence parsers is the drift this repo refuses. A fenced
+    run leaves one blank line, so the paragraph before it still ends.
 
     **A block that ends without terminal punctuation ends a sentence anyway.**
     Twelve bullets with no full stops are twelve statements, not one 200-word
@@ -134,7 +137,11 @@ def _prepared(text: str) -> str:
     and backticks, emphasis, quote marks, heading marks, and list markers go.
     Left in, the URL of every cross-reference would count as words.
     """
-    lines = FENCED.sub("", text).splitlines()
+    lines = [
+        line
+        for fenced, run in _runs(text.splitlines())
+        for line in ([""] if fenced else run)
+    ]
 
     def opens(index: int) -> bool:
         if index >= len(lines):
@@ -183,17 +190,15 @@ class Section:
 def sections(text: str) -> list[Section]:
     """*text* split on every ATX heading, each span rated.
 
-    A heading inside a fenced block is not a heading — the mask is `FENCED`
-    again, so the splitter and the counter agree about where the fences are. A
+    A heading inside a fenced block is not a heading — the mask is
+    `subphase.unfenced` again, so the splitter and the counter agree about
+    where the fences are. A
     file with no headings comes back as one span named for the whole of it.
     """
-    fenced = set()
-    for block in FENCED.finditer(text):
-        start = text.count("\n", 0, block.start())
-        end = text.count("\n", 0, block.end())
-        fenced.update(range(start, end + 1))
-
     lines = text.splitlines()
+    fenced = {
+        index for index, outside in enumerate(subphase.unfenced(lines)) if not outside
+    }
     spans: list[tuple[str, list[str]]] = [("(preamble)", [])]
     for index, line in enumerate(lines):
         if index not in fenced and HEADING.match(line):

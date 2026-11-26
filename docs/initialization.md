@@ -400,11 +400,6 @@ particular workflow declares.
 
 A copied skill goes stale when fileplan is upgraded, so copy it again after an
 upgrade. Claude Code's native route is a **plugin**: a directory of skills and
-other parts, usually with a manifest at `.claude-plugin/plugin.json`. Most
-plugins are installed from a marketplace, a git repository or a directory whose
-`.claude-plugin/marketplace.json` says where to fetch each plugin. An installed
-plugin is updated by `claude plugin update`, or by the marketplace's
-auto-update, which is off until you turn it on. A plugin's skills run under its
-name, so in a plugin named fileplan, `/fileplan` runs as `/fileplan:fileplan`.
+other parts, usually with a manifest at `.claude-plugin/plugin.json`.
 fileplan ships no plugin yet. This paragraph was checked against Claude Code
 2.1.319's documentation on 2026-11-08.
